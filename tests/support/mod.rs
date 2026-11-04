@@ -73,3 +73,44 @@ pub fn volume(shift: u8) -> Vec<u8> {
     data.copy_within(..sector * 12, sector * 12);
     data
 }
+
+pub fn upcase_bytes() -> Vec<u8> {
+    let mut words = vec![0xffff, 97];
+    words.extend(65..=90);
+    words.extend([0xffff, 65413]);
+    words.into_iter().flat_map(u16::to_le_bytes).collect()
+}
+
+pub fn metadata_volume() -> Vec<u8> {
+    let mut data = volume(9);
+    for (cluster, value) in [
+        (0, 0xffff_fff8),
+        (1, 0xffff_ffff),
+        (2, 0xffff_ffff),
+        (3, 0xffff_ffff),
+        (4, 0xffff_ffff),
+    ] {
+        put32(&mut data, 24 * 512 + cluster * 4, value);
+    }
+    let root = 32 * 512;
+    data[root] = 0x81;
+    put32(&mut data, root + 20, 3);
+    put64(&mut data, root + 24, 13);
+    let upcase = upcase_bytes();
+    data[root + 32] = 0x82;
+    put32(
+        &mut data,
+        root + 36,
+        fs_exfat::metadata::checksum32(&upcase),
+    );
+    put32(&mut data, root + 52, 4);
+    put64(&mut data, root + 56, upcase.len() as u64);
+    data[root + 64] = 0x83;
+    data[root + 65] = 6;
+    for (index, unit) in "M1TEST".encode_utf16().enumerate() {
+        put16(&mut data, root + 66 + index * 2, unit);
+    }
+    data[33 * 512] = 7;
+    data[34 * 512..34 * 512 + upcase.len()].copy_from_slice(&upcase);
+    data
+}

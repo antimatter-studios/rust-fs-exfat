@@ -22,5 +22,9 @@ exclude = ["fuzz"]
 name = "macos_boot"
 path = "tests/oracle/boot.rs"
 
+[[test]]
+name = "macos_metadata"
+path = "tests/oracle/metadata.rs"
+
 [profile.release]
 lto = "thin"

@@ -11,8 +11,8 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured on 2026-11-04 | Budget | Executed floor |
 |---|---|---|---|
-| unit | 41 lines, 1803 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 15 |
-| oracle | 64 lines, 2153 bytes for two newly formatted images on macOS arm64 | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 1 |
+| unit | 56 lines, 2652 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 24 |
+| oracle | 93 lines, 3123 bytes for two newly formatted images on macOS arm64 | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 2 |
 
 Boot reports validate both copies and report every differing byte. The macOS
 oracle formats fresh 64 MiB images with 512-byte and 4096-byte sectors, checks
@@ -20,7 +20,10 @@ them with fsck_exfat -n, and compares decoded geometry with newfs_exfat output.
 Each attachment uses the matching hdiutil -blocksize; otherwise fsck_exfat
 correctly refuses a 4096-byte filesystem on a 512-byte presented device.
 Only the device node in that attachment's own plist is ever used, and every
-image is detached before the Rust reader runs. A failing run retains its
+image is detached before the Rust reader runs. Metadata tests compare the FAT,
+bitmap and upcase streams with formatter output. After GUID insertion into the
+detached image, the macOS driver mounts it read-only; diskutil supplies an
+independent label and GUID comparison. A failing run retains its
 image and receipt; a successful run removes its own scratch directory.
 
 The unit tier and the macOS-only oracle tier are explicit, separate tasks.
