@@ -114,3 +114,36 @@ pub fn metadata_volume() -> Vec<u8> {
     data[34 * 512..34 * 512 + upcase.len()].copy_from_slice(&upcase);
     data
 }
+
+pub fn file_set(name: &str, attributes: u16, first: u32, length: u64, contiguous: bool) -> Vec<u8> {
+    let name: Vec<_> = name.encode_utf16().collect();
+    let count = name.len().div_ceil(15);
+    let mut set = vec![0; (count + 2) * 32];
+    set[0] = 0x85;
+    set[1] = (count + 1) as u8;
+    put16(&mut set, 4, attributes);
+    set[32] = 0xc0;
+    set[33] = if contiguous { 3 } else { 1 };
+    set[35] = name.len() as u8;
+    let upcase = upcase_bytes();
+    let table =
+        fs_exfat::metadata::UpcaseTable::parse(&upcase, fs_exfat::metadata::checksum32(&upcase))
+            .unwrap();
+    put16(&mut set, 36, table.name_hash(&name));
+    put64(&mut set, 40, length);
+    put32(&mut set, 52, first);
+    put64(&mut set, 56, length);
+    for (index, chunk) in name.chunks(15).enumerate() {
+        set[(index + 2) * 32] = 0xc1;
+        for (position, unit) in chunk.iter().enumerate() {
+            put16(&mut set, (index + 2) * 32 + 2 + position * 2, *unit);
+        }
+    }
+    seal_set(&mut set);
+    set
+}
+
+pub fn seal_set(set: &mut [u8]) {
+    let checksum = fs_exfat::metadata::set_checksum(set);
+    put16(set, 2, checksum);
+}

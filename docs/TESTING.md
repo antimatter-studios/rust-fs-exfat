@@ -4,15 +4,16 @@
 the local and CI gates. Rust 1.95.0 is pinned. The shared lint scripts need
 Python 3 with PyYAML 6.0.3 and ripgrep. CI installs those prerequisites explicitly.
 The dependency policy is deny.toml; the initial lockfile contains only the
-MIT-licensed rust-fs-core 0.4.3 dependency.
+MIT-licensed rust-fs-core 0.4.3 dependency. Unicode normalization is a permissive
+test-only dependency for the platform's decomposed directory names.
 
 Each test tier uses rust-fs-core's tier.sh, refuses skipped and ignored tests,
 and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured on 2026-11-04 | Budget | Executed floor |
 |---|---|---|---|
-| unit | 56 lines, 2652 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 24 |
-| oracle | 93 lines, 3123 bytes for two newly formatted images on macOS arm64 | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 2 |
+| unit | 70 lines, 3447 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 32 |
+| oracle | 102 lines, 3490 bytes for two newly formatted populated images on macOS arm64 | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 3 |
 
 Boot reports validate both copies and report every differing byte. The macOS
 oracle formats fresh 64 MiB images with 512-byte and 4096-byte sectors, checks
@@ -26,13 +27,23 @@ detached image, the macOS driver mounts it read-only; diskutil supplies an
 independent label and GUID comparison. A failing run retains its
 image and receipt; a successful run removes its own scratch directory.
 
+Image setup never requests a system-wide filesystem flush. Files are closed,
+then hdiutil detach flushes the image device obtained from that attach receipt.
+The lint gate tests both accepted file-scoped flushing and rejected global
+flush calls before checking the actual runner. This addresses #12.
+
 The unit tier and the macOS-only oracle tier are explicit, separate tasks.
 `chore test` requires both. Missing tools and non-macOS oracle invocation fail,
 naming `chore test:oracle`; Linux CI invokes only `chore test:unit`, while
 macOS CI also invokes `chore test:oracle`. No decoder test is ignored.
 
-No directory/file reader or CLI is implemented yet, and mounted-driver
-listing/hash differential tests remain pending. This is not yet Milestone 1.
+Directory sets spanning FAT-linked clusters and contiguous subdirectories are
+validated. Fresh images are populated through the macOS driver, then remounted
+read-only for complete recursive path/size comparisons, including platform
+metadata files. Canonical Unicode equivalence is used only in the oracle because
+macOS readdir decomposes names; the reader preserves the stored UTF-16 name.
+File-content hashes, timestamps and the CLI remain pending. This is not yet
+Milestone 1.
 
 Use a fresh CARGO_TARGET_DIR for each validation pass and run package validation
 last. With mixed staticlib/rlib outputs, package verification in the same target

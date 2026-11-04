@@ -27,6 +27,20 @@ scope for Milestone 1.
 
 ## Validation
 
+Image setup uses only the device in its own attachment receipt. There is no
+system-wide flush; detaching that image completes its writes. The safety guard
+has positive and negative checks and gates lint and the image-safety workflow.
+
+Directory sets follow specification sections 6 and 7.4, 7.6–7.9. No directory
+decoder implementation is copied from another filesystem. Synthetic tests cover
+checksums, order, counts, invalid names and cluster-boundary splits. The macOS
+driver creates Unicode, long-name, nested and many-entry directories on newly
+formatted images; a subsequent read-only mount supplies every path and file
+size for differential comparison. macOS readdir decomposes accented names even
+when their on-disk form is composed; the oracle compares canonical-equivalent
+paths in NFC. The library preserves on-disk names and does not normalize them.
+File contents and timestamps remain pending.
+
 FAT entries, allocation bitmap indexing, compressed and uncompressed upcase
 tables, labels and Volume GUIDs are derived from specification sections 4.1
 and 7.1–7.5. No salvage statistics or island-walking code is imported from the
