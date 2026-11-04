@@ -1,0 +1,68 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUSTUP_TOOLCHAIN: 1.95.0
+  CARGO_TERM_COLOR: never
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.95.0
+          components: clippy, rustfmt
+      - name: install chore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/chore"
+          case "$RUNNER_OS-$RUNNER_ARCH" in
+            Linux-X64) archive=chore-0.19.0-linux-x86_64.tar.gz ;;
+            macOS-ARM64) archive=chore-0.19.0-darwin-arm64.tar.gz ;;
+            *) echo "unsupported runner $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
+          esac
+          gh release download v0.19.0 -R antimatter-studios/chore -p "$archive" -p checksums.txt -D "$RUNNER_TEMP/chore"
+          cd "$RUNNER_TEMP/chore"
+          grep " $archive\$" checksums.txt | shasum -a 256 -c -
+          tar -xzf "$archive"
+          echo "$RUNNER_TEMP/chore" >> "$GITHUB_PATH"
+      - run: python3 -m venv "$RUNNER_TEMP/python" && "$RUNNER_TEMP/python/bin/pip" install PyYAML==6.0.3
+      - run: echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - run: chore build && chore lint && chore test && chore package
+        working-directory: rust-fs-exfat
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: logs-${{ matrix.os }}
+          path: rust-fs-exfat/tmp/logs/
+  ci-ok:
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: always()
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'

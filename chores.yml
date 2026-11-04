@@ -1,0 +1,37 @@
+version: "3"
+chore_min_version: 0.19.0
+
+tasks:
+  build:
+    cmds: ['cargo build --locked --all-targets']
+  fmt:
+    cmds: ['cargo fmt --all --check']
+  lint:
+    cmds:
+      - bash ../rust-fs-core/scripts/agents-core-check.sh
+      - bash ../rust-fs-core/scripts/changelog-check.sh
+      - bash ../rust-fs-core/scripts/features-check.sh
+      - bash ../rust-fs-core/scripts/family-check.sh
+      - bash ../rust-fs-core/scripts/ci-gate.sh
+      - bash scripts/check-read-only.sh
+      - bash scripts/check-provenance.sh
+      - cargo fmt --all --check
+      - cargo clippy --locked --all-targets -- -D warnings
+  test:unit:
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 100 8000 -- cargo test --locked'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 4
+  test:
+    cmds: ['chore test:unit']
+  package:
+    cmds: ['cargo package --locked --allow-dirty']
+  staticlib:
+    cmds:
+      - cargo build --locked --release --lib
+      - mkdir -p dist
+      - 'cp "${CARGO_TARGET_DIR:-target}/release/libfs_exfat.a" dist/'
+  artifact:
+    silent: true
+    cmds: ['cd dist && pwd -P']
+  clean:
+    cmds: ['cargo clean']

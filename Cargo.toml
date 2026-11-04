@@ -1,0 +1,22 @@
+[package]
+name = "rust-fs-exfat"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT"
+description = "Strict read-only exFAT reader"
+repository = "https://github.com/antimatter-studios/rust-fs-exfat"
+exclude = ["fuzz", "tmp", "dist"]
+
+[lib]
+name = "fs_exfat"
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+rust-fs-core = "=0.4.3"
+
+[workspace]
+exclude = ["fuzz"]
+
+[profile.release]
+lto = "thin"
