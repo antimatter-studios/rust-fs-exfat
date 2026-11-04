@@ -30,6 +30,20 @@ scope for Milestone 1.
 Image setup uses only the device in its own attachment receipt. There is no
 system-wide flush; detaching that image completes its writes. The safety guard
 has positive and negative checks and gates lint and the image-safety workflow.
+The same guard runs before image setup. It rejects other disk-management verbs,
+foreign device/image bindings, stale receipts, global flushes and process killing.
+The only permitted disk-management query is the exact read-only
+`/usr/sbin/diskutil info -plist "$device"` on the current attachment's own node;
+it independently supplies the mounted label, GUID and read-only state. The
+reviewed receipt parser and failure cleanup are pinned by source fingerprints;
+changes to those small ownership boundaries require deliberate guard review.
+
+The C ABI and CLI are new interface code, not reused filesystem implementations.
+Both use BlockRead-only volume entry points and ReadOnlyDevice. The C ABI's
+limited pointer conversion is isolated from safe decoders and catches Rust
+panics with rust-fs-core's boundary helpers. CLI extraction delegates staging,
+source-alias refusal and SHA-256 verification to rust-fs-core. The check-only
+allocation audit has no repair or write callback.
 
 Path equality applies the decoded volume upcase table to individual UTF-16
 units, as required by specification sections 7.2 and 7.6. It does not use host
@@ -82,5 +96,6 @@ Synthetic tests test malformed boot structures. `chore test:oracle` creates new
 bytes per sector, checks them with fsck_exfat -n, and compares both decoded boot
 copies with the formatter's geometry. Device nodes come only from each attach
 command's own plist output. Images are detached before the Rust reader runs.
-The mounted-driver listing/hash differential is still pending; boot validation
-alone does not satisfy the whole milestone.
+Mounted-driver listing/hash differentials cover the Rust reader, C ABI and CLI;
+synthetic corruption tests are not independent format evidence. Complete decoder
+fuzz targets and the final milestone audit remain pending.

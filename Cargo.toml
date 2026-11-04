@@ -12,12 +12,21 @@ exclude = ["fuzz", "tmp", "dist"]
 name = "fs_exfat"
 crate-type = ["rlib", "staticlib"]
 
+[features]
+cli = ["rust-fs-core/cli"]
+
+[[bin]]
+name = "rust-fs-exfat"
+path = "src/main.rs"
+required-features = ["cli"]
+
 [dependencies]
 rust-fs-core = "=0.4.3"
 
 [dev-dependencies]
 unicode-normalization = "=0.1.24"
 sha2 = "=0.10.9"
+serde_json = "=1.0.149"
 
 [workspace]
 exclude = ["fuzz"]
@@ -41,6 +50,16 @@ path = "tests/oracle/file.rs"
 [[test]]
 name = "macos_path"
 path = "tests/oracle/path.rs"
+
+[[test]]
+name = "cli"
+path = "tests/cli.rs"
+required-features = ["cli"]
+
+[[test]]
+name = "macos_interfaces"
+path = "tests/oracle/interfaces.rs"
+required-features = ["cli"]
 
 [profile.release]
 lto = "thin"

@@ -3,17 +3,19 @@
 `chore build`, `chore fmt`, `chore lint`, `chore test` and `chore package` are
 the local and CI gates. Rust 1.95.0 is pinned. The shared lint scripts need
 Python 3 with PyYAML 6.0.3 and ripgrep. CI installs those prerequisites explicitly.
-The dependency policy is deny.toml; the initial lockfile contains only the
-MIT-licensed rust-fs-core 0.4.3 dependency. Unicode normalization is a permissive
-test-only dependency for the platform's decomposed directory names.
+The dependency policy is deny.toml. rust-fs-core 0.4.3 supplies the optional CLI
+plumbing; all dependencies must remain permissively licensed. Unicode
+normalization and JSON parsing are test-only dependencies for platform names and
+structured CLI output. A C compiler is required by the unit header check and
+the oracle's static-library link test.
 
 Each test tier uses rust-fs-core's tier.sh, refuses skipped and ignored tests,
 and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured on 2026-11-04 | Budget | Executed floor |
 |---|---|---|---|
-| unit | Path-layer clean target: 119 lines, 5761 bytes; build-first: 105 lines, 5221 bytes | 150 lines, 12000 bytes, allowing the added path suite and clean-build diagnostics | 49 |
-| oracle | 116 lines, 4066 bytes including path-query comparisons | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 5 |
+| unit | Interface-layer cold target: 180 lines, 8109 bytes; build-first: 141 lines, 6873 bytes, with 67 tests | 200 lines, 12000 bytes, allowing clean-build diagnostics | 67 |
+| oracle | 128 lines, 4647 bytes including ABI/CLI comparisons and the linked C caller | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 6 |
 
 Boot reports validate both copies and report every differing byte. The macOS
 oracle formats fresh 64 MiB images with 512-byte and 4096-byte sectors, checks
@@ -52,8 +54,27 @@ than being converted using the host clock. Lookup uses the volume table without
 host case folding or Unicode normalization. Paths are root-relative, with at
 most 1024 nonempty components and 255 UTF-16 units per ordinary component.
 Missing components are never cancelled lexically by a later parent component.
-The C ABI, command-line tools and complete decoder fuzz targets remain pending.
-This is not yet Milestone 1.
+The C ABI and CLI are exercised on the same independent images. Complete ABI and
+CLI listings and every file's SHA-256 match the mounted driver. The C compiler
+also links the static library and reads a reference-created file on each sector
+size. Check-only fsck agrees with the reference checker on those clean images;
+synthetic tests cover cross-links, lost clusters, dirty state and explicit audit
+limits. CLI tests cover verified extraction, source protection and repair refusal.
+Complete decoder fuzz targets and the final audit remain pending. This is not
+yet Milestone 1.
+
+Before any image operation, the safety guard checks the reviewed receipt parser,
+cleanup, fresh image binding and attach/query/detach ordering. Only the exact
+read-only diskutil info query on that attachment's own device is accepted; other
+verbs, device reassignment, stale/foreign receipts, global flushes and process
+killing fail. The guard's negative regression was observed failing in CI before
+the correction. These checks are source-policy tests, not a sandbox for arbitrary
+untrusted shell programs.
+
+On a host without PyYAML, `chore lint` stops at `ci-gate.sh` with status 2.
+Run the remaining read-only/provenance guards, format and all-feature Clippy
+steps explicitly; report the missing YAML gate. CI supplies PyYAML and still
+runs the complete lint task. Do not install host tools implicitly.
 
 Use a fresh CARGO_TARGET_DIR for each validation pass and run package validation
 last. With mixed staticlib/rlib outputs, package verification in the same target
