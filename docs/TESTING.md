@@ -12,8 +12,8 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured on 2026-11-04 | Budget | Executed floor |
 |---|---|---|---|
-| unit | 92 lines, 4517 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 42 |
-| oracle | 109 lines, 3763 bytes for the every-file hash/time differential | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 4 |
+| unit | Path-layer clean target: 119 lines, 5761 bytes; build-first: 105 lines, 5221 bytes | 150 lines, 12000 bytes, allowing the added path suite and clean-build diagnostics | 49 |
+| oracle | 116 lines, 4066 bytes including path-query comparisons | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 5 |
 
 Boot reports validate both copies and report every differing byte. The macOS
 oracle formats fresh 64 MiB images with 512-byte and 4096-byte sectors, checks
@@ -48,8 +48,12 @@ allocated tail and uses a 4096-byte boundary. macOS rounded a 513-byte valid
 length to a sector boundary in black-box testing; unit tests independently
 require byte-exact zero filling at unaligned lengths. The library does not
 reproduce the reference discrepancy (tracked in #10). Unknown UTC offsets remain unknown rather
-than being converted using the host clock. Path lookup and the interfaces remain
-pending. This is not yet Milestone 1.
+than being converted using the host clock. Lookup uses the volume table without
+host case folding or Unicode normalization. Paths are root-relative, with at
+most 1024 nonempty components and 255 UTF-16 units per ordinary component.
+Missing components are never cancelled lexically by a later parent component.
+The C ABI, command-line tools and complete decoder fuzz targets remain pending.
+This is not yet Milestone 1.
 
 Use a fresh CARGO_TARGET_DIR for each validation pass and run package validation
 last. With mixed staticlib/rlib outputs, package verification in the same target

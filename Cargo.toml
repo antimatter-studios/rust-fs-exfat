@@ -38,5 +38,9 @@ path = "tests/oracle/directory.rs"
 name = "macos_file"
 path = "tests/oracle/file.rs"
 
+[[test]]
+name = "macos_path"
+path = "tests/oracle/path.rs"
+
 [profile.release]
 lto = "thin"

@@ -31,6 +31,13 @@ Image setup uses only the device in its own attachment receipt. There is no
 system-wide flush; detaching that image completes its writes. The safety guard
 has positive and negative checks and gates lint and the image-safety workflow.
 
+Path equality applies the decoded volume upcase table to individual UTF-16
+units, as required by specification sections 7.2 and 7.6. It does not use host
+Unicode case folding, normalization or multi-character expansions. A synthetic
+nonstandard table proves that the volume, not the host, determines equality.
+Read-only macOS queries independently cover ASCII/non-ASCII case variants,
+directory navigation, content hashes and missing/non-directory errors.
+
 Directory sets follow specification sections 6 and 7.4, 7.6–7.9. No directory
 decoder implementation is copied from another filesystem. Synthetic tests cover
 checksums, order, counts, invalid names and cluster-boundary splits. The macOS
