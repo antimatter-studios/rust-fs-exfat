@@ -27,6 +27,18 @@ scope for Milestone 1.
 
 ## Validation
 
-Synthetic tests prove bounds and device alignment only. The reference-formatter,
-check-only filesystem checker and mounted-driver differential tests required by
-issue #1 are pending; this record does not claim independent format validation.
+The boot-sector offsets and rotating-add checksum follow specification sections
+3.1 and 3.4. Their starting point is the owner's authorized `src/exfat.rs`, whose
+SHA-256 was `787958c49773eaed2c15b54340293af74be341382b63755aef7a0db3c985434d`.
+The strict reader adds complete geometry checks, every repeated checksum word,
+extended signatures, bounded reads, independent reports for both boot copies,
+and an explicit comparison of the copies. It does not reuse the starting code's
+salvage scanner, fixed-sector assumption or unchecked geometry.
+
+Synthetic tests test malformed boot structures. `chore test:oracle` creates new
+64 MiB images with macOS hdiutil, formats them with newfs_exfat at 512 and 4096
+bytes per sector, checks them with fsck_exfat -n, and compares both decoded boot
+copies with the formatter's geometry. Device nodes come only from each attach
+command's own plist output. Images are detached before the Rust reader runs.
+The mounted-driver listing/hash differential is still pending; boot validation
+alone does not satisfy the whole milestone.

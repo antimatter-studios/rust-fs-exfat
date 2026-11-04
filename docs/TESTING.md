@@ -11,12 +11,30 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured on 2026-11-04 | Budget | Executed floor |
 |---|---|---|---|
-| unit | 23 lines, 862 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 4 |
+| unit | 41 lines, 1803 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 15 |
+| oracle | 64 lines, 2153 bytes for two newly formatted images on macOS arm64 | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 1 |
 
-The scaffold has no format decoder, reference image tests or CLI. The unit
-tests do not satisfy the independent oracle acceptance criteria for Milestone
-1. Formatter/checker and mounted-driver differential tests will run on macOS;
-Linux host unit tests must not claim to have run those tests.
+Boot reports validate both copies and report every differing byte. The macOS
+oracle formats fresh 64 MiB images with 512-byte and 4096-byte sectors, checks
+them with fsck_exfat -n, and compares decoded geometry with newfs_exfat output.
+Each attachment uses the matching hdiutil -blocksize; otherwise fsck_exfat
+correctly refuses a 4096-byte filesystem on a 512-byte presented device.
+Only the device node in that attachment's own plist is ever used, and every
+image is detached before the Rust reader runs. A failing run retains its
+image and receipt; a successful run removes its own scratch directory.
+
+The unit tier and the macOS-only oracle tier are explicit, separate tasks.
+`chore test` requires both. Missing tools and non-macOS oracle invocation fail,
+naming `chore test:oracle`; Linux CI invokes only `chore test:unit`, while
+macOS CI also invokes `chore test:oracle`. No decoder test is ignored.
+
+No directory/file reader or CLI is implemented yet, and mounted-driver
+listing/hash differential tests remain pending. This is not yet Milestone 1.
+
+Use a fresh CARGO_TARGET_DIR for each validation pass and run package validation
+last. With mixed staticlib/rlib outputs, package verification in the same target
+directory was observed to leave stale library artifacts for a subsequent test
+build on Rust 1.95.0. A fresh target reproduced the expected updated behavior.
 
 The Linux harness configuration used by other filesystem drivers is not copied:
 there is no Linux guest oracle in the current milestone. Windows formatting is

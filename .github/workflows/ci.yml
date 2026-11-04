@@ -50,7 +50,10 @@ jobs:
           echo "$RUNNER_TEMP/chore" >> "$GITHUB_PATH"
       - run: python3 -m venv "$RUNNER_TEMP/python" && "$RUNNER_TEMP/python/bin/pip" install PyYAML==6.0.3
       - run: echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
-      - run: chore build && chore lint && chore test && chore package
+      - run: chore build && chore lint && chore test:unit && chore package
+        working-directory: rust-fs-exfat
+      - run: chore test:oracle
+        if: runner.os == 'macOS'
         working-directory: rust-fs-exfat
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
