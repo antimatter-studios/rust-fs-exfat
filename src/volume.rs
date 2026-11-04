@@ -1,6 +1,7 @@
 use crate::boot::{BootRegions, BootSector};
 use crate::device::Reader;
 use crate::directory::{self, DirectoryEntry, Stream};
+use crate::file::File;
 use crate::metadata::{AllocationBitmap, FatEntry, RootMetadata, SystemStream, UpcaseTable};
 use crate::{Error, Result};
 use fs_core::BlockRead;
@@ -29,6 +30,7 @@ pub struct Volume<Device: BlockRead> {
     pub(crate) metadata: RootMetadata,
     pub(crate) bitmap: AllocationBitmap,
     pub(crate) upcase: UpcaseTable,
+    system_clusters: HashSet<u32>,
 }
 
 impl<Device: BlockRead> Volume<Device> {
@@ -73,6 +75,7 @@ impl<Device: BlockRead> Volume<Device> {
             metadata,
             bitmap,
             upcase,
+            system_clusters: occupied,
         };
         volume.root_directory()?;
         Ok(volume)
@@ -104,6 +107,10 @@ impl<Device: BlockRead> Volume<Device> {
 
     pub fn root_directory(&self) -> Result<Vec<DirectoryEntry>> {
         directory::parse(&self.root, &self.boot, &self.upcase, true)
+    }
+
+    pub fn open_file(&self, entry: &DirectoryEntry) -> Result<File<'_, Device>> {
+        File::open(self, entry)
     }
 
     pub fn read_directory(&self, entry: &DirectoryEntry) -> Result<Vec<DirectoryEntry>> {
@@ -145,8 +152,8 @@ impl<Device: BlockRead> Volume<Device> {
             ));
         }
         for cluster in &clusters {
-            if !self.bitmap.allocated(*cluster)? {
-                return Err(Error::Invalid("stream uses a free cluster"));
+            if !self.bitmap.allocated(*cluster)? || self.system_clusters.contains(cluster) {
+                return Err(Error::Invalid("stream uses a free or system cluster"));
             }
         }
         Ok(clusters)

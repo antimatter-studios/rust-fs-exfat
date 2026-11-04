@@ -1,5 +1,6 @@
 use crate::boot::BootSector;
 use crate::metadata::{set_checksum, UpcaseTable};
+use crate::timestamp::Timestamps;
 use crate::{Error, Result};
 use std::collections::HashSet;
 
@@ -36,6 +37,7 @@ pub struct DirectoryEntry {
     attributes: u16,
     stream: Stream,
     primary: [u8; 32],
+    timestamps: Timestamps,
 }
 
 impl DirectoryEntry {
@@ -61,6 +63,10 @@ impl DirectoryEntry {
 
     pub fn raw_primary(&self) -> &[u8; 32] {
         &self.primary
+    }
+
+    pub fn timestamps(&self) -> &Timestamps {
+        &self.timestamps
     }
 }
 
@@ -153,6 +159,7 @@ fn file_entry(set: &[u8], boot: &BootSector, upcase: &UpcaseTable) -> Result<Dir
         attributes,
         stream,
         primary: set[..32].try_into().unwrap(),
+        timestamps: Timestamps::parse(&set[..32])?,
     })
 }
 

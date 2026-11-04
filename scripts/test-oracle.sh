@@ -93,10 +93,65 @@ for name in ['ASCII.txt', 'MixedCase.txt', 'grüße-😀.txt', 'Nested/a long fi
     (root / name).write_bytes(('contents of ' + name + '\n').encode())
 for index in range(180):
     (root / f'item-{index:03}.txt').write_bytes(bytes([index]) * (index + 1))
+(root / 'contiguous.bin').write_bytes(bytes(range(256)) * 4096)
+(root / 'fragmented.bin').write_bytes(b'A' * 4096)
+(root / 'blocker.bin').write_bytes(b'B' * 4096)
+with (root / 'fragmented.bin').open('ab') as output:
+    output.write(b'C' * 12288)
+(root / 'valid-tail.bin').write_bytes(b'U' * 12288)
+(root / 'timestamp.bin').write_bytes(b'timestamp oracle\n')
+os.utime(root / 'timestamp.bin', ns=(1700000000120000000, 1700000001120000000))
 PY
     /usr/bin/hdiutil detach "$device"
     device=''
     attached=0
+    /usr/bin/python3 - "$image" <<'PY'
+import struct, sys
+with open(sys.argv[1], 'r+b') as image:
+    boot = image.read(512)
+    sector = 1 << boot[108]
+    cluster_size = sector << boot[109]
+    heap = struct.unpack_from('<I', boot, 88)[0] * sector
+    fat = struct.unpack_from('<I', boot, 80)[0] * sector
+    current = struct.unpack_from('<I', boot, 96)[0]
+    seen, positions, directory = set(), [], bytearray()
+    while current != 0xffffffff:
+        if current in seen:
+            raise SystemExit('oracle: generated root chain cycle')
+        seen.add(current)
+        position = heap + (current - 2) * cluster_size
+        positions.append(position)
+        image.seek(position)
+        directory.extend(image.read(cluster_size))
+        image.seek(fat + current * 4)
+        current = struct.unpack('<I', image.read(4))[0]
+    index = 0
+    found = False
+    while index < len(directory) and directory[index] != 0:
+        if directory[index] != 0x85:
+            index += 32
+            continue
+        length = (directory[index + 1] + 1) * 32
+        entry = directory[index:index + length]
+        name_bytes = b''.join(entry[start + 2:start + 32] for start in range(64, length, 32) if entry[start] == 0xc1)
+        name = name_bytes[:entry[35] * 2].decode('utf-16le')
+        if name == 'valid-tail.bin':
+            struct.pack_into('<Q', entry, 40, 4096)
+            checksum = 0
+            for position, byte in enumerate(entry):
+                if position not in (2, 3):
+                    checksum = (((checksum >> 1) | (checksum << 15)) + byte) & 0xffff
+            struct.pack_into('<H', entry, 2, checksum)
+            directory[index:index + length] = entry
+            found = True
+            break
+        index += length
+    if not found:
+        raise SystemExit('oracle: populate valid-tail.bin before changing its valid length')
+    for index, position in enumerate(positions):
+        image.seek(position)
+        image.write(directory[index * cluster_size:(index + 1) * cluster_size])
+PY
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"
     accept_receipt
     /sbin/fsck_exfat -n "$device"
@@ -110,11 +165,11 @@ if not info.get('MountPoint') or any(info.get(key, True) for key in ('Writable',
 with open(sys.argv[2], 'w') as output:
     output.write(info['VolumeName'] + '\n' + info['VolumeUUID'].upper() + '\nread-only\n')
 PY
-    /usr/bin/python3 - "$directory/mount-$sector" "$directory/listing-$sector.txt" <<'PY'
+    /usr/bin/python3 - "$directory/mount-$sector" "$directory/listing-$sector.txt" "$directory/files-$sector.txt" <<'PY'
 from pathlib import Path
-import os, sys
+import hashlib, os, sys
 root = Path(sys.argv[1])
-records = []
+records, contents = [], []
 for current, directories, files in os.walk(root):
     for name in directories + files:
         item = Path(current) / name
@@ -123,11 +178,17 @@ for current, directories, files in os.walk(root):
         kind = 'd' if item.is_dir() else 'f'
         length = 0 if kind == 'd' else item.stat().st_size
         records.append(f'{kind}\t{length}\t{item.relative_to(root)}\n')
+        if kind == 'f':
+            metadata = item.stat()
+            digest = hashlib.sha256(item.read_bytes()).hexdigest()
+            contents.append(f'{length}\t{digest}\t{metadata.st_mtime_ns // 1000000}\t{metadata.st_atime_ns // 1000000}\t{round(metadata.st_birthtime * 1000)}\t{item.relative_to(root)}\n')
 with open(sys.argv[2], 'w') as output:
     output.writelines(sorted(records))
+with open(sys.argv[3], 'w') as output:
+    output.writelines(sorted(contents))
 PY
     /usr/bin/hdiutil detach "$device"
     device=''
     attached=0
 done
-EXFAT_ORACLE_DIR="$directory" cargo test --locked --test macos_boot --test macos_metadata --test macos_directory -- --nocapture
+EXFAT_ORACLE_DIR="$directory" cargo test --locked --test macos_boot --test macos_metadata --test macos_directory --test macos_file -- --nocapture

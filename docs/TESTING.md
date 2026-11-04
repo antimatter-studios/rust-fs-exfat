@@ -12,8 +12,8 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured on 2026-11-04 | Budget | Executed floor |
 |---|---|---|---|
-| unit | 70 lines, 3447 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 32 |
-| oracle | 102 lines, 3490 bytes for two newly formatted populated images on macOS arm64 | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 3 |
+| unit | 92 lines, 4517 bytes on macOS arm64 | 100 lines, 8000 bytes, allowing clean-build paths and diagnostics | 42 |
+| oracle | 109 lines, 3763 bytes for the every-file hash/time differential | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 4 |
 
 Boot reports validate both copies and report every differing byte. The macOS
 oracle formats fresh 64 MiB images with 512-byte and 4096-byte sectors, checks
@@ -42,8 +42,14 @@ validated. Fresh images are populated through the macOS driver, then remounted
 read-only for complete recursive path/size comparisons, including platform
 metadata files. Canonical Unicode equivalence is used only in the oracle because
 macOS readdir decomposes names; the reader preserves the stored UTF-16 name.
-File-content hashes, timestamps and the CLI remain pending. This is not yet
-Milestone 1.
+Every file length, SHA-256 and creation/modification/access timestamp is compared
+with the read-only driver. The reduced-valid-length fixture retains a nonzero
+allocated tail and uses a 4096-byte boundary. macOS rounded a 513-byte valid
+length to a sector boundary in black-box testing; unit tests independently
+require byte-exact zero filling at unaligned lengths. The library does not
+reproduce the reference discrepancy (tracked in #10). Unknown UTC offsets remain unknown rather
+than being converted using the host clock. Path lookup and the interfaces remain
+pending. This is not yet Milestone 1.
 
 Use a fresh CARGO_TARGET_DIR for each validation pass and run package validation
 last. With mixed staticlib/rlib outputs, package verification in the same target

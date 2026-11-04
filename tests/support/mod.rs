@@ -122,6 +122,10 @@ pub fn file_set(name: &str, attributes: u16, first: u32, length: u64, contiguous
     set[0] = 0x85;
     set[1] = (count + 1) as u8;
     put16(&mut set, 4, attributes);
+    for offset in [8, 12, 16] {
+        put32(&mut set, offset, (46 << 25) | (11 << 21) | (4 << 16));
+    }
+    set[22..25].fill(0x80);
     set[32] = 0xc0;
     set[33] = if contiguous { 3 } else { 1 };
     set[35] = name.len() as u8;

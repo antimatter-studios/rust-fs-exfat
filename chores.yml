@@ -20,12 +20,12 @@ tasks:
       - cargo clippy --locked --all-targets -- -D warnings
   test:unit:
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 100 8000 -- bash -c "cargo test --locked --lib --test read_only --test boot --test metadata --test directory && cargo test --locked --doc"'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 32
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 100 8000 -- bash -c "cargo test --locked --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp && cargo test --locked --doc"'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 42
   test:oracle:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 160 16000 -- bash scripts/test-oracle.sh'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 3
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 4
   test:
     cmds: ['chore test:unit', 'chore test:oracle']
   package:
