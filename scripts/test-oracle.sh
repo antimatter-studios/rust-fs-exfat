@@ -187,8 +187,32 @@ with open(sys.argv[2], 'w') as output:
 with open(sys.argv[3], 'w') as output:
     output.writelines(sorted(contents))
 PY
+    /usr/bin/python3 - "$directory/mount-$sector" "$directory/lookup-$sector.txt" <<'PY'
+import hashlib, os, stat, sys
+queries = ['.', 'ascii.TXT', 'MIXEDCASE.txt', 'nested/A LONG FILE NAME SPANNING ENTRIES.TXT',
+           'GRÜßE-😀.TXT', 'GRÜSSE-😀.TXT', 'Nested/../aScIi.TxT', 'Nested/missing/../aScIi.TxT',
+           'absent.txt', 'ASCII.txt/child', 'ASCII.txt/']
+with open(sys.argv[2], 'w') as output:
+    for query in queries:
+        item = os.path.join(sys.argv[1], query)
+        try:
+            metadata = os.stat(item)
+            if stat.S_ISDIR(metadata.st_mode):
+                value = 'directory'
+            elif stat.S_ISREG(metadata.st_mode):
+                with open(item, 'rb') as source:
+                    digest = hashlib.sha256(source.read()).hexdigest()
+                value = f'file\t{metadata.st_size}\t{digest}'
+            else:
+                raise SystemExit('oracle: unexpected file type in path lookup')
+        except FileNotFoundError:
+            value = 'missing'
+        except NotADirectoryError:
+            value = 'not-directory'
+        output.write(query + '\t' + value + '\n')
+PY
     /usr/bin/hdiutil detach "$device"
     device=''
     attached=0
 done
-EXFAT_ORACLE_DIR="$directory" cargo test --locked --test macos_boot --test macos_metadata --test macos_directory --test macos_file -- --nocapture
+EXFAT_ORACLE_DIR="$directory" cargo test --locked --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path -- --nocapture

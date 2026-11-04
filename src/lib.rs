@@ -6,6 +6,7 @@ pub mod directory;
 pub mod error;
 pub mod file;
 pub mod metadata;
+pub mod path;
 pub mod timestamp;
 pub mod volume;
 

@@ -4,7 +4,8 @@ A strict, read-only exFAT reader in safe Rust, licensed under MIT.
 
 **Status: not yet usable.** The read-only device boundary and validated boot-region
 reports, FAT-linked system metadata, validated directory iteration and file reads
-with timestamps are present. Path lookup, the C ABI and command-line tools are being implemented in
+with timestamps and volume-upcase path lookup are present. The C ABI and
+command-line tools are being implemented in
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
 There is no formatter, repair operation or write feature.
 
@@ -30,7 +31,7 @@ chore staticlib
 chore artifact
 ```
 
-`chore test` runs unit, documentation and macOS boot/metadata-oracle tests. Linux CI runs
+`chore test` runs unit, documentation and macOS image-oracle tests. Linux CI runs
 the explicitly host-independent `chore test:unit` tier; the oracle tier fails on
 a non-macOS host rather than skipping.
 Tests never silently skip missing prerequisites. Test output is retained in

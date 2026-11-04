@@ -6,6 +6,8 @@ pub enum Error {
     Invalid(&'static str),
     Bounds,
     Unsupported(&'static str),
+    NotFound,
+    NotDirectory,
 }
 
 impl fmt::Display for Error {
@@ -15,6 +17,8 @@ impl fmt::Display for Error {
             Self::Invalid(reason) => write!(formatter, "invalid exFAT: {reason}"),
             Self::Bounds => formatter.write_str("read outside device or arithmetic overflow"),
             Self::Unsupported(reason) => write!(formatter, "unsupported exFAT: {reason}"),
+            Self::NotFound => formatter.write_str("exFAT path not found"),
+            Self::NotDirectory => formatter.write_str("exFAT path component is not a directory"),
         }
     }
 }
