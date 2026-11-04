@@ -1,0 +1,2 @@
+The library is a scaffold and is not yet usable as a filesystem reader.
+No command-line tools, formatter, repair operation or writable mode are shipped.
