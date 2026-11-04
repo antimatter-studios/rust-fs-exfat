@@ -27,6 +27,17 @@ scope for Milestone 1.
 
 ## Validation
 
+FAT entries, allocation bitmap indexing, compressed and uncompressed upcase
+tables, labels and Volume GUIDs are derived from specification sections 4.1
+and 7.1–7.5. No salvage statistics or island-walking code is imported from the
+authorized starting code. Synthetic system streams cover malformed metadata;
+the macOS oracle compares FAT-linked system streams with independent formatter
+output and its recommended upcase checksum. A specification-built optional
+GUID entry is inserted into each newly formatted image while detached. The
+macOS driver then mounts the image read-only, and diskutil independently reports
+the label and GUID for comparison. The checker accepts these images but does not
+reject a damaged GUID checksum; checksum rejection is synthetic evidence only.
+
 The boot-sector offsets and rotating-add checksum follow specification sections
 3.1 and 3.4. Their starting point is the owner's authorized `src/exfat.rs`, whose
 SHA-256 was `787958c49773eaed2c15b54340293af74be341382b63755aef7a0db3c985434d`.
