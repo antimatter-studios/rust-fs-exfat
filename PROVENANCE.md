@@ -39,7 +39,17 @@ formatted images; a subsequent read-only mount supplies every path and file
 size for differential comparison. macOS readdir decomposes accented names even
 when their on-disk form is composed; the oracle compares canonical-equivalent
 paths in NFC. The library preserves on-disk names and does not normalize them.
-File contents and timestamps remain pending.
+File streams and timestamps follow specification sections 7.4 and 7.6. The
+read-only macOS oracle compares every file length, SHA-256, creation, modification
+and access timestamp. A driver-created file has its ValidDataLength reduced in
+the detached image; its allocated tail remains nonzero while both readers must
+return zeroes. The fixture edit and its checksum are specification-derived.
+The main file differential uses a 4096-byte-aligned valid length: the macOS
+reference was observed to round an unaligned 513-byte valid length up to a
+512-byte sector boundary. The library does not emulate that discrepancy;
+synthetic tests retain byte-exact unaligned boundaries. The reference discrepancy
+is tracked in #10.
+Unknown UTC offsets are represented explicitly, not guessed from the host clock.
 
 FAT entries, allocation bitmap indexing, compressed and uncompressed upcase
 tables, labels and Volume GUIDs are derived from specification sections 4.1

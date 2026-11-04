@@ -17,6 +17,7 @@ rust-fs-core = "=0.4.3"
 
 [dev-dependencies]
 unicode-normalization = "=0.1.24"
+sha2 = "=0.10.9"
 
 [workspace]
 exclude = ["fuzz"]
@@ -32,6 +33,10 @@ path = "tests/oracle/metadata.rs"
 [[test]]
 name = "macos_directory"
 path = "tests/oracle/directory.rs"
+
+[[test]]
+name = "macos_file"
+path = "tests/oracle/file.rs"
 
 [profile.release]
 lto = "thin"
