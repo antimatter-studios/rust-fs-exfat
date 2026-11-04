@@ -8,6 +8,7 @@ tasks:
     cmds: ['cargo fmt --all --check']
   lint:
     cmds:
+      - bash scripts/test-image-safety.sh
       - bash ../rust-fs-core/scripts/agents-core-check.sh
       - bash ../rust-fs-core/scripts/changelog-check.sh
       - bash ../rust-fs-core/scripts/features-check.sh
@@ -19,12 +20,12 @@ tasks:
       - cargo clippy --locked --all-targets -- -D warnings
   test:unit:
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 100 8000 -- bash -c "cargo test --locked --lib --test read_only --test boot --test metadata && cargo test --locked --doc"'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 24
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 100 8000 -- bash -c "cargo test --locked --lib --test read_only --test boot --test metadata --test directory && cargo test --locked --doc"'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 32
   test:oracle:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 160 16000 -- bash scripts/test-oracle.sh'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 2
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 3
   test:
     cmds: ['chore test:unit', 'chore test:oracle']
   package:

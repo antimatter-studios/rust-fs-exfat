@@ -1,5 +1,6 @@
 use crate::boot::{BootRegions, BootSector};
 use crate::device::Reader;
+use crate::directory::{self, DirectoryEntry, Stream};
 use crate::metadata::{AllocationBitmap, FatEntry, RootMetadata, SystemStream, UpcaseTable};
 use crate::{Error, Result};
 use fs_core::BlockRead;
@@ -64,7 +65,7 @@ impl<Device: BlockRead> Volume<Device> {
                 return Err(Error::Invalid("system stream unallocated or cross-linked"));
             }
         }
-        Ok(Self {
+        let volume = Self {
             reader,
             boot,
             root,
@@ -72,7 +73,9 @@ impl<Device: BlockRead> Volume<Device> {
             metadata,
             bitmap,
             upcase,
-        })
+        };
+        volume.root_directory()?;
+        Ok(volume)
     }
 
     pub fn boot(&self) -> &BootSector {
@@ -97,6 +100,56 @@ impl<Device: BlockRead> Volume<Device> {
 
     pub fn limits(&self) -> ReadLimits {
         self.limits
+    }
+
+    pub fn root_directory(&self) -> Result<Vec<DirectoryEntry>> {
+        directory::parse(&self.root, &self.boot, &self.upcase, true)
+    }
+
+    pub fn read_directory(&self, entry: &DirectoryEntry) -> Result<Vec<DirectoryEntry>> {
+        if !entry.is_directory() {
+            return Err(Error::Invalid("entry is not a directory"));
+        }
+        let clusters = self.stream_clusters(entry.stream())?;
+        let data = read_chain(
+            &self.reader,
+            &self.boot,
+            &clusters,
+            entry.stream().data_length,
+            self.limits,
+        )?;
+        directory::parse(&data, &self.boot, &self.upcase, false)
+    }
+
+    pub(crate) fn stream_clusters(&self, stream: &Stream) -> Result<Vec<u32>> {
+        let count = usize::try_from(stream.data_length.div_ceil(self.boot.cluster_size()))
+            .map_err(|_| Error::Bounds)?;
+        if count > self.limits.max_chain_clusters {
+            return Err(Error::Unsupported("stream exceeds chain read limits"));
+        }
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let clusters = if stream.no_fat_chain {
+            let end = u64::from(stream.first_cluster) + count as u64;
+            if end > u64::from(self.boot.cluster_count) + 2 {
+                return Err(Error::Invalid("contiguous stream exceeds heap"));
+            }
+            (stream.first_cluster..end as u32).collect()
+        } else {
+            self.cluster_chain(stream.first_cluster)?
+        };
+        if clusters.len() != count {
+            return Err(Error::Invalid(
+                "stream chain length differs from allocation",
+            ));
+        }
+        for cluster in &clusters {
+            if !self.bitmap.allocated(*cluster)? {
+                return Err(Error::Invalid("stream uses a free cluster"));
+            }
+        }
+        Ok(clusters)
     }
 
     pub fn fat_entry(&self, cluster: u32) -> Result<FatEntry> {

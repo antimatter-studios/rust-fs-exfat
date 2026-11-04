@@ -2,6 +2,7 @@
 
 pub mod boot;
 pub mod device;
+pub mod directory;
 pub mod error;
 pub mod metadata;
 pub mod volume;
