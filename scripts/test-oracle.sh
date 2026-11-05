@@ -48,6 +48,55 @@ PY
         *) case "$device" in "$EXFAT_TEST_DENY_DEVICE_PREFIX"*) device=''; exit 1 ;; esac ;;
     esac
 }
+set_valid_tail() {
+    /usr/bin/python3 - "$image" "$1" <<'PY'
+import struct, sys
+with open(sys.argv[1], 'r+b') as image:
+    boot = image.read(512)
+    sector = 1 << boot[108]
+    cluster_size = sector << boot[109]
+    heap = struct.unpack_from('<I', boot, 88)[0] * sector
+    fat = struct.unpack_from('<I', boot, 80)[0] * sector
+    current = struct.unpack_from('<I', boot, 96)[0]
+    seen, positions, directory = set(), [], bytearray()
+    while current != 0xffffffff:
+        if current in seen:
+            raise SystemExit('oracle: generated root chain cycle')
+        seen.add(current)
+        position = heap + (current - 2) * cluster_size
+        positions.append(position)
+        image.seek(position)
+        directory.extend(image.read(cluster_size))
+        image.seek(fat + current * 4)
+        current = struct.unpack('<I', image.read(4))[0]
+    index = 0
+    found = False
+    while index < len(directory) and directory[index] != 0:
+        if directory[index] != 0x85:
+            index += 32
+            continue
+        length = (directory[index + 1] + 1) * 32
+        entry = directory[index:index + length]
+        name_bytes = b''.join(entry[start + 2:start + 32] for start in range(64, length, 32) if entry[start] == 0xc1)
+        name = name_bytes[:entry[35] * 2].decode('utf-16le')
+        if name == 'valid-tail.bin':
+            struct.pack_into('<Q', entry, 40, int(sys.argv[2]))
+            checksum = 0
+            for position, byte in enumerate(entry):
+                if position not in (2, 3):
+                    checksum = (((checksum >> 1) | (checksum << 15)) + byte) & 0xffff
+            struct.pack_into('<H', entry, 2, checksum)
+            directory[index:index + length] = entry
+            found = True
+            break
+        index += length
+    if not found:
+        raise SystemExit('oracle: populate valid-tail.bin before changing its valid length')
+    for index, position in enumerate(positions):
+        image.seek(position)
+        image.write(directory[index * cluster_size:(index + 1) * cluster_size])
+PY
+}
 for sector in 512 4096; do
     image="$directory/reference-$sector.dmg"
     /usr/bin/hdiutil create -size 64m -layout NONE "$image"
@@ -106,53 +155,24 @@ PY
     /usr/bin/hdiutil detach "$device"
     device=''
     attached=0
-    /usr/bin/python3 - "$image" <<'PY'
-import struct, sys
-with open(sys.argv[1], 'r+b') as image:
-    boot = image.read(512)
-    sector = 1 << boot[108]
-    cluster_size = sector << boot[109]
-    heap = struct.unpack_from('<I', boot, 88)[0] * sector
-    fat = struct.unpack_from('<I', boot, 80)[0] * sector
-    current = struct.unpack_from('<I', boot, 96)[0]
-    seen, positions, directory = set(), [], bytearray()
-    while current != 0xffffffff:
-        if current in seen:
-            raise SystemExit('oracle: generated root chain cycle')
-        seen.add(current)
-        position = heap + (current - 2) * cluster_size
-        positions.append(position)
-        image.seek(position)
-        directory.extend(image.read(cluster_size))
-        image.seek(fat + current * 4)
-        current = struct.unpack('<I', image.read(4))[0]
-    index = 0
-    found = False
-    while index < len(directory) and directory[index] != 0:
-        if directory[index] != 0x85:
-            index += 32
-            continue
-        length = (directory[index + 1] + 1) * 32
-        entry = directory[index:index + length]
-        name_bytes = b''.join(entry[start + 2:start + 32] for start in range(64, length, 32) if entry[start] == 0xc1)
-        name = name_bytes[:entry[35] * 2].decode('utf-16le')
-        if name == 'valid-tail.bin':
-            struct.pack_into('<Q', entry, 40, 4096)
-            checksum = 0
-            for position, byte in enumerate(entry):
-                if position not in (2, 3):
-                    checksum = (((checksum >> 1) | (checksum << 15)) + byte) & 0xffff
-            struct.pack_into('<H', entry, 2, checksum)
-            directory[index:index + length] = entry
-            found = True
-            break
-        index += length
-    if not found:
-        raise SystemExit('oracle: populate valid-tail.bin before changing its valid length')
-    for index, position in enumerate(positions):
-        image.seek(position)
-        image.write(directory[index * cluster_size:(index + 1) * cluster_size])
+    set_valid_tail 513
+    /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"
+    accept_receipt
+    /sbin/fsck_exfat -n "$device"
+    /usr/bin/python3 - "$directory/mount-$sector/valid-tail.bin" "$directory/unaligned-$sector.txt" <<'PY'
+import sys
+with open(sys.argv[1], 'rb') as source:
+    data = source.read()
+kept = len(data) - len(data.lstrip(b'U'))
+if len(data) != 12288 or any(data[kept:]):
+    raise SystemExit('oracle: the driver returned something other than original bytes, then zeros')
+with open(sys.argv[2], 'w') as output:
+    output.write(f'{kept}\n')
 PY
+    /usr/bin/hdiutil detach "$device"
+    device=''
+    attached=0
+    set_valid_tail 4096
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"
     accept_receipt
     /sbin/fsck_exfat -n "$device"

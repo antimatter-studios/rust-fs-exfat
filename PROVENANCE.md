@@ -66,10 +66,10 @@ and access timestamp. A driver-created file has its ValidDataLength reduced in
 the detached image; its allocated tail remains nonzero while both readers must
 return zeroes. The fixture edit and its checksum are specification-derived.
 The main file differential uses a 4096-byte-aligned valid length: the macOS
-reference was observed to round an unaligned 513-byte valid length up to a
-512-byte sector boundary. The library does not emulate that discrepancy;
-synthetic tests retain byte-exact unaligned boundaries. The reference discrepancy
-is tracked in #10.
+reference rounds an unaligned 513-byte valid length up to the next sector
+boundary. The library does not emulate that discrepancy; synthetic tests retain
+byte-exact unaligned boundaries, and the oracle tier exercises the reference's
+rounding on each image, so a change in either is seen (#10).
 Unknown UTC offsets are represented explicitly, not guessed from the host clock.
 
 FAT entries, allocation bitmap indexing, compressed and uncompressed upcase

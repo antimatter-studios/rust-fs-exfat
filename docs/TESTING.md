@@ -15,7 +15,7 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 | Tier | Measured on 2026-11-04 | Budget | Executed floor |
 |---|---|---|---|
 | unit | Fuzz-gate cold target: 198 lines, 9877 bytes; build-first: 159 lines, 8625 bytes, with 79 tests | 230 lines, 12000 bytes, allowing clean-build diagnostics | 79 |
-| oracle | Cold target: 175 lines, 6943 bytes including ABI/CLI comparisons, the linked C caller and the seed cut | 200 lines, 16000 bytes, allowing formatter/checker diagnostics | 7 |
+| oracle | Cold target: 199 lines, 7759 bytes including ABI/CLI comparisons, the linked C caller, the seed cut and the unaligned mount | 240 lines, 16000 bytes, allowing formatter/checker diagnostics | 8 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
 
@@ -48,10 +48,14 @@ metadata files. Canonical Unicode equivalence is used only in the oracle because
 macOS readdir decomposes names; the reader preserves the stored UTF-16 name.
 Every file length, SHA-256 and creation/modification/access timestamp is compared
 with the read-only driver. The reduced-valid-length fixture retains a nonzero
-allocated tail and uses a 4096-byte boundary. macOS rounded a 513-byte valid
-length to a sector boundary in black-box testing; unit tests independently
-require byte-exact zero filling at unaligned lengths. The library does not
-reproduce the reference discrepancy (tracked in #10). Unknown UTC offsets remain unknown rather
+allocated tail and uses a 4096-byte boundary, because the macOS driver rounds an
+unaligned valid length up to the next sector boundary: of a 513-byte valid length
+it kept 1024 original bytes at 512 bytes per sector and 4096 at 4096, and
+fsck_exfat -n accepts both images. The specification requires zeros from the
+valid length itself, so the reader differs from the driver here on purpose. An
+oracle test exercises both on each reference image: the reader must be byte-exact,
+and the driver must keep exactly 513 bytes or round as described, so a change in
+the platform is told apart from a regression in the reader. Unknown UTC offsets remain unknown rather
 than being converted using the host clock. Lookup uses the volume table without
 host case folding or Unicode normalization. Paths are root-relative, with at
 most 1024 nonempty components and 255 UTF-16 units per ordinary component.

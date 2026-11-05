@@ -7,7 +7,7 @@ use fs_exfat::volume::Volume;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use support::Bytes;
+use support::{put64, seal_set, Bytes};
 use unicode_normalization::UnicodeNormalization;
 
 fn walk<Device: BlockRead>(
@@ -121,5 +121,67 @@ fn every_file_hash_length_and_timestamp_match_the_read_only_macos_driver() {
                 "{path} on {sector}-byte image"
             );
         }
+    }
+}
+
+/// The specification zero-fills from ValidDataLength without rounding, so this reader
+/// must, whatever the macOS driver does. That driver has been seen to keep original
+/// bytes up to the next sector boundary (#10). Anything but that or an exact answer
+/// fails here, which tells a change in the platform from a regression in the reader.
+#[test]
+fn an_unaligned_valid_length_is_exact_here_and_the_macos_driver_rounds_it_or_agrees() {
+    let directory =
+        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    for sector in [512u64, 4096] {
+        let mut image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
+        let volume = Volume::open(Bytes(image.clone())).unwrap();
+        let boot = volume.boot();
+        let root = volume.root_bytes();
+        let chain = volume.cluster_chain(boot.root_cluster).unwrap();
+        let cluster_size = boot.cluster_size() as usize;
+        let entries = volume.root_directory().unwrap();
+        let entry = entries
+            .iter()
+            .find(|entry| entry.name() == "valid-tail.bin")
+            .unwrap();
+        let start = root
+            .chunks_exact(32)
+            .position(|candidate| candidate == entry.raw_primary())
+            .unwrap()
+            * 32;
+        let mut set = root[start..start + (usize::from(root[start + 1]) + 1) * 32].to_vec();
+        put64(&mut set, 40, 513);
+        seal_set(&mut set);
+        for (index, byte) in set.iter().enumerate() {
+            let at = start + index;
+            let physical =
+                boot.cluster_offset(chain[at / cluster_size]).unwrap() as usize + at % cluster_size;
+            image[physical] = *byte;
+        }
+
+        let volume = Volume::open(Bytes(image)).unwrap();
+        let entries = volume.root_directory().unwrap();
+        let entry = entries
+            .iter()
+            .find(|entry| entry.name() == "valid-tail.bin")
+            .unwrap();
+        let file = volume.open_file(entry).unwrap();
+        assert_eq!(file.valid_data_length(), 513);
+        let mut contents = vec![0xff; file.len() as usize];
+        assert_eq!(file.read_at(0, &mut contents).unwrap(), contents.len());
+        assert!(contents[..513].iter().all(|byte| *byte == b'U'));
+        assert!(contents[513..].iter().all(|byte| *byte == 0));
+
+        let kept: u64 = std::fs::read_to_string(directory.join(format!("unaligned-{sector}.txt")))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let rounded = 513u64.next_multiple_of(sector);
+        assert!(
+            kept == 513 || kept == rounded,
+            "the {sector}-byte driver kept {kept} original bytes, neither 513 nor {rounded}"
+        );
+        println!("{sector}-byte driver kept {kept} original bytes of a 513-byte valid length");
     }
 }
