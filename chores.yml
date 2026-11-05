@@ -31,12 +31,18 @@ tasks:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 200 16000 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 7
   test:
-    cmds: ['chore test:unit', 'chore test:oracle']
+    cmds: ['chore test:unit', 'chore test:oracle', 'chore test:package']
   fuzz:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'
   package:
-    cmds: ['cargo package --locked --all-features --allow-dirty']
+    cmds:
+      # In a directory of its own: verification builds the packaged copy under the
+      # same crate hash as the working tree's, and a later test would link it (#5).
+      - 'cargo package --locked --all-features --allow-dirty --target-dir "${CARGO_TARGET_DIR:-target}/package-verify"'
+  test:package:
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored package package 20 1000 -- bash scripts/test-package-isolation.sh'
   staticlib:
     cmds:
       - cargo build --locked --release --lib

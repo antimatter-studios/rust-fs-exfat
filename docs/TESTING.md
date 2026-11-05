@@ -16,6 +16,7 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 |---|---|---|---|
 | unit | Fuzz-gate cold target: 198 lines, 9877 bytes; build-first: 159 lines, 8625 bytes, with 79 tests | 230 lines, 12000 bytes, allowing clean-build diagnostics | 79 |
 | oracle | Cold target: 175 lines, 6943 bytes including ABI/CLI comparisons, the linked C caller and the seed cut | 200 lines, 16000 bytes, allowing formatter/checker diagnostics | 7 |
+| package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
 
 Boot reports validate both copies and report every differing byte. The macOS
@@ -77,10 +78,12 @@ Run the remaining read-only/provenance guards, format and all-feature Clippy
 steps explicitly; report the missing YAML gate. CI supplies PyYAML and still
 runs the complete lint task. Do not install host tools implicitly.
 
-Use a fresh CARGO_TARGET_DIR for each validation pass and run package validation
-last. With mixed staticlib/rlib outputs, package verification in the same target
-directory was observed to leave stale library artifacts for a subsequent test
-build on Rust 1.95.0. A fresh target reproduced the expected updated behavior.
+`chore package` verifies in `package-verify` under the current target directory.
+Verification builds the packaged copy under the same crate hash as the working
+tree's build, so in a shared directory a later test, after an edit to the library,
+linked the packaged library and tested old code. `chore test:package` edits a copy
+of the tree after `chore package` and fails unless a test links the edited library.
+A bare `cargo package` still shares the directory, so use the task.
 
 The Linux harness configuration used by other filesystem drivers is not copied:
 there is no Linux guest oracle in the current milestone. Windows formatting is
