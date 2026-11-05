@@ -14,8 +14,9 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured on 2026-11-04 | Budget | Executed floor |
 |---|---|---|---|
-| unit | Interface-layer cold target: 180 lines, 8109 bytes; build-first: 141 lines, 6873 bytes, with 67 tests | 200 lines, 12000 bytes, allowing clean-build diagnostics | 67 |
-| oracle | 128 lines, 4647 bytes including ABI/CLI comparisons and the linked C caller | 160 lines, 16000 bytes, allowing formatter/checker diagnostics | 6 |
+| unit | Fuzz-gate cold target: 198 lines, 9877 bytes; build-first: 159 lines, 8625 bytes, with 79 tests | 230 lines, 12000 bytes, allowing clean-build diagnostics | 79 |
+| oracle | Cold target: 175 lines, 6943 bytes including ABI/CLI comparisons, the linked C caller and the seed cut | 200 lines, 16000 bytes, allowing formatter/checker diagnostics | 7 |
+| fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
 
 Boot reports validate both copies and report every differing byte. The macOS
 oracle formats fresh 64 MiB images with 512-byte and 4096-byte sectors, checks
@@ -84,3 +85,19 @@ build on Rust 1.95.0. A fresh target reproduced the expected updated behavior.
 The Linux harness configuration used by other filesystem drivers is not copied:
 there is no Linux guest oracle in the current milestone. Windows formatting is
 additional evidence only if the Windows harness can provide it.
+
+## Fuzzing
+
+Every public decoder has a cargo-fuzz target; `fuzz/README.md` lists them and says
+why `DirectoryEntry` and `Stream` need none of their own. `chore fuzz -- SECONDS` is
+the explorer: it runs on nightly, is not a required check, and fails on a crash, on
+a target with no corpus, on a run that failed to start and on a run that executed
+fewer inputs than it had seconds. `.github/workflows/fuzz.yml` runs it nightly and
+keeps reproducers. `scripts/test-fuzz-all.sh`, in `chore lint`, proves each of those
+verdicts against a stub.
+
+`tests/fuzz_decoders.rs` is the gate, in the unit tier: the same harness on the
+pinned toolchain, deterministic, replaying and mutating the corpus. It fails when a
+public `parse` or `decode` has no target and when no seed gets past a decoder's first
+check. The seeds are cut from reference images by `tests/oracle/fuzz_seeds.rs`, which
+the oracle tier runs. Fuzzing uses in-memory inputs only and needs no device.

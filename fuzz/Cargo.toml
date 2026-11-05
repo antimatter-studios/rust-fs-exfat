@@ -1,0 +1,83 @@
+[package]
+name = "fs-exfat-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# The explorer half of the fuzzing setup. The gate half is
+# tests/fuzz_decoders.rs in the parent crate, which replays and mutates the
+# same corpus on the pinned stable toolchain. Run one target:
+#   cargo +nightly fuzz run image
+# Run all of them, for a bounded time, which is what CI does:
+#   chore fuzz -- 60
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+rust-fs-exfat = { path = ".." }
+rust-fs-core = "=0.4.3"
+
+[[bin]]
+name = "boot_sector"
+path = "fuzz_targets/boot_sector.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fat_entry"
+path = "fuzz_targets/fat_entry.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "allocation_bitmap"
+path = "fuzz_targets/allocation_bitmap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "upcase_table"
+path = "fuzz_targets/upcase_table.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "root_metadata"
+path = "fuzz_targets/root_metadata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "directory"
+path = "fuzz_targets/directory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "timestamp"
+path = "fuzz_targets/timestamp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "timestamps"
+path = "fuzz_targets/timestamps.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image"
+path = "fuzz_targets/image.rs"
+test = false
+doc = false
+bench = false

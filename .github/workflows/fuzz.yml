@@ -1,0 +1,77 @@
+name: fuzz
+
+# The explorer half of the fuzzing setup. The gate half, tests/fuzz_decoders.rs,
+# runs in ci.yml on every pull request because it is deterministic. This one is
+# not: how long a fuzzer ran decides what it found, so a fresh finding would fail
+# whichever unrelated change happened to be open. It runs nightly and on demand,
+# is not a required check, and keeps its reproducers.
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds per target"
+        required: false
+        default: "120"
+  schedule:
+    - cron: "0 3 * * *"
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: 0
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      # Nightly, not the pin: cargo-fuzz needs -Z sanitizer. The +nightly in
+      # scripts/fuzz-all.sh overrides rust-toolchain.toml for those calls alone.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: nightly
+      - run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
+      - name: install chore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/chore"
+          archive=chore-0.19.0-linux-x86_64.tar.gz
+          gh release download v0.19.0 -R antimatter-studios/chore -p "$archive" -p checksums.txt -D "$RUNNER_TEMP/chore"
+          cd "$RUNNER_TEMP/chore"
+          grep " $archive\$" checksums.txt | shasum -a 256 -c -
+          tar -xzf "$archive"
+          echo "$RUNNER_TEMP/chore" >> "$GITHUB_PATH"
+      # The input arrives through env, never pasted into the script: an expression
+      # in run: is substituted before the shell parses it. fuzz-all.sh then refuses
+      # anything but a whole number of seconds that fits the job's timeout.
+      - name: fuzz
+        working-directory: rust-fs-exfat
+        env:
+          SECONDS_PER_TARGET: ${{ inputs.seconds || '120' }}
+        run: chore fuzz -- "$SECONDS_PER_TARGET"
+      # Without this the finding is lost: the reproducer lives on the runner, and
+      # the runner is thrown away. cancelled() too, since a run stopped at its
+      # timeout still holds whatever the earlier targets found.
+      - name: keep the reproducers
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fuzz-artifacts
+          path: rust-fs-exfat/fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 90
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: fuzz-logs
+          path: rust-fs-exfat/tmp/logs/

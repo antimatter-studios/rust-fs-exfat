@@ -9,6 +9,7 @@ tasks:
   lint:
     cmds:
       - bash scripts/test-image-safety.sh
+      - bash scripts/test-fuzz-all.sh
       - bash ../rust-fs-core/scripts/agents-core-check.sh
       - bash ../rust-fs-core/scripts/changelog-check.sh
       - bash ../rust-fs-core/scripts/features-check.sh
@@ -17,17 +18,23 @@ tasks:
       - bash scripts/check-read-only.sh
       - bash scripts/check-provenance.sh
       - cargo fmt --all --check
+      - cargo fmt --manifest-path fuzz/Cargo.toml --check
+      # The fuzz crate has a lockfile of its own, and nothing above resolves it.
+      - cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - cargo clippy --locked --all-targets --all-features -- -D warnings
   test:unit:
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 200 12000 -- bash -c "cargo test --locked --features cli --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test capi --test check --test cli && cargo test --locked --all-features --doc"'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 67
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 230 12000 -- bash -c "cargo test --locked --features cli --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test capi --test check --test cli --test fuzz_decoders && cargo test --locked --all-features --doc"'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 79
   test:oracle:
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 160 16000 -- bash scripts/test-oracle.sh'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 6
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 200 16000 -- bash scripts/test-oracle.sh'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 7
   test:
     cmds: ['chore test:unit', 'chore test:oracle']
+  fuzz:
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'
   package:
     cmds: ['cargo package --locked --all-features --allow-dirty']
   staticlib:
