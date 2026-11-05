@@ -28,8 +28,8 @@ tasks:
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 79
   test:oracle:
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 200 16000 -- bash scripts/test-oracle.sh'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 7
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 240 16000 -- bash scripts/test-oracle.sh'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 8
   test:
     cmds: ['chore test:unit', 'chore test:oracle', 'chore test:package']
   fuzz:
