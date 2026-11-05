@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+bash scripts/check-image-safety.sh "$0"
 [ "$(uname -s)" = Darwin ] || { echo 'oracle: macOS is required; run chore test:oracle on macOS' >&2; exit 1; }
 for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil; do
     [ -x "$tool" ] || { echo "oracle: $tool is required by chore test:oracle" >&2; exit 1; }
@@ -215,4 +216,5 @@ PY
     device=''
     attached=0
 done
-EXFAT_ORACLE_DIR="$directory" cargo test --locked --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path -- --nocapture
+EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces -- --nocapture
+bash scripts/test-capi.sh "$directory/reference-512.dmg" "$directory/reference-4096.dmg"

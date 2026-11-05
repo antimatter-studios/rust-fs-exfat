@@ -3,7 +3,7 @@ chore_min_version: 0.19.0
 
 tasks:
   build:
-    cmds: ['cargo build --locked --all-targets']
+    cmds: ['cargo build --locked --all-targets --all-features']
   fmt:
     cmds: ['cargo fmt --all --check']
   lint:
@@ -17,19 +17,19 @@ tasks:
       - bash scripts/check-read-only.sh
       - bash scripts/check-provenance.sh
       - cargo fmt --all --check
-      - cargo clippy --locked --all-targets -- -D warnings
+      - cargo clippy --locked --all-targets --all-features -- -D warnings
   test:unit:
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 150 12000 -- bash -c "cargo test --locked --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path && cargo test --locked --doc"'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 49
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 200 12000 -- bash -c "cargo test --locked --features cli --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test capi --test check --test cli && cargo test --locked --all-features --doc"'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 67
   test:oracle:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 160 16000 -- bash scripts/test-oracle.sh'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 5
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 6
   test:
     cmds: ['chore test:unit', 'chore test:oracle']
   package:
-    cmds: ['cargo package --locked --allow-dirty']
+    cmds: ['cargo package --locked --all-features --allow-dirty']
   staticlib:
     cmds:
       - cargo build --locked --release --lib

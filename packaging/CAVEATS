@@ -1,2 +1,4 @@
-The library is a scaffold and is not yet usable as a filesystem reader.
-No command-line tools, formatter, repair operation or writable mode are shipped.
+The library and optional command-line tools are experimental read-only readers.
+The cli feature builds the multi-call binary for fs.exfat and fsck.exfat.
+fsck.exfat is check-only. No formatter, repair operation or writable mode exists.
+Complete decoder fuzz targets and the final Milestone 1 audit remain pending.

@@ -1,11 +1,11 @@
 # rust-fs-exfat
 
-A strict, read-only exFAT reader in safe Rust, licensed under MIT.
+A strict, read-only exFAT reader with safe Rust decoders, licensed under MIT.
 
-**Status: not yet usable.** The read-only device boundary and validated boot-region
-reports, FAT-linked system metadata, validated directory iteration and file reads
-with timestamps and volume-upcase path lookup are present. The C ABI and
-command-line tools are being implemented in
+**Status: experimental; Milestone 1 is incomplete.** Boot-region reports,
+system metadata, directory iteration, file reads, timestamps, volume-upcase path
+lookup, a read-only C ABI and command-line tools are implemented. Complete decoder
+fuzz targets and the final validation audit remain in
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
 There is no formatter, repair operation or write feature.
 
@@ -15,6 +15,38 @@ The library is `fs_exfat`. Strict entry points accept `fs_core::BlockRead` only;
 devices are held behind `ReadOnlyDevice`, never a writable device trait or a
 runtime writable flag. Reads passed to a device are aligned to 512 bytes.
 See [features](docs/features.md) and [provenance](PROVENANCE.md).
+Pointer conversion is confined to the C ABI module; the decoders and command-line
+implementation deny unsafe Rust. The header and ownership rules are documented
+in [the C ABI guide](docs/C-ABI.md).
+
+## Command-line tools
+
+The optional `cli` feature builds the family multi-call binary. These commands
+use it without relying on tool names installed elsewhere on PATH:
+
+```sh
+cargo build --locked --release --features cli
+target/release/rust-fs-exfat fs image.dmg ls /
+target/release/rust-fs-exfat fs image.dmg stat /file.txt
+target/release/rust-fs-exfat fs image.dmg cat /file.txt
+target/release/rust-fs-exfat fs image.dmg export /file.txt output.txt --verify
+target/release/rust-fs-exfat fsck image.dmg -n
+```
+
+The corresponding dotted names are `fs.exfat` and `fsck.exfat`; packaging may
+link those names to the same binary. Metadata is JSON by default, with `--text`
+for people; `cat` writes raw bytes. `--offset BYTES` selects a filesystem within
+an image and must be 512-byte aligned. Export uses `fs_core::cli::transfer`:
+it stages locally, refuses source aliases and existing destinations by default,
+and verifies staged length and SHA-256 before publication when `--verify` is set.
+Only the destination is written; the source always stays read-only.
+
+`fsck.exfat` is check-only, with no repair mode. It checks boot copies, metadata,
+entry sets, chain allocation, cross-links and unreferenced allocated clusters.
+Dirty/media-failure flags are reported without clearing them. The audit is
+bounded to 1,048,576 clusters and entries; larger volumes fail explicitly rather
+than receive a partial clean bill. Exit statuses are 0 clean, 4 uncorrected
+inconsistencies, 8 I/O or unsupported audit limits, and 16 usage errors.
 
 ## Building and testing
 
