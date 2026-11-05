@@ -52,6 +52,10 @@ name = "macos_path"
 path = "tests/oracle/path.rs"
 
 [[test]]
+name = "macos_fuzz_seeds"
+path = "tests/oracle/fuzz_seeds.rs"
+
+[[test]]
 name = "cli"
 path = "tests/cli.rs"
 required-features = ["cli"]

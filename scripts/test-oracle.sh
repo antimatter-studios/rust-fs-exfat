@@ -216,5 +216,5 @@ PY
     device=''
     attached=0
 done
-EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces -- --nocapture
+EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces --test macos_fuzz_seeds -- --nocapture
 bash scripts/test-capi.sh "$directory/reference-512.dmg" "$directory/reference-4096.dmg"
