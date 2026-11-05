@@ -50,7 +50,7 @@ jobs:
           echo "$RUNNER_TEMP/chore" >> "$GITHUB_PATH"
       - run: python3 -m venv "$RUNNER_TEMP/python" && "$RUNNER_TEMP/python/bin/pip" install PyYAML==6.0.3
       - run: echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
-      - run: chore build && chore lint && chore test:unit && chore package
+      - run: chore build && chore lint && chore test:unit && chore package && chore test:package
         working-directory: rust-fs-exfat
       - run: chore test:oracle
         if: runner.os == 'macOS'
