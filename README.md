@@ -2,12 +2,26 @@
 
 A strict, read-only exFAT reader with safe Rust decoders, licensed under MIT.
 
-**Status: experimental; Milestone 1 is incomplete.** Boot-region reports,
-system metadata, directory iteration, file reads, timestamps, volume-upcase path
-lookup, a read-only C ABI and command-line tools are implemented. Complete decoder
-fuzz targets and the final validation audit remain in
+**Status: experimental and unreleased.** Boot-region reports, system metadata,
+directory iteration, file reads, timestamps, volume-upcase path lookup, a read-only
+C ABI and command-line tools are implemented, which completes
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
 There is no formatter, repair operation or write feature.
+
+The evidence is limited. Listings and every file's SHA-256 are compared with the
+macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
+sector, and `fsck_exfat -n` agrees on them. Nothing has been compared with an image
+Windows formatted
+([#22](https://github.com/antimatter-studios/rust-fs-exfat/issues/22)), or with a
+real disk. Known limits:
+
+- A raw device with 4096-byte sectors cannot be read; its block node can
+  ([#20](https://github.com/antimatter-studios/rust-fs-exfat/issues/20)).
+- A file over 1,048,576 clusters is refused, not misread
+  ([#21](https://github.com/antimatter-studios/rust-fs-exfat/issues/21)).
+- The macOS driver keeps original bytes up to the next sector boundary past an
+  unaligned ValidDataLength. This reader returns zeros from the exact length, as the
+  specification requires, so the two differ on such a file.
 
 ## Architecture
 
@@ -61,9 +75,13 @@ chore test
 chore package
 chore staticlib
 chore artifact
+chore fuzz -- 30
 ```
 
-`chore test` runs unit, documentation and macOS image-oracle tests. Linux CI runs
+`chore test` runs unit, documentation and macOS image-oracle tests, and the check
+that package verification leaves nothing a later test links. `chore fuzz -- 30` runs
+every decoder's [fuzz target](fuzz/README.md) for 30 seconds and needs nightly Rust
+and cargo-fuzz. Linux CI runs
 the explicitly host-independent `chore test:unit` tier; the oracle tier fails on
 a non-macOS host rather than skipping.
 Tests never silently skip missing prerequisites. Test output is retained in

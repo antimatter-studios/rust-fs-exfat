@@ -1,7 +1,8 @@
 # Features
 
-This is an unreleased scaffold, not a usable filesystem reader. Feature changes
-are recorded under `features.d/` and applied to this page at release time.
+Nothing is released yet, so the tables below still show the initial scaffold. The
+current state of each row is a fragment under `features.d/`, and fragments are
+applied to this page at release time.
 
 ## Safety
 

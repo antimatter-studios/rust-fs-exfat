@@ -66,8 +66,6 @@ also links the static library and reads a reference-created file on each sector
 size. Check-only fsck agrees with the reference checker on those clean images;
 synthetic tests cover cross-links, lost clusters, dirty state and explicit audit
 limits. CLI tests cover verified extraction, source protection and repair refusal.
-Complete decoder fuzz targets and the final audit remain pending. This is not
-yet Milestone 1.
 
 Before any image operation, the safety guard checks the reviewed receipt parser,
 cleanup, fresh image binding and attach/query/detach ordering. Only the exact

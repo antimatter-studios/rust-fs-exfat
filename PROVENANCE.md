@@ -97,5 +97,5 @@ bytes per sector, checks them with fsck_exfat -n, and compares both decoded boot
 copies with the formatter's geometry. Device nodes come only from each attach
 command's own plist output. Images are detached before the Rust reader runs.
 Mounted-driver listing/hash differentials cover the Rust reader, C ABI and CLI;
-synthetic corruption tests are not independent format evidence. Complete decoder
-fuzz targets and the final milestone audit remain pending.
+synthetic corruption tests are not independent format evidence. Fuzz seeds are cut
+from these reference images, and fuzzing is not independent format evidence either.
