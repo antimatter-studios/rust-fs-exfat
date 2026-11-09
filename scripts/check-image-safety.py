@@ -38,11 +38,16 @@ def check(source):
         refuse("unterminated source heredoc")
     initialization = 'directory="$(mktemp -d "$PWD/tmp/oracle.XXXXXX")"'
     image_binding = 'image="$directory/reference-$sector.dmg"'
+    fixture_binding = 'image="$directory/reencoded-fixtures-$sector.dmg"'
+    fixture_regular = '[ -f "$image" ] && [ ! -L "$image" ]'
+    fixture_test = 'EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces --test macos_fuzz_seeds -- --nocapture'
+    fixture_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"'
     tools = 'for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil; do'
     query = '/usr/sbin/diskutil info -plist "$device" > "$directory/info-$sector.plist"'
     create = '/usr/bin/hdiutil create -size 64m -layout NONE "$image"'
     detach = '/usr/bin/hdiutil detach "$device"'
     attachments = {
+        fixture_attach,
         '/usr/bin/hdiutil attach -blocksize "$sector" -nomount -nobrowse -plist "$image" > "$directory/attach.plist"',
         '/usr/bin/hdiutil attach -blocksize "$sector" -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"',
         '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"',
@@ -54,10 +59,14 @@ def check(source):
     }
     if lines.count(initialization) != 1 or lines.count('trap cleanup EXIT') != 1 or lines.count(image_binding) != 1:
         refuse("images must be bound to this run's fresh private temporary directory")
+    if lines.count(fixture_binding) != 1 or lines.count(fixture_test) != 1:
+        refuse("reencoded fixtures require the reviewed test producer and private image binding")
     active = False
     created = False
     receipt_pending = False
     image_bound = False
+    fixture_image = False
+    fixtures_ready = False
     for line in lines:
         if not line:
             continue
@@ -71,10 +80,28 @@ def check(source):
             refuse("a receipt cannot be reused without a fresh image attachment")
         if line == initialization:
             continue
+        if line == fixture_test:
+            if active:
+                refuse("fixture generation requires detached reference images")
+            fixtures_ready = True
+            continue
+        if line == fixture_binding:
+            if active or not fixtures_ready:
+                refuse("fixture attachment requires this run's completed fixture producer")
+            image_bound = True
+            fixture_image = True
+            created = False
+            continue
+        if line == fixture_regular:
+            if not fixture_image or active:
+                refuse("fixture validation requires its detached private image binding")
+            created = True
+            continue
         if line == image_binding:
             if active:
                 refuse("an attached image cannot be rebound")
             image_bound = True
+            fixture_image = False
             created = False
             continue
         if line == create:
@@ -85,6 +112,8 @@ def check(source):
         if line in attachments:
             if not created or active:
                 refuse("attach requires this run's created, detached image")
+            if fixture_image and line != fixture_attach:
+                refuse("reencoded fixture images must be attached read-only")
             receipt_pending = True
             continue
         if line == detach or line in device_commands:

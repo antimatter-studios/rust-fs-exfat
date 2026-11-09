@@ -1,5 +1,32 @@
 #![deny(unsafe_code)]
 
+//! A strict, read-only exFAT reader with permissive on-disk primitives.
+//!
+//! # Test-support images
+//!
+//! The optional `test-support` feature exposes `fs_exfat::fixtures`, pure in-memory
+//! encoders for boot copies, FAT words, allocation bits, upcase tables and
+//! live/deleted directory entry sets, plus complete damaged-volume scenarios.
+//! It is off by default, adds no dependencies, and never enables device writes.
+//! These deliberately incomplete fixtures are not a formatter or evidence of
+//! format correctness; healthy structures are checked against macOS oracles.
+//!
+//! ```toml
+//! [dev-dependencies]
+//! fs_exfat = { package = "rust-fs-exfat", version = "0.1.0", features = ["test-support"] }
+//! ```
+//!
+//! ```
+//! # #[cfg(feature = "test-support")] {
+//! use fs_exfat::fixtures::{entry_set, Builder, ROOT_CLUSTER};
+//!
+//! let mut image = Builder::new();
+//! image.directory(ROOT_CLUSTER, &[entry_set("sample.bin", false, 10, 4, true, true)]);
+//! image.put(10, 0, b"data");
+//! assert_eq!(image.image.len(), 835_584);
+//! # }
+//! ```
+
 pub mod boot;
 #[allow(unsafe_code)]
 pub mod capi;
@@ -10,6 +37,8 @@ pub mod device;
 pub mod directory;
 pub mod error;
 pub mod file;
+#[cfg(feature = "test-support")]
+pub mod fixtures;
 pub mod interface;
 pub mod metadata;
 pub mod path;

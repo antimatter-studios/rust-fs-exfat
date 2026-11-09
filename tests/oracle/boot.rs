@@ -3,6 +3,9 @@ mod support;
 
 mod primitives;
 
+#[cfg(feature = "test-support")]
+mod fixtures;
+
 use fs_exfat::{boot::BootRegions, device::Reader};
 use std::path::PathBuf;
 use support::Bytes;
