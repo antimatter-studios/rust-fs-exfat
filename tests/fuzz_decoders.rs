@@ -27,7 +27,7 @@ struct Target {
 const TARGETS: &[Target] = &[
     Target {
         name: "boot_sector",
-        decoders: &["BootSector::parse"],
+        decoders: &["BootSector::parse", "BootSector::parse"],
         run: shared::boot_sector,
         rounds: 2000,
     },

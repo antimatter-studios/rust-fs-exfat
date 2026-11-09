@@ -1,6 +1,8 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod primitives;
+
 use fs_exfat::{boot::BootRegions, device::Reader};
 use std::path::PathBuf;
 use support::Bytes;

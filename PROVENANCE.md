@@ -8,7 +8,8 @@ Reference programs are used only as black-box tools on generated disk images.
 The repository layout and development conventions follow rust-fs-ext4 (MIT).
 Filesystem-specific source, historical provenance and test fixtures are not
 copied from that template. rust-fs-core 0.4.3 (MIT) supplies the read-only device
-traits and shared development scripts. There are no other library dependencies.
+traits and shared development scripts. Serde (MIT/Apache-2.0) preserves the
+primitive boot-sector and entry-set types' camelCase serialization contract.
 
 ## Owner-authorized starting code
 
@@ -26,6 +27,24 @@ and independent reference tests. Recovery scans and salvage code are out of
 scope for Milestone 1.
 
 ## Validation
+
+The owner authorized the complete permissive on-disk parser for the primitive
+layer in #26. The supplied `src/exfat.rs` has SHA-256
+`3dabdfb21626dbdcbb42da5b8e034516299aab962c9262e2f786eef4b2cbf347`.
+Its boot fields and accessors, checksums, timestamp strings, entry-set fields,
+bitmap lookup and byte helpers are preserved independently of the strict reader.
+Boot parse failures use this crate's existing `Error::Invalid` type. Serde keeps
+the original camelCase field names; public checksum and byte helpers retain their
+unchecked slice preconditions. No stricter geometry, calendar-day, checksum,
+name or bitmap validation is introduced into these primitives.
+
+`tests/oracle/primitives.rs` compares healthy boot geometry and both boot checksums
+with macOS formatter/checker output, every live directory entry with read-only
+driver listings, bitmap locations with formatter output, and timestamp strings
+with driver stat timestamps at their preserved two-second precision. These tests
+run on both 512- and 4096-byte-sector images in `chore test:oracle` without using
+the strict decoder as an oracle. Synthetic primitive fixtures are limited to
+permissive and malformed cases, not evidence for healthy format correctness.
 
 Image setup uses only the device in its own attachment receipt. There is no
 system-wide flush; detaching that image completes its writes. The safety guard
