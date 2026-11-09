@@ -13,6 +13,7 @@ pub mod file;
 pub mod interface;
 pub mod metadata;
 pub mod path;
+pub mod primitives;
 pub mod timestamp;
 pub mod volume;
 

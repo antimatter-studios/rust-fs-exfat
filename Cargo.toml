@@ -32,6 +32,10 @@ serde_json = "=1.0.149"
 exclude = ["fuzz"]
 
 [[test]]
+name = "primitives"
+path = "tests/primitives.rs"
+
+[[test]]
 name = "macos_boot"
 path = "tests/oracle/boot.rs"
 
