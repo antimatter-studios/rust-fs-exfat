@@ -193,6 +193,7 @@ name = "rust-fs-exfat"
 version = "0.1.0"
 dependencies = [
  "rust-fs-core",
+ "serde",
  "serde_json",
  "sha2",
  "unicode-normalization",

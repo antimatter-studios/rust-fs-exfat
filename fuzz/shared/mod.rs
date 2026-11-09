@@ -28,6 +28,11 @@ use std::sync::OnceLock;
 use support::{file_set, metadata_volume, put16, put32, put64, seal_boot, seal_set, Bytes};
 
 pub fn boot_sector(data: &[u8]) -> bool {
+    let permissive = fs_exfat::primitives::BootSector::parse(data).ok();
+    if let Some(boot) = &permissive {
+        assert_eq!(boot.file_system_name, "EXFAT   ");
+        assert_eq!(boot.signature_ok, data[510..512] == [0x55, 0xaa]);
+    }
     for sector in [512, 1024, 2048, 4096] {
         let Ok(checksum) = boot_checksum(data, sector) else {
             continue;
@@ -39,8 +44,13 @@ pub fn boot_sector(data: &[u8]) -> bool {
         assert_eq!(boot_checksum(&flags_changed, sector).ok(), Some(checksum));
     }
     let Ok(boot) = BootSector::parse(data) else {
-        return false;
+        return permissive.is_some();
     };
+    let permissive =
+        permissive.expect("the strict decoder accepts only a subset of primitive boots");
+    assert_eq!(boot.cluster_count, permissive.cluster_count);
+    assert_eq!(boot.bytes_per_sector(), permissive.bytes_per_sector());
+    assert_eq!(boot.cluster_size(), permissive.cluster_size());
     assert!(matches!(boot.bytes_per_sector(), 512 | 1024 | 2048 | 4096));
     assert!((boot.bytes_per_sector()..=32 * 1024 * 1024).contains(&boot.cluster_size()));
     let volume_bytes = boot.volume_length * boot.bytes_per_sector();

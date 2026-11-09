@@ -1,12 +1,21 @@
-//! Primitives over raw bytes: finds entry sets in data that the strict reader
-//! would not walk. Read-only by type: nothing here takes a writable device.
+//! Permissive on-disk decoders over raw bytes, including structures the strict
+//! reader would reject. Read-only by type: nothing here takes a writable device.
 //!
 //! Field layout and checksum rules follow Microsoft's published exFAT
 //! specification.
 
+use crate::{Error, Result};
+use serde::Serialize;
+
 /// Size of one directory entry on disk.
 pub const ENTRY_SIZE: usize = 32;
+pub const FAT_END: u32 = 0xFFFF_FFFF;
+pub const FAT_BAD: u32 = 0xFFFF_FFF7;
+pub const FIRST_CLUSTER: u32 = 2;
+pub const BOOT_REGION_SECTORS: u64 = 12;
 
+const VOLUME_DIRTY: u16 = 0x0002;
+const ATTRIBUTE_DIRECTORY: u16 = 0x10;
 const ATTRIBUTE_VALID_MASK: u16 = 0x37;
 const TYPE_FILE: u8 = 0x85;
 const TYPE_FILE_DELETED: u8 = 0x05;
@@ -14,10 +23,157 @@ const TYPE_STREAM: u8 = 0xC0;
 const TYPE_STREAM_DELETED: u8 = 0x40;
 const TYPE_NAME: u8 = 0xC1;
 const TYPE_NAME_DELETED: u8 = 0x41;
+const TYPE_BITMAP: u8 = 0x81;
 const NAME_CHARS_PER_ENTRY: usize = 15;
 const MIN_SECONDARY_COUNT: usize = 2;
 const MAX_SECONDARY_COUNT: usize = 18;
-const FIRST_CLUSTER: u32 = 2;
+const STREAM_FLAG_NO_FAT_CHAIN: u8 = 0x02;
+const UTC_OFFSET_VALID: u8 = 0x80;
+const MINUTES_PER_OFFSET_STEP: i32 = 15;
+
+/// A permissively decoded boot sector, separate from the strict reader's boot
+/// sector. Only the minimum length and filesystem name are required; callers
+/// must assess geometry and `signature_ok` before using the raw accessors.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BootSector {
+    pub file_system_name: String,
+    pub partition_offset: u64,
+    pub volume_length: u64,
+    pub fat_offset: u32,
+    pub fat_length: u32,
+    pub cluster_heap_offset: u32,
+    pub cluster_count: u32,
+    pub root_cluster: u32,
+    pub volume_serial: u32,
+    pub revision: u16,
+    pub volume_flags: u16,
+    pub bytes_per_sector_shift: u8,
+    pub sectors_per_cluster_shift: u8,
+    pub number_of_fats: u8,
+    pub percent_in_use: u8,
+    pub signature_ok: bool,
+}
+
+impl BootSector {
+    pub fn parse(sector: &[u8]) -> Result<Self> {
+        if sector.len() < 512 {
+            return Err(Error::Invalid("boot sector is shorter than 512 bytes"));
+        }
+        if &sector[3..11] != b"EXFAT   " {
+            return Err(Error::Invalid(
+                "no exFAT signature at offset 3: this is not an exFAT volume",
+            ));
+        }
+        Ok(Self {
+            file_system_name: String::from_utf8_lossy(&sector[3..11]).into_owned(),
+            partition_offset: u64_at(sector, 64),
+            volume_length: u64_at(sector, 72),
+            fat_offset: u32_at(sector, 80),
+            fat_length: u32_at(sector, 84),
+            cluster_heap_offset: u32_at(sector, 88),
+            cluster_count: u32_at(sector, 92),
+            root_cluster: u32_at(sector, 96),
+            volume_serial: u32_at(sector, 100),
+            revision: u16_at(sector, 104),
+            volume_flags: u16_at(sector, 106),
+            bytes_per_sector_shift: sector[108],
+            sectors_per_cluster_shift: sector[109],
+            number_of_fats: sector[110],
+            percent_in_use: sector[112],
+            signature_ok: sector[510] == 0x55 && sector[511] == 0xAA,
+        })
+    }
+
+    pub fn bytes_per_sector(&self) -> u64 {
+        1 << self.bytes_per_sector_shift
+    }
+
+    pub fn cluster_size(&self) -> u64 {
+        self.bytes_per_sector() << self.sectors_per_cluster_shift
+    }
+
+    /// Set while a volume is mounted for writing, and cleared by a clean unmount.
+    pub fn volume_dirty(&self) -> bool {
+        self.volume_flags & VOLUME_DIRTY != 0
+    }
+
+    pub fn heap_offset(&self) -> u64 {
+        u64::from(self.cluster_heap_offset) * self.bytes_per_sector()
+    }
+
+    pub fn last_cluster_exclusive(&self) -> u32 {
+        self.cluster_count + FIRST_CLUSTER
+    }
+}
+
+/// Checksum over sectors 0-10, skipping VolumeFlags and PercentInUse.
+///
+/// Panics when the complete first eleven sectors are not present.
+pub fn boot_checksum(region: &[u8], bytes_per_sector: usize) -> u32 {
+    let mut checksum = 0u32;
+    for (index, &byte) in region[..bytes_per_sector * 11].iter().enumerate() {
+        if matches!(index, 106 | 107 | 112) {
+            continue;
+        }
+        checksum = checksum.rotate_right(1).wrapping_add(u32::from(byte));
+    }
+    checksum
+}
+
+/// The first stored checksum word in sector twelve, without checking repeats.
+///
+/// Panics when that word is not present.
+pub fn stored_boot_checksum(region: &[u8], bytes_per_sector: usize) -> u32 {
+    u32_at(region, bytes_per_sector * 11)
+}
+
+/// Decodes a two-second-resolution timestamp, without calendar-day validation.
+/// Zero and out-of-range individual fields return `None`.
+pub fn decode_timestamp(value: u32) -> Option<String> {
+    if value == 0 {
+        return None;
+    }
+    let year = 1980 + (value >> 25);
+    let month = (value >> 21) & 0xF;
+    let day = (value >> 16) & 0x1F;
+    let hour = (value >> 11) & 0x1F;
+    let minute = (value >> 5) & 0x3F;
+    let second = (value & 0x1F) * 2;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}"
+    ))
+}
+
+/// Formats a valid signed seven-bit count of quarter-hour UTC offset steps.
+/// Without OffsetValid, the time is local to an unknown zone.
+pub fn decode_utc_offset(byte: u8) -> Option<String> {
+    if byte & UTC_OFFSET_VALID == 0 {
+        return None;
+    }
+    let steps = i32::from(((byte & 0x7F) << 1) as i8 >> 1);
+    let minutes = steps * MINUTES_PER_OFFSET_STEP;
+    let sign = if minutes < 0 { '-' } else { '+' };
+    let minutes = minutes.abs();
+    Some(format!("{sign}{:02}:{:02}", minutes / 60, minutes % 60))
+}
+
+/// A timestamp followed by its UTC offset only when the entry recorded one.
+pub fn decode_timestamp_with_offset(value: u32, offset: u8) -> Option<String> {
+    let time = decode_timestamp(value)?;
+    Some(match decode_utc_offset(offset) {
+        Some(offset) => time + offset.as_str(),
+        None => time,
+    })
+}
 
 /// Limits that a candidate entry set must respect when its checksum fails.
 #[derive(Clone, Copy, Debug)]
@@ -33,38 +189,44 @@ impl Limits {
 }
 
 /// A file entry set found in raw bytes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct EntrySet {
     pub offset: usize,
     pub name: String,
     pub in_use: bool,
     pub checksum_ok: bool,
+    pub attributes: u16,
+    pub is_dir: bool,
     pub first_cluster: u32,
     pub length: u64,
+    pub valid_length: u64,
+    pub no_fat_chain: bool,
+    pub created: Option<String>,
+    pub modified: Option<String>,
+    pub accessed: Option<String>,
     pub slots: usize,
 }
 
-fn u16_at(data: &[u8], offset: usize) -> u16 {
+/// Reads a little-endian word, panicking if the bytes are absent.
+pub fn u16_at(data: &[u8], offset: usize) -> u16 {
     u16::from_le_bytes([data[offset], data[offset + 1]])
 }
 
-fn u32_at(data: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes([
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ])
+/// Reads a little-endian double word, panicking if the bytes are absent.
+pub fn u32_at(data: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(data[offset..offset + 4].try_into().expect("four bytes"))
 }
 
-fn u64_at(data: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap_or([0; 8]))
+/// Reads a little-endian quad word, panicking if the bytes are absent.
+pub fn u64_at(data: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(data[offset..offset + 8].try_into().expect("eight bytes"))
 }
 
 /// SetChecksum over a whole set. Deleted entries clear InUse, so the bit is
 /// restored on each entry's first byte before summing; that lets a deleted
 /// set's stored checksum validate.
-fn set_checksum(set: &[u8]) -> u16 {
+pub fn set_checksum(set: &[u8]) -> u16 {
     let mut checksum = 0u16;
     for (index, &byte) in set.iter().enumerate() {
         if index == 2 || index == 3 {
@@ -140,8 +302,15 @@ pub fn parse_set(data: &[u8], position: usize, limits: Limits) -> Option<EntrySe
         name: String::from_utf16_lossy(&units),
         in_use: set[0] == TYPE_FILE,
         checksum_ok,
+        attributes,
+        is_dir: attributes & ATTRIBUTE_DIRECTORY != 0,
         first_cluster,
         length,
+        valid_length: u64_at(stream, 8),
+        no_fat_chain: stream[1] & STREAM_FLAG_NO_FAT_CHAIN != 0,
+        created: decode_timestamp_with_offset(u32_at(set, 8), set[22]),
+        modified: decode_timestamp_with_offset(u32_at(set, 12), set[23]),
+        accessed: decode_timestamp_with_offset(u32_at(set, 16), set[24]),
         slots,
     })
 }
@@ -165,4 +334,12 @@ pub fn find_sets(data: &[u8], search_end: usize, limits: Limits) -> Vec<EntrySet
         }
     }
     found
+}
+
+/// Location of the first allocation bitmap entry, without validating its flags,
+/// geometry, or preceding directory end markers.
+pub fn find_bitmap_entry(root: &[u8]) -> Option<(u32, u64)> {
+    root.chunks_exact(ENTRY_SIZE)
+        .find(|entry| entry[0] == TYPE_BITMAP)
+        .map(|entry| (u32_at(entry, 20), u64_at(entry, 24)))
 }

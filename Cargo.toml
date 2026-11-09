@@ -22,6 +22,7 @@ required-features = ["cli"]
 
 [dependencies]
 rust-fs-core = "=0.4.3"
+serde = { version = "=1.0.229", features = ["derive"] }
 
 [dev-dependencies]
 unicode-normalization = "=0.1.24"
