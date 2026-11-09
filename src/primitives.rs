@@ -3,6 +3,36 @@
 //!
 //! Field layout and checksum rules follow Microsoft's published exFAT
 //! specification.
+//!
+//! # Chains and allocation
+//!
+//! Volume-level format operations are exposed as pure functions over borrowed
+//! geometry and slices: FAT bytes map to [`decode_fat`], the root directory to
+//! [`root_chain`], and stream claims to [`clusters_for`] and [`StreamClusters`].
+//! Geometry and bitmap operations map to [`valid_cluster`], [`cluster_offset`],
+//! [`is_allocated`] and [`allocation_class`]. The existing [`Limits`] carries the
+//! entry-set geometry without a volume wrapper.
+//! [`compute_predecessors`] builds the index consumed by [`predecessor`] and
+//! [`chain_head`]; [`chain_islands`] and [`compute_stats`] expose topology and
+//! allocation without requiring a device or a reporting layer. [`boot_check`]
+//! compares already-read boot copies using the checksum primitives above.
+//!
+//! Chain, island and allocation-class names describe general concepts. FAT and
+//! cluster-heap geometry retain their exFAT-defined names. These helpers are not
+//! strict-reader validators: broken chains yield partial walks, all nonzero FAT
+//! values affect allocation classes, and headless cycles are not islands. Raw
+//! FAT, bitmap and predecessor slices must cover every indexed cluster; malformed
+//! geometry and undersized slices retain unchecked arithmetic/index preconditions.
+
+#[path = "primitive_chains.rs"]
+mod chains;
+
+pub use chains::{
+    allocation_class, boot_check, chain_head, chain_islands, cluster_offset, clusters_for,
+    compute_predecessors, compute_stats, decode_fat, is_allocated, predecessor, root_chain,
+    valid_cluster, AllocationStats, BootCheck, ChainGroup, Island, StreamClusters, ALLOC_ALLOCATED,
+    ALLOC_FREE_FAT, ALLOC_FREE_ZERO, ISLAND_END_BROKEN, ISLAND_END_EOF, ISLAND_END_JOINS_ANOTHER,
+};
 
 use crate::{Error, Result};
 use serde::Serialize;
