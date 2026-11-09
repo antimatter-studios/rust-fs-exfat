@@ -14,6 +14,7 @@ crate-type = ["rlib", "staticlib"]
 
 [features]
 cli = ["rust-fs-core/cli"]
+test-support = []
 
 [[bin]]
 name = "rust-fs-exfat"
@@ -31,6 +32,11 @@ serde_json = "=1.0.149"
 
 [workspace]
 exclude = ["fuzz"]
+
+[[test]]
+name = "fixtures"
+path = "tests/fixtures.rs"
+required-features = ["test-support"]
 
 [[test]]
 name = "primitives"

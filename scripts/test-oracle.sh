@@ -236,5 +236,15 @@ PY
     device=''
     attached=0
 done
-EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces --test macos_fuzz_seeds -- --nocapture
+EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces --test macos_fuzz_seeds -- --nocapture
+for sector in 512 4096; do
+    image="$directory/reencoded-fixtures-$sector.dmg"
+    [ -f "$image" ] && [ ! -L "$image" ]
+    /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"
+    accept_receipt
+    /sbin/fsck_exfat -n "$device"
+    /usr/bin/hdiutil detach "$device"
+    device=''
+    attached=0
+done
 bash scripts/test-capi.sh "$directory/reference-512.dmg" "$directory/reference-4096.dmg"
