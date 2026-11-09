@@ -46,6 +46,23 @@ run on both 512- and 4096-byte-sector images in `chore test:oracle` without usin
 the strict decoder as an oracle. Synthetic primitive fixtures are limited to
 permissive and malformed cases, not evidence for healthy format correctness.
 
+The owner authorized the format-level volume algorithms for #27. The supplied
+`src/volume.rs` has SHA-256
+`225483f08ce15b5172f36abe353765159adfb4159b5596e467b55a26df787ab0`.
+FAT decoding, root and stream walks, allocation classes, predecessor indexing,
+chain heads, islands, allocation statistics and boot-copy checks are preserved
+as pure borrowed-slice functions. Existing primitive boot geometry, byte readers,
+checksums and format constants are reused. Device access, saved-structure models,
+hashing and application reports are not incorporated.
+
+`tests/oracle/primitive_chains.rs` compares healthy FAT entries, root and stream
+chains, offsets, allocation bits, predecessor indexes, islands and statistics
+with macOS-created images, including every read-only driver file hash. Both
+512- and 4096-byte-sector images pass the platform checker in the shared oracle
+harness. Damaged-only fixtures preserve partial walks, out-of-range FAT values,
+convergent predecessors, headless cycles, raw bitmap preconditions and boot-copy
+mismatches; no strict-reader validation is added.
+
 Image setup uses only the device in its own attachment receipt. There is no
 system-wide flush; detaching that image completes its writes. The safety guard
 has positive and negative checks and gates lint and the image-safety workflow.

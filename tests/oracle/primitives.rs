@@ -10,6 +10,9 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use unicode_normalization::UnicodeNormalization;
 
+#[path = "primitive_chains.rs"]
+mod chains;
+
 fn oracle_directory() -> PathBuf {
     std::env::var("EXFAT_ORACLE_DIR")
         .expect("run chore test:oracle on macOS to create independent reference images")
