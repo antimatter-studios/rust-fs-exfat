@@ -208,6 +208,36 @@ pub fn special(kind: u8, first: u32, length: u64) -> Vec<u8> {
     entry
 }
 
+/// Encodes the first allocation-bitmap entry, leaving flags and reserved bytes zero.
+pub fn bitmap_entry(first: u32, length: u64) -> Vec<u8> {
+    special(0x81, first, length)
+}
+
+/// Named boot-sector fields, distinct from the extended-sector signatures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootField {
+    /// Eight-byte filesystem name at offsets 3 through 10.
+    FileSystemName,
+    /// Two-byte little-endian VolumeFlags at offsets 106 and 107.
+    VolumeFlags,
+    /// Two-byte boot signature at offsets 510 and 511, even on larger sectors.
+    BootSignature,
+}
+
+/// Replaces a named field in a sector or boot region, retaining all other bytes.
+///
+/// Checksums are not resealed and other boot copies are not updated. Panics when
+/// the supplied value has the wrong field width or the buffer is too short.
+pub fn boot_field(mut sector: Vec<u8>, field: BootField, value: &[u8]) -> Vec<u8> {
+    let range = match field {
+        BootField::FileSystemName => 3..11,
+        BootField::VolumeFlags => 106..108,
+        BootField::BootSignature => 510..512,
+    };
+    sector[range].copy_from_slice(value);
+    sector
+}
+
 /// Builds a volume with a live tree, an orphan tree and every damage class.
 pub fn build_volume() -> Vec<u8> {
     let mut builder = Builder::new();
