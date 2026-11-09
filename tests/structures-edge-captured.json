@@ -1,0 +1,113 @@
+{
+  "backup_short": {
+    "error": "backup boot sector: boot sector is shorter than 512 bytes"
+  },
+  "backup_unusable_geometry": {
+    "backupBoot": {
+      "bytesPerSectorShift": 255,
+      "clusterCount": 200,
+      "clusterHeapOffset": 32,
+      "fatLength": 8,
+      "fatOffset": 24,
+      "fileSystemName": "EXFAT   ",
+      "numberOfFats": 1,
+      "partitionOffset": 0,
+      "percentInUse": 59,
+      "revision": 256,
+      "rootCluster": 3,
+      "sectorsPerClusterShift": 255,
+      "signatureOk": true,
+      "volumeFlags": 0,
+      "volumeLength": 1632,
+      "volumeSerial": 2882343476
+    },
+    "boot": {
+      "bytesPerSectorShift": 9,
+      "clusterCount": 200,
+      "clusterHeapOffset": 32,
+      "fatLength": 8,
+      "fatOffset": 24,
+      "fileSystemName": "EXFAT   ",
+      "numberOfFats": 1,
+      "partitionOffset": 0,
+      "percentInUse": 5,
+      "revision": 256,
+      "rootCluster": 3,
+      "sectorsPerClusterShift": 3,
+      "signatureOk": true,
+      "volumeFlags": 0,
+      "volumeLength": 1632,
+      "volumeSerial": 2882343476
+    },
+    "bootCheck": {
+      "backupComputed": 2321740222,
+      "backupStored": 2309452222,
+      "mainComputed": 2309452222,
+      "mainStored": 2309452222,
+      "regionsIdentical": false
+    },
+    "rootClusters": [
+      3
+    ]
+  },
+  "main_short": {
+    "error": "main boot sector: boot sector is shorter than 512 bytes"
+  },
+  "minimum_checksum_bytes": {
+    "backupBoot": {
+      "bytesPerSectorShift": 9,
+      "clusterCount": 200,
+      "clusterHeapOffset": 32,
+      "fatLength": 8,
+      "fatOffset": 24,
+      "fileSystemName": "EXFAT   ",
+      "numberOfFats": 1,
+      "partitionOffset": 0,
+      "percentInUse": 59,
+      "revision": 256,
+      "rootCluster": 3,
+      "sectorsPerClusterShift": 3,
+      "signatureOk": true,
+      "volumeFlags": 0,
+      "volumeLength": 1632,
+      "volumeSerial": 2882343476
+    },
+    "boot": {
+      "bytesPerSectorShift": 9,
+      "clusterCount": 200,
+      "clusterHeapOffset": 32,
+      "fatLength": 8,
+      "fatOffset": 24,
+      "fileSystemName": "EXFAT   ",
+      "numberOfFats": 1,
+      "partitionOffset": 0,
+      "percentInUse": 5,
+      "revision": 256,
+      "rootCluster": 3,
+      "sectorsPerClusterShift": 3,
+      "signatureOk": true,
+      "volumeFlags": 0,
+      "volumeLength": 1632,
+      "volumeSerial": 2882343476
+    },
+    "bootCheck": {
+      "backupComputed": 2309452222,
+      "backupStored": 2309452222,
+      "mainComputed": 2309452222,
+      "mainStored": 2309452222,
+      "regionsIdentical": false
+    },
+    "rootClusters": [
+      3
+    ]
+  },
+  "unsupported_saved": {
+    "error": "unsupported sector size 4096"
+  },
+  "wrong_backup": {
+    "error": "backup boot sector: no exFAT signature at offset 3: this is not an exFAT volume"
+  },
+  "wrong_main": {
+    "error": "main boot sector: no exFAT signature at offset 3: this is not an exFAT volume"
+  }
+}

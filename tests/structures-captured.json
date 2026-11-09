@@ -1,0 +1,851 @@
+{
+  "bitmap": [
+    [
+      2,
+      true
+    ],
+    [
+      3,
+      false
+    ],
+    [
+      9,
+      true
+    ],
+    [
+      10,
+      true
+    ],
+    [
+      17,
+      false
+    ],
+    [
+      18,
+      false
+    ],
+    [
+      200,
+      false
+    ],
+    [
+      4294967295,
+      false
+    ]
+  ],
+  "emptyBitmap": false,
+  "emptyFat": null,
+  "fat": [
+    [
+      0,
+      4294967288
+    ],
+    [
+      1,
+      4294967295
+    ],
+    [
+      2,
+      null
+    ],
+    [
+      3,
+      null
+    ],
+    [
+      200,
+      null
+    ],
+    [
+      4294967295,
+      null
+    ]
+  ],
+  "fixtures": {
+    "bitmap_entry": {
+      "length": 32,
+      "sha256": "409ccb81e826cbf50b1094e94a6ba93702297103b2862b39ce18f55cd84d2c5d"
+    },
+    "boot_signature": {
+      "length": 6144,
+      "sha256": "330c5f300f400350b28cc852162f117f42194c88d7ca7c4eea03dd5086a2f235"
+    },
+    "both_volume_flags": {
+      "length": 6144,
+      "sha256": "d7b15d64222e0c07f158f08219e5a415307e774a43d7a6d00aa6f7d53f18396f"
+    },
+    "file_system_name": {
+      "length": 6144,
+      "sha256": "bad251699f330096a6ddb7fbb5776a1278d10565ed34fb638f823876d44d601b"
+    },
+    "volume_flags": {
+      "length": 6144,
+      "sha256": "056aeed78cb30f5bbc1b2de3ed63e5e52c349b34e5891c6b8847cf53b69c2d73"
+    }
+  },
+  "rootMismatch": "the root directory copy does not match the FAT's root chain",
+  "structures": {
+    "damaged_backup_name": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ],
+        [
+          16384,
+          25
+        ]
+      ],
+      "result": {
+        "error": "backup boot sector: no exFAT signature at offset 3: this is not an exFAT volume",
+        "raw": {
+          "backup": {
+            "length": 6144,
+            "sha256": "a2db871a0b0df0172923e8ff7f7c25373be2a7b82e17b89dd86778bcfb4ba570"
+          },
+          "bitmap": {
+            "length": 25,
+            "sha256": "388b4a849a43f5c41f719a843826870f7173a9fbcf2252be0583d28d324430f4"
+          },
+          "fat": {
+            "length": 4096,
+            "sha256": "914b5582c0bda5c803c90f009276c0b003385494e440d808a9a7da725085386e"
+          },
+          "main": {
+            "length": 6144,
+            "sha256": "3295ae62d882c5f13dfbaac5eca7fb2c56283546f20404a9ce6fc82f1e8329e8"
+          },
+          "root": {
+            "length": 4096,
+            "sha256": "4d0cd3f929af905ab72d65a6478b995964400aae06de1505ea618513ae3b2549"
+          }
+        }
+      }
+    },
+    "damaged_trailer": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ],
+        [
+          16384,
+          25
+        ]
+      ],
+      "result": {
+        "backupBoot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 59,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "boot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 5,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": false,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "bootCheck": {
+          "backupComputed": 2309452222,
+          "backupStored": 2309452222,
+          "mainComputed": 161968362,
+          "mainStored": 2309452222,
+          "regionsIdentical": false
+        },
+        "fat": {
+          "length": 4096,
+          "sha256": "914b5582c0bda5c803c90f009276c0b003385494e440d808a9a7da725085386e"
+        },
+        "raw": {
+          "backup": {
+            "length": 6144,
+            "sha256": "ac537e596d9d6634ceb572afacb7d676f5acfed00f77a33734069db9e286dc5c"
+          },
+          "bitmap": {
+            "length": 25,
+            "sha256": "388b4a849a43f5c41f719a843826870f7173a9fbcf2252be0583d28d324430f4"
+          },
+          "fat": {
+            "length": 4096,
+            "sha256": "914b5582c0bda5c803c90f009276c0b003385494e440d808a9a7da725085386e"
+          },
+          "main": {
+            "length": 6144,
+            "sha256": "330c5f300f400350b28cc852162f117f42194c88d7ca7c4eea03dd5086a2f235"
+          },
+          "root": {
+            "length": 4096,
+            "sha256": "4d0cd3f929af905ab72d65a6478b995964400aae06de1505ea618513ae3b2549"
+          }
+        },
+        "requiredBitmapLength": 25,
+        "rootClusters": [
+          3
+        ]
+      }
+    },
+    "fragmented_root": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ],
+        [
+          28672,
+          4096
+        ],
+        [
+          16384,
+          25
+        ]
+      ],
+      "result": {
+        "backupBoot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 59,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "boot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 5,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "bootCheck": {
+          "backupComputed": 2309452222,
+          "backupStored": 2309452222,
+          "mainComputed": 2309452222,
+          "mainStored": 2309452222,
+          "regionsIdentical": false
+        },
+        "fat": {
+          "length": 4096,
+          "sha256": "da7595e77cf118608041ec306a6cc8edcce9e3e637945c1b9d0de6adec1db04c"
+        },
+        "raw": {
+          "backup": {
+            "length": 6144,
+            "sha256": "ac537e596d9d6634ceb572afacb7d676f5acfed00f77a33734069db9e286dc5c"
+          },
+          "bitmap": {
+            "length": 25,
+            "sha256": "388b4a849a43f5c41f719a843826870f7173a9fbcf2252be0583d28d324430f4"
+          },
+          "fat": {
+            "length": 4096,
+            "sha256": "da7595e77cf118608041ec306a6cc8edcce9e3e637945c1b9d0de6adec1db04c"
+          },
+          "main": {
+            "length": 6144,
+            "sha256": "3295ae62d882c5f13dfbaac5eca7fb2c56283546f20404a9ce6fc82f1e8329e8"
+          },
+          "root": {
+            "length": 8192,
+            "sha256": "b2310c8d8712c52d284d01543f704b3ec7fdbd0b042fffc27f6caf61db3fb055"
+          }
+        },
+        "requiredBitmapLength": 25,
+        "rootClusters": [
+          3,
+          5
+        ]
+      }
+    },
+    "invalid_root": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ]
+      ],
+      "result": {
+        "error": "root directory has no allocation bitmap entry"
+      }
+    },
+    "missing_bitmap": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ]
+      ],
+      "result": {
+        "error": "root directory has no allocation bitmap entry"
+      }
+    },
+    "normal": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ],
+        [
+          16384,
+          25
+        ]
+      ],
+      "result": {
+        "backupBoot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 59,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "boot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 5,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "bootCheck": {
+          "backupComputed": 2309452222,
+          "backupStored": 2309452222,
+          "mainComputed": 2309452222,
+          "mainStored": 2309452222,
+          "regionsIdentical": false
+        },
+        "fat": {
+          "length": 4096,
+          "sha256": "914b5582c0bda5c803c90f009276c0b003385494e440d808a9a7da725085386e"
+        },
+        "raw": {
+          "backup": {
+            "length": 6144,
+            "sha256": "ac537e596d9d6634ceb572afacb7d676f5acfed00f77a33734069db9e286dc5c"
+          },
+          "bitmap": {
+            "length": 25,
+            "sha256": "388b4a849a43f5c41f719a843826870f7173a9fbcf2252be0583d28d324430f4"
+          },
+          "fat": {
+            "length": 4096,
+            "sha256": "914b5582c0bda5c803c90f009276c0b003385494e440d808a9a7da725085386e"
+          },
+          "main": {
+            "length": 6144,
+            "sha256": "3295ae62d882c5f13dfbaac5eca7fb2c56283546f20404a9ce6fc82f1e8329e8"
+          },
+          "root": {
+            "length": 4096,
+            "sha256": "4d0cd3f929af905ab72d65a6478b995964400aae06de1505ea618513ae3b2549"
+          }
+        },
+        "requiredBitmapLength": 25,
+        "rootClusters": [
+          3
+        ]
+      }
+    },
+    "oversized_bitmap": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ],
+        [
+          16384,
+          33
+        ]
+      ],
+      "result": {
+        "backupBoot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 59,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "boot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 5,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "bootCheck": {
+          "backupComputed": 2309452222,
+          "backupStored": 2309452222,
+          "mainComputed": 2309452222,
+          "mainStored": 2309452222,
+          "regionsIdentical": false
+        },
+        "fat": {
+          "length": 4096,
+          "sha256": "914b5582c0bda5c803c90f009276c0b003385494e440d808a9a7da725085386e"
+        },
+        "raw": {
+          "backup": {
+            "length": 6144,
+            "sha256": "ac537e596d9d6634ceb572afacb7d676f5acfed00f77a33734069db9e286dc5c"
+          },
+          "bitmap": {
+            "length": 33,
+            "sha256": "7324b5c72b51bb5d4c180f1109cfd347b60473882145841c39f3e584576296f9"
+          },
+          "fat": {
+            "length": 4096,
+            "sha256": "914b5582c0bda5c803c90f009276c0b003385494e440d808a9a7da725085386e"
+          },
+          "main": {
+            "length": 6144,
+            "sha256": "3295ae62d882c5f13dfbaac5eca7fb2c56283546f20404a9ce6fc82f1e8329e8"
+          },
+          "root": {
+            "length": 4096,
+            "sha256": "8c2c83ef4f92075e7b6b89603daa1bf3d023b3d5da86c67735f7a4533b8edd00"
+          }
+        },
+        "requiredBitmapLength": 25,
+        "rootClusters": [
+          3
+        ]
+      }
+    },
+    "read_failure_1": {
+      "reads": [
+        [
+          0,
+          6144
+        ]
+      ],
+      "result": {
+        "error": "reading main boot region: capture read failure"
+      }
+    },
+    "read_failure_2": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ]
+      ],
+      "result": {
+        "error": "reading backup boot region: capture read failure"
+      }
+    },
+    "read_failure_3": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ]
+      ],
+      "result": {
+        "error": "reading FAT: capture read failure"
+      }
+    },
+    "read_failure_4": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ]
+      ],
+      "result": {
+        "error": "reading root directory: capture read failure"
+      }
+    },
+    "read_failure_5": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ],
+        [
+          16384,
+          25
+        ]
+      ],
+      "result": {
+        "error": "reading allocation bitmap: capture read failure"
+      }
+    },
+    "rounded_bitmap": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ]
+      ],
+      "result": {
+        "error": "allocation bitmap holds 25 bytes, volume needs 26"
+      }
+    },
+    "short_bitmap": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          4096
+        ],
+        [
+          20480,
+          4096
+        ]
+      ],
+      "result": {
+        "error": "allocation bitmap holds 24 bytes, volume needs 25"
+      }
+    },
+    "unsupported_sector": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ]
+      ],
+      "result": {
+        "error": "unsupported sector size 4096"
+      }
+    },
+    "wrong_name": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ]
+      ],
+      "result": {
+        "error": "main boot sector: no exFAT signature at offset 3: this is not an exFAT volume"
+      }
+    },
+    "zero_fat": {
+      "reads": [
+        [
+          0,
+          6144
+        ],
+        [
+          6144,
+          6144
+        ],
+        [
+          12288,
+          0
+        ],
+        [
+          20480,
+          4096
+        ],
+        [
+          16384,
+          25
+        ]
+      ],
+      "result": {
+        "backupBoot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 8,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 59,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "boot": {
+          "bytesPerSectorShift": 9,
+          "clusterCount": 200,
+          "clusterHeapOffset": 32,
+          "fatLength": 0,
+          "fatOffset": 24,
+          "fileSystemName": "EXFAT   ",
+          "numberOfFats": 1,
+          "partitionOffset": 0,
+          "percentInUse": 5,
+          "revision": 256,
+          "rootCluster": 3,
+          "sectorsPerClusterShift": 3,
+          "signatureOk": true,
+          "volumeFlags": 0,
+          "volumeLength": 1632,
+          "volumeSerial": 2882343476
+        },
+        "bootCheck": {
+          "backupComputed": 2309452222,
+          "backupStored": 2309452222,
+          "mainComputed": 2175234494,
+          "mainStored": 2309452222,
+          "regionsIdentical": false
+        },
+        "fat": {
+          "length": 808,
+          "sha256": "33e15ec51f02d31aedb153489237b7938676d30e5a211a4498ae4910930e1a86"
+        },
+        "raw": {
+          "backup": {
+            "length": 6144,
+            "sha256": "ac537e596d9d6634ceb572afacb7d676f5acfed00f77a33734069db9e286dc5c"
+          },
+          "bitmap": {
+            "length": 25,
+            "sha256": "388b4a849a43f5c41f719a843826870f7173a9fbcf2252be0583d28d324430f4"
+          },
+          "fat": {
+            "length": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "main": {
+            "length": 6144,
+            "sha256": "28343f3ce2af319346f68bf0e79d300b73dedeb3e43b77ead16a2fcce47f04e2"
+          },
+          "root": {
+            "length": 4096,
+            "sha256": "4d0cd3f929af905ab72d65a6478b995964400aae06de1505ea618513ae3b2549"
+          }
+        },
+        "requiredBitmapLength": 25,
+        "rootClusters": [
+          3
+        ]
+      }
+    }
+  }
+}

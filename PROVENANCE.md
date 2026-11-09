@@ -1,5 +1,58 @@
 # Provenance
 
+## Permissive structure snapshots
+
+For #35, on 2026-11-09 the owner authorized the current Captain Salvage
+`crates/salvage-core/src/volume.rs`, `src/changes.rs` and synthetic tests as
+behavioral inputs. The application worktree was at revision
+`71ad79bb63976caa558fd786e43e1b640c27cab9`, with its existing uncommitted
+`refactor/exfat-remove` changes. The files read had these SHA-256 digests:
+
+- `volume.rs`: `02ed137a7735778679b69bbc22860da30b36e0fbfc1ee886d07a72dd2587d3d2`.
+- `changes.rs`: `39921c5dd08711f17aa0ca9b6a485a6255c26b7575b1af2c44bdeb7ec09ca4bd`.
+- Current `tests/synthetic.rs`: `bffe9110c35726c061ac1ad64ea96f8f51c8edc77d2df31a87f9aca221439380`.
+
+Before the driver implementation, a standalone Rust program called the actual
+application's `Volume::read_structures` and `Volume::from_structures`. It used
+the original synthetic builder definitions extracted unchanged from that
+revision, whose complete source-file digest is recorded below for #33.
+The two private snapshot accessors from the current `changes.rs` were extracted
+unchanged and executed in the same program. No expected output was generated
+by the new driver APIs.
+
+`tests/structures-captured.json` records raw lengths and SHA-256 digests, exact
+read offsets/order/lengths, decoded geometry, boot reports, bitmap minimums,
+diagnostic text and snapshot boundary results. Its SHA-256 is
+`80c51ee0faa199d861cfaef0034f573658231f60dbf2f71ae7467a1ef1357c10`.
+The cases include damaged signatures/checksums, an unusable backup name, a
+fragmented root, a zero-length FAT, absent/undersized/oversized bitmap entries,
+rounding at 201 clusters and an injected failure at each of the five reads.
+The fixture captures preserve the bitmap entry and raw mutations at the
+filesystem name (3..11), both VolumeFlags bytes (106..108) and boot signature
+(510..512), without resealing boot checksums.
+
+Additional application captures in `tests/structures-edge-captured.json`
+(SHA-256 `57ec636a9af37b19a70b3d70a2ff67c623cbca54988125c05620c23fdc68281d`)
+pin saved-copy errors and acceptance of a partial checksum sector containing
+only its first stored word. Backup geometry remains raw rather than imposing
+the main sector-size rule on it. New representability checks return diagnostics
+where legacy unchecked arithmetic or slicing would panic; they add no arbitrary
+volume-size limit. Out-of-snapshot FAT words return `None`; bitmap bits return
+`false`, without strict cluster/value validation. Reserved bitmap clusters below
+two also return `false` instead of underflowing.
+
+The macOS oracle checks the loader against formatter-produced 512-byte-sector
+structures, raw FAT words and allocation bits. It explicitly confirms the
+fixed-sector loader rejects a 4096-byte-sector image rather than interpreting
+it as 512-byte sectors. Named bitmap-entry bytes and boot-field boundaries are
+checked against newly formatted images at both sector sizes. Damaged structures
+have captured compatibility evidence, not platform acceptance evidence.
+
+The application's existing 171 tests and unchanged `scripts/parity.sh` pass.
+They also pass in an isolated copy wired to the new loader, inspection,
+checked-accessor and fixture APIs; all three existing parity references remain
+byte-identical. The original application worktree and references are untouched.
+
 ## Test-support encoders
 
 For #33, on 2026-11-09 the owner authorized the supplied `tests/synthetic.rs`

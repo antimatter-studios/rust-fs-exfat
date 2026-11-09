@@ -23,9 +23,24 @@
 //! values affect allocation classes, and headless cycles are not islands. Raw
 //! FAT, bitmap and predecessor slices must cover every indexed cluster; malformed
 //! geometry and undersized slices retain unchecked arithmetic/index preconditions.
+//!
+//! [`read_structures`] loads raw fixed-512-byte-sector snapshots through a
+//! read-only callback. [`inspect_structures`] decodes saved copies and reports
+//! boot checksums and signatures without enforcing strict-reader validity.
+//! [`bitmap_location`] checks only the declared bitmap's minimum byte length.
+//! [`checked_fat_entry`] and [`checked_bitmap_bit`] accept incomplete snapshots
+//! without imposing volume geometry or interpreting reserved FAT values.
 
 #[path = "primitive_chains.rs"]
 mod chains;
+
+#[path = "primitive_structures.rs"]
+mod structures;
+
+pub use structures::{
+    bitmap_location, checked_bitmap_bit, checked_fat_entry, inspect_structures, read_structures,
+    BitmapLocation, StructureCopy, StructureError, StructureGeometry,
+};
 
 pub use chains::{
     allocation_class, boot_check, chain_head, chain_islands, cluster_offset, clusters_for,

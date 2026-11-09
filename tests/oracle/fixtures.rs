@@ -14,6 +14,79 @@ fn length(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
+#[test]
+fn permissive_loading_and_checked_snapshots_agree_with_platform_structures() {
+    use fs_exfat::primitives::{
+        checked_bitmap_bit, checked_fat_entry, inspect_structures, read_structures,
+    };
+
+    for sector in [512, 4096] {
+        let reference = Reference::open(sector);
+        let loaded = read_structures(|offset, output| {
+            let start = offset as usize;
+            output.copy_from_slice(&reference.image[start..start + output.len()]);
+            Ok(())
+        });
+        if sector == 4096 {
+            assert_eq!(
+                loaded.unwrap_err().to_string(),
+                "unsupported sector size 4096"
+            );
+            continue;
+        }
+        let loaded = loaded.unwrap();
+        let geometry = inspect_structures(&loaded).unwrap();
+        assert_eq!(geometry.boot.bytes_per_sector(), sector as u64);
+        assert_eq!(geometry.boot.cluster_size(), reference.cluster as u64);
+        assert_eq!(loaded.main, reference.image[..sector * 12]);
+        assert_eq!(loaded.backup, reference.image[sector * 12..sector * 24]);
+        assert_eq!(
+            loaded.fat,
+            reference.image
+                [reference.fat..reference.fat + word(&reference.image, 84) as usize * sector]
+        );
+        assert_eq!(loaded.root, reference.root().0);
+        let entry = reference.system_entry(0x81);
+        let bitmap_start = reference.position(word(&entry, 20));
+        assert_eq!(
+            loaded.bitmap,
+            reference.image[bitmap_start..bitmap_start + length(&entry, 24) as usize]
+        );
+        for cluster in 2..geometry.boot.cluster_count + 2 {
+            assert_eq!(
+                checked_fat_entry(&loaded.fat, cluster as usize),
+                Some(word(&reference.image, reference.fat + cluster as usize * 4))
+            );
+            let index = (cluster - 2) as usize;
+            assert_eq!(
+                checked_bitmap_bit(&loaded.bitmap, cluster),
+                reference.image[bitmap_start + index / 8] & (1 << (index % 8)) != 0
+            );
+        }
+    }
+}
+
+#[test]
+fn named_fixture_fields_match_formatter_entry_bytes_and_boot_offsets() {
+    use fs_exfat::fixtures::{bitmap_entry, boot_field, BootField};
+
+    for sector in [512, 4096] {
+        let reference = Reference::open(sector);
+        let entry = reference.system_entry(0x81);
+        assert_eq!(bitmap_entry(word(&entry, 20), length(&entry, 24)), entry);
+        for (field, start, length) in [
+            (BootField::FileSystemName, 3, 8),
+            (BootField::VolumeFlags, 106, 2),
+            (BootField::BootSignature, 510, 2),
+        ] {
+            let original = reference.image[..sector * 12].to_vec();
+            let mut expected = original.clone();
+            expected[start..start + length].fill(0xa5);
+            assert_eq!(boot_field(original, field, &vec![0xa5; length]), expected);
+        }
+    }
+}
+
 fn directory() -> PathBuf {
     std::env::var("EXFAT_ORACLE_DIR")
         .expect("run chore test:oracle on macOS to create independent reference images")

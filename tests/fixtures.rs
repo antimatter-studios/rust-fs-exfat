@@ -154,3 +154,39 @@ fn resealed_matches_captured_bytes() {
         set
     });
 }
+
+#[test]
+fn named_bitmap_entry_matches_the_independent_capture() {
+    captured("bitmap_entry", &bitmap_entry(BITMAP_CLUSTER, 25));
+}
+
+#[test]
+fn named_boot_field_mutations_match_captured_bytes_without_resealing() {
+    let captures: serde_json::Value =
+        serde_json::from_str(include_str!("structures-captured.json")).unwrap();
+    for (name, field, bytes) in [
+        (
+            "file_system_name",
+            BootField::FileSystemName,
+            &b"\0XFAT   "[..],
+        ),
+        ("volume_flags", BootField::VolumeFlags, &[2, 0][..]),
+        (
+            "both_volume_flags",
+            BootField::VolumeFlags,
+            &[0xa5, 0x5a][..],
+        ),
+        ("boot_signature", BootField::BootSignature, &[0, 0][..]),
+    ] {
+        let region = boot_field(Builder::new().image[..SECTOR * 12].to_vec(), field, bytes);
+        assert_eq!(
+            region.len(),
+            captures["fixtures"][name]["length"].as_u64().unwrap() as usize
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&region)),
+            captures["fixtures"][name]["sha256"],
+            "{name}"
+        );
+    }
+}

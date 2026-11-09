@@ -6,6 +6,10 @@ mod parsing;
 #[path = "primitive_cases/chains.rs"]
 mod chains;
 
+#[cfg(feature = "test-support")]
+#[path = "primitive_cases/structures.rs"]
+mod structures;
+
 const TYPE_FILE: u8 = 0x85;
 const TYPE_FILE_DELETED: u8 = 0x05;
 const TYPE_STREAM: u8 = 0xC0;
