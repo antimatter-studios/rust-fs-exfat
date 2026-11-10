@@ -1,3 +1,5 @@
+#[path = "file/scale.rs"]
+mod scale;
 mod support;
 
 use fs_core::BlockRead;

@@ -17,8 +17,6 @@ real disk. Known limits:
 
 - A raw device with 4096-byte sectors cannot be read; its block node can
   ([#20](https://github.com/antimatter-studios/rust-fs-exfat/issues/20)).
-- A file over 1,048,576 clusters is refused, not misread
-  ([#21](https://github.com/antimatter-studios/rust-fs-exfat/issues/21)).
 - The macOS driver keeps original bytes up to the next sector boundary past an
   unaligned ValidDataLength. This reader returns zeros from the exact length, as the
   specification requires, so the two differ on such a file.
@@ -48,6 +46,21 @@ directory workspace budgeting and the complete-report requirement stay in
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).
+
+File reads and chain walks are bounded by the volume's cluster count, not a fixed
+million-cluster cap. Contiguous streams retain only their cluster range; opening
+them still validates every allocation bit and rejects system-cluster overlap.
+FAT-linked streams retain a four-byte index per cluster and use constant-space
+cycle detection. `ReadLimits::max_metadata_bytes` bounds each metadata buffer and
+each chain index independently, including reserved vector capacity; its default
+64 MiB permits up to 16,777,216 FAT-linked clusters, further bounded by the volume
+and any explicit `max_chain_clusters`. The default cluster cap is the volume's
+cluster count (`usize::MAX` before opening). Memory or cluster limits and
+allocation failures return explicit errors, never truncated files or chains.
+These are per-allocation limits, not a total process-memory ceiling. Simultaneously
+open files retain separate indexes; the allocation audit has its own total budget.
+Both stream layouts above 1,048,576 clusters are checked with macOS `fsck_exfat -n`
+and complete streamed SHA-256 comparisons against its read-only filesystem driver.
 
 ## Command-line tools
 

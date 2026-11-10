@@ -1,13 +1,13 @@
 use crate::directory::{DirectoryEntry, Stream};
 use crate::primitives;
-use crate::volume::Volume;
+use crate::volume::{StreamClusters, Volume};
 use crate::{Error, Result};
 use fs_core::BlockRead;
 
 pub struct File<'volume, Device: BlockRead> {
     volume: &'volume Volume<Device>,
     stream: Stream,
-    clusters: Vec<u32>,
+    clusters: StreamClusters,
 }
 
 impl<'volume, Device: BlockRead> File<'volume, Device> {
@@ -48,7 +48,7 @@ impl<'volume, Device: BlockRead> File<'volume, Device> {
         let cluster_size = self.volume.boot.cluster_size();
         for chunk in primitives::cluster_reads(offset, valid, cluster_size) {
             let index = usize::try_from(chunk.cluster_index).map_err(|_| Error::Bounds)?;
-            let cluster = *self
+            let cluster = self
                 .clusters
                 .get(index)
                 .ok_or(Error::Invalid("short file chain"))?;

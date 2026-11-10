@@ -10,8 +10,17 @@ struct Attachment(String, std::path::PathBuf);
 
 impl Attachment {
     fn new(image: &Image, readonly: bool) -> Self {
+        Self::attach(image, readonly, None)
+    }
+
+    fn attach(image: &Image, readonly: bool, mount: Option<&std::path::Path>) -> Self {
         let mut command = Command::new("/usr/bin/hdiutil");
-        command.args(["attach", "-nomount", "-nobrowse", "-plist"]);
+        command.args(["attach", "-nobrowse", "-plist"]);
+        if let Some(mount) = mount {
+            command.arg("-mountpoint").arg(mount);
+        } else {
+            command.arg("-nomount");
+        }
         if readonly {
             command.arg("-readonly");
         }
@@ -130,4 +139,60 @@ fn macos_agrees_on_a_directory_with_more_than_a_million_entries() {
     native_check(&image, true);
     let report = clean(image.check());
     assert_eq!(report["files"], u64::from(OLD_CAP) + 1);
+}
+
+#[test]
+fn large_files_match_fsck_and_streamed_read_only_macos_driver_hashes() {
+    use fs_exfat::volume::Volume;
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    for contiguous in [false, true] {
+        let image = Image::sparse(OLD_CAP + 4096, 0);
+        image.long_file(OLD_CAP + 1, contiguous);
+        let length = u64::from(OLD_CAP + 1) * 512;
+        let start = image.heap + image.allocated * 512;
+        for (offset, byte) in [
+            (0, 17),
+            (length / 2 + 13, 53),
+            (length - 513, 91),
+            (length - 1, 137),
+        ] {
+            image.file.write_all_at(&[byte], start + offset).unwrap();
+        }
+        native_check(&image, true);
+        let mount = image.directory.join("readonly-mount");
+        std::fs::create_dir(&mount).unwrap();
+        let attachment = Attachment::attach(&image, true, Some(&mount));
+        let mut native = std::fs::File::open(mount.join("long")).unwrap();
+        assert_eq!(native.metadata().unwrap().len(), length);
+        let mut native_hash = Sha256::new();
+        let mut buffer = [0; 64 * 1024];
+        loop {
+            let count = native.read(&mut buffer).unwrap();
+            if count == 0 {
+                break;
+            }
+            native_hash.update(&buffer[..count]);
+        }
+        drop(native);
+        drop(attachment);
+        let volume = Volume::open(fs_core::FileDevice::open(&image.path).unwrap()).unwrap();
+        let entry = volume.root_directory().unwrap().remove(0);
+        let file = volume.open_file(&entry).unwrap();
+        assert_eq!(file.len(), length);
+        let mut observed_hash = Sha256::new();
+        let mut offset = 0;
+        loop {
+            let count = file.read_at(offset, &mut buffer).unwrap();
+            if count == 0 {
+                break;
+            }
+            observed_hash.update(&buffer[..count]);
+            offset += count as u64;
+        }
+        assert_eq!(offset, length);
+        assert_eq!(observed_hash.finalize(), native_hash.finalize());
+    }
 }
