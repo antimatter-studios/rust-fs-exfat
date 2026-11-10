@@ -1,6 +1,7 @@
+use crate::device::AlignedDevice;
 use crate::volume::Volume;
 use crate::{Error, Result};
-use fs_core::{BlockRead, FileDevice, OwnedSlice, ReadOnlyDevice};
+use fs_core::{BlockRead, FileDevice, OwnedSlice};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ pub fn open_device<Device: BlockRead + 'static>(
         ));
     }
     let length = device.size_bytes() - offset;
-    let device: Arc<dyn BlockRead> = Arc::new(ReadOnlyDevice::new(device));
+    let device: Arc<dyn BlockRead> = Arc::new(AlignedDevice::new(device));
     Volume::open(OwnedSlice::new(device, offset, length))
 }
 

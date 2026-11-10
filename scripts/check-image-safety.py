@@ -58,6 +58,7 @@ def check(source):
     }
     device_commands = {
         query,
+        'EXFAT_ORACLE_DEVICE="$device" EXFAT_ORACLE_SECTOR="$sector" EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_device -- --nocapture',
         '/sbin/newfs_exfat -R -S "$sector" -b 4096 -v M1ORACLE "$device" | tee "$directory/format-$sector.txt"',
         '/sbin/fsck_exfat -n "$device"',
     }
@@ -154,7 +155,7 @@ def check(source):
             continue
         if re.search(r"diskutil|hdiutil|newfs_exfat|fsck_exfat", line) and line != tools:
             refuse("only the reviewed image commands and exact receipt-owned info query are permitted")
-        if re.search(r"\$device|\b(?:device|image|directory)\s*\+?=|\b(?:read|for|declare|typeset|export|local|unset)\b.*\b(?:device|image|directory)\b|printf\s+-v\s+(?:device|image|directory)\b", line):
+        if re.search(r"EXFAT_ORACLE_DEVICE|\$device|\b(?:device|image|directory)\s*\+?=|\b(?:read|for|declare|typeset|export|local|unset)\b.*\b(?:device|image|directory)\b|printf\s+-v\s+(?:device|image|directory)\b", line):
             refuse("a device or image binding outside its reviewed ownership boundary is forbidden")
     if active or receipt_pending:
         refuse("every attachment must retain its receipt through detachment")

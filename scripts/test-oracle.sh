@@ -235,6 +235,12 @@ PY
     /usr/bin/hdiutil detach "$device"
     device=''
     attached=0
+    /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"
+    accept_receipt
+    EXFAT_ORACLE_DEVICE="$device" EXFAT_ORACLE_SECTOR="$sector" EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_device -- --nocapture
+    /usr/bin/hdiutil detach "$device"
+    device=''
+    attached=0
 done
 for sector in 512 4096; do
     image="$directory/windows-$sector.dmg"
