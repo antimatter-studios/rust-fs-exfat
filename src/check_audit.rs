@@ -2,12 +2,12 @@ use crate::boot::{BootRegions, BootSector};
 use crate::check::CheckReport;
 use crate::device::Reader;
 use crate::directory::{self, Stream};
-use crate::metadata::{FatEntry, RootMetadata, SystemStream, UpcaseTable};
+use crate::metadata::{RootMetadata, SystemStream, UpcaseTable};
+use crate::primitives::{self, FatChainStep, FatEntryReport, FatValue, StreamReadError};
 use crate::{Error, Result};
 use fs_core::BlockRead;
 use std::mem::size_of;
 
-const CHUNK_BYTES: usize = 64 * 1024;
 const FIXED_BYTES: usize = 1024 * 1024;
 const WORKSPACE_BYTES: usize = 512 * 1024 * 1024;
 pub const MAX_AUDIT_MEMORY_BYTES: usize = 1537 * 1024 * 1024;
@@ -61,10 +61,7 @@ impl Budget {
 struct Fat<'reader, Device: BlockRead> {
     reader: &'reader Reader<Device>,
     boot: &'reader BootSector,
-    start: u64,
-    length: u64,
-    cached: u64,
-    bytes: [u8; CHUNK_BYTES],
+    window: primitives::FatWindow,
 }
 
 impl<'reader, Device: BlockRead> Fat<'reader, Device> {
@@ -72,30 +69,22 @@ impl<'reader, Device: BlockRead> Fat<'reader, Device> {
         Self {
             reader,
             boot,
-            start: (u64::from(boot.fat_offset)
-                + u64::from(boot.volume_flags & 1) * u64::from(boot.fat_length))
-                * boot.bytes_per_sector(),
-            length: u64::from(boot.fat_length) * boot.bytes_per_sector(),
-            cached: u64::MAX,
-            bytes: [0; CHUNK_BYTES],
+            window: primitives::FatWindow::new(
+                (u64::from(boot.fat_offset)
+                    + primitives::VolumeState::from_flags(boot.volume_flags).active_fat as u64
+                        * u64::from(boot.fat_length))
+                    * boot.bytes_per_sector(),
+                u64::from(boot.fat_length) * boot.bytes_per_sector(),
+                boot.cluster_count,
+            ),
         }
     }
 
-    fn entry(&mut self, cluster: u32) -> Result<FatEntry> {
+    fn entry(&mut self, cluster: u32) -> Result<FatEntryReport> {
         self.boot.cluster_offset(cluster)?;
-        let offset = u64::from(cluster) * 4;
-        let chunk = offset / CHUNK_BYTES as u64 * CHUNK_BYTES as u64;
-        if chunk != self.cached {
-            let length = (self.length - chunk).min(CHUNK_BYTES as u64) as usize;
-            self.reader
-                .read_at(self.start + chunk, &mut self.bytes[..length])?;
-            self.cached = chunk;
-        }
-        let position = (offset - chunk) as usize;
-        FatEntry::parse(
-            u32::from_le_bytes(self.bytes[position..position + 4].try_into().unwrap()),
-            self.boot.cluster_count,
-        )
+        self.window.entry(cluster, |offset, output| {
+            self.reader.read_at(offset, output)
+        })
     }
 }
 
@@ -133,22 +122,14 @@ struct Ownership {
 }
 
 impl Ownership {
-    fn claim(
-        &mut self,
-        cluster: u32,
-        fat: &Fat<'_, impl BlockRead>,
-        bitmap: Option<&[u8]>,
-    ) -> Result<()> {
-        fat.boot.cluster_offset(cluster)?;
-        let index = (cluster - 2) as usize;
-        let mask = 1 << (index % 8);
-        if bitmap.is_some_and(|bytes| bytes[index / 8] & mask == 0) {
+    fn claim(&mut self, cluster: u32, boot: &BootSector, bitmap: Option<&[u8]>) -> Result<()> {
+        boot.cluster_offset(cluster)?;
+        if bitmap.is_some_and(|bytes| !primitives::checked_bitmap_bit(bytes, cluster)) {
             return Err(Error::Invalid("stream uses a free cluster"));
         }
-        if self.bytes[index / 8] & mask != 0 {
+        if primitives::claim_bitmap_cluster(&mut self.bytes, cluster).ok_or(Error::Bounds)? {
             return Err(Error::Invalid("cross-linked allocation or FAT chain cycle"));
         }
-        self.bytes[index / 8] |= mask;
         self.count += 1;
         Ok(())
     }
@@ -163,29 +144,35 @@ impl Ownership {
         if !allocation.root && expected == 0 {
             return Ok(());
         }
-        let mut current = allocation.first;
+        let boot = fat.boot;
         let mut count = 0u64;
-        loop {
-            self.claim(current, fat, bitmap)?;
-            count += 1;
-            if allocation.contiguous {
-                if count == expected {
-                    break;
+        for step in primitives::walk_allocation(
+            allocation.first,
+            boot.cluster_count,
+            allocation.contiguous.then_some(expected),
+            |cluster| fat.entry(cluster),
+        ) {
+            match step? {
+                FatChainStep::Cluster(position) => {
+                    self.claim(position.cluster, boot, bitmap)?;
+                    count += 1;
                 }
-                current = current.checked_add(1).ok_or(Error::Bounds)?;
-            } else {
-                match fat.entry(current)? {
-                    FatEntry::End => break,
-                    FatEntry::Next(next) => current = next,
-                    FatEntry::Free | FatEntry::Bad => {
+                FatChainStep::Entry { entry, .. } => match entry.kind {
+                    FatValue::End => break,
+                    FatValue::Free | FatValue::Bad => {
                         return Err(Error::Invalid("free or bad cluster in FAT chain"));
                     }
-                }
-                if !allocation.root && count >= expected {
-                    return Err(Error::Invalid(
-                        "stream chain length differs from allocation",
-                    ));
-                }
+                    FatValue::Reserved => {
+                        return Err(Error::Invalid("reserved or out-of-range FAT entry"));
+                    }
+                    FatValue::Next(_) => {
+                        if !allocation.root && count >= expected {
+                            return Err(Error::Invalid(
+                                "stream chain length differs from allocation",
+                            ));
+                        }
+                    }
+                },
             }
         }
         if allocation.root {
@@ -203,81 +190,53 @@ impl Ownership {
 }
 
 struct Cursor {
-    allocation: Allocation,
-    cluster: u32,
-    within: u64,
-    position: u64,
-    bytes: [u8; CHUNK_BYTES],
-    start: usize,
-    end: usize,
+    stream: primitives::StreamCursor,
 }
 
 impl Cursor {
     fn new(allocation: Allocation) -> Self {
         Self {
-            allocation,
-            cluster: allocation.first,
-            within: 0,
-            position: 0,
-            bytes: [0; CHUNK_BYTES],
-            start: 0,
-            end: 0,
+            stream: primitives::StreamCursor::new(
+                allocation.first,
+                allocation.length,
+                allocation.contiguous,
+            ),
         }
     }
 
-    fn read(&mut self, fat: &mut Fat<'_, impl BlockRead>, mut output: &mut [u8]) -> Result<()> {
-        while !output.is_empty() {
-            if self.start == self.end {
-                if self.position == self.allocation.length {
-                    return Err(Error::Invalid("short allocation audit stream"));
+    fn read(&mut self, fat: &mut Fat<'_, impl BlockRead>, output: &mut [u8]) -> Result<()> {
+        let boot = fat.boot;
+        let reader = fat.reader;
+        self.stream
+            .read(
+                boot.cluster_size(),
+                |cluster| fat.entry(cluster),
+                |cluster, within, bytes| {
+                    reader.read_at(boot.cluster_offset(cluster)? + within, bytes)
+                },
+                output,
+            )
+            .map_err(|error| match error {
+                StreamReadError::End => Error::Invalid("short allocation audit stream"),
+                StreamReadError::Link(entry) if entry.kind == FatValue::Reserved => {
+                    Error::Invalid("reserved or out-of-range FAT entry")
                 }
-                if self.within == fat.boot.cluster_size() {
-                    self.cluster = if self.allocation.contiguous {
-                        self.cluster.checked_add(1).ok_or(Error::Bounds)?
-                    } else if let FatEntry::Next(next) = fat.entry(self.cluster)? {
-                        next
-                    } else {
-                        return Err(Error::Invalid("short allocation audit chain"));
-                    };
-                    self.within = 0;
-                }
-                let length = (CHUNK_BYTES as u64)
-                    .min(fat.boot.cluster_size() - self.within)
-                    .min(self.allocation.length - self.position)
-                    as usize;
-                fat.reader.read_at(
-                    fat.boot.cluster_offset(self.cluster)? + self.within,
-                    &mut self.bytes[..length],
-                )?;
-                self.within += length as u64;
-                self.position += length as u64;
-                self.start = 0;
-                self.end = length;
-            }
-            let count = output.len().min(self.end - self.start);
-            output[..count].copy_from_slice(&self.bytes[self.start..self.start + count]);
-            self.start += count;
-            output = &mut output[count..];
-        }
-        Ok(())
+                StreamReadError::Link(_) => Error::Invalid("short allocation audit chain"),
+                StreamReadError::Failure(error) => error,
+            })
     }
 
     fn set(&mut self, fat: &mut Fat<'_, impl BlockRead>) -> Result<Option<Vec<u8>>> {
-        if self.position == self.allocation.length && self.start == self.end {
+        if self.stream.finished() {
             return Ok(None);
         }
         let mut primary = [0; 32];
         self.read(fat, &mut primary)?;
-        if primary[0] == 0 {
+        let record = primitives::directory_record(&primary).unwrap();
+        if record.entry_type.value == 0 {
             return Ok(None);
         }
-        let kind = primary[0];
-        let secondaries = if kind & 0x80 != 0 && (kind == 0x85 || kind & 0xe0 == 0xa0) {
-            usize::from(primary[1])
-        } else {
-            0
-        };
-        let mut bytes = vec![0; (secondaries + 1) * 32];
+        let mut bytes = vec![0; record.length];
         bytes[..32].copy_from_slice(&primary);
         self.read(fat, &mut bytes[32..])?;
         Ok(Some(bytes))
@@ -289,14 +248,14 @@ fn root_metadata(fat: &mut Fat<'_, impl BlockRead>, root: Allocation) -> Result<
     let mut system = [0; 5 * 32];
     let mut length = 0;
     while let Some(set) = cursor.set(fat)? {
-        let kind = set[0];
-        if matches!(kind, 0x81..=0x83 | 0xa0) {
+        let kind = primitives::EntryType::parse(&set).unwrap();
+        if matches!(kind.value, 0x81..=0x83 | 0xa0) {
             if length == system.len() {
                 return Err(Error::Invalid("duplicate root system metadata"));
             }
             system[length..length + 32].copy_from_slice(&set[..32]);
             length += 32;
-        } else if kind & 0x80 != 0 && kind != 0x85 && kind & 0xe0 != 0xa0 {
+        } else if kind.in_use && kind.value != 0x85 && (!kind.benign || kind.secondary) {
             return Err(Error::Unsupported("critical root directory entry"));
         }
     }
@@ -389,7 +348,8 @@ pub(super) fn check_reader<Device: BlockRead>(
     };
     ownership.walk(&mut fat, None, &mut root)?;
     let metadata = root_metadata(&mut fat, root)?;
-    let active = usize::from((boot.volume_flags & 1) as u8);
+    let state = primitives::VolumeState::from_flags(boot.volume_flags);
+    let active = state.active_fat;
     let mut bitmap_allocation = Allocation::system(
         metadata.bitmaps[active].ok_or(Error::Invalid("active bitmap missing"))?,
     );
@@ -402,12 +362,7 @@ pub(super) fn check_reader<Device: BlockRead>(
         "allocation bitmap exceeds allocation audit memory budget",
     )?;
     load(&mut fat, bitmap_allocation, &mut bitmap)?;
-    if ownership
-        .bytes
-        .iter()
-        .zip(&bitmap)
-        .any(|(owned, allocated)| owned & !allocated != 0)
-    {
+    if !primitives::bitmap_contains_all(&bitmap, &ownership.bytes) {
         return Err(Error::Invalid("system stream uses a free cluster"));
     }
     for (identity, stream) in metadata.bitmaps.iter().enumerate() {
@@ -458,19 +413,15 @@ pub(super) fn check_reader<Device: BlockRead>(
         }
         names.finish(&mut budget)?;
     }
-    if !boot.cluster_count.is_multiple_of(8) {
-        let last = bitmap.last_mut().unwrap();
-        *last &= (1 << (boot.cluster_count % 8)) - 1;
-    }
-    let allocated_clusters = bitmap.iter().map(|byte| u64::from(byte.count_ones())).sum();
+    let allocated_clusters = primitives::bitmap_count(&bitmap, boot.cluster_count);
     Ok(CheckReport {
         files,
         directories,
         allocated_clusters,
         referenced_clusters: ownership.count,
         unreferenced_clusters: allocated_clusters - ownership.count,
-        dirty: boot.volume_flags & 2 != 0,
-        media_failure: boot.volume_flags & 4 != 0,
+        dirty: state.dirty,
+        media_failure: state.media_failure,
         boot_differences: regions.differences,
     })
 }

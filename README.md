@@ -41,6 +41,10 @@ Strict FAT lookups, chain traversal and cluster read mapping delegate to
 `fs_exfat::primitives`. Its lazy chain reports retain raw FAT words and damage
 flags without requiring a full FAT snapshot. Volume and file APIs retain
 allocation, system-stream overlap, read-budget and ValidDataLength policy.
+The allocation audit also uses primitive FAT windows, constant-memory stream
+walks, entry framing and bitmap operations. Audit verdicts, ownership rejection,
+directory workspace budgeting and the complete-report requirement stay in
+`check.rs` and its `check_audit.rs` implementation.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).
