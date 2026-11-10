@@ -34,6 +34,9 @@ checksums and name hashes are decoded by `fs_exfat::primitives`. Its
 `RawEntrySet` retains damaged values and validity flags; strict directory
 validation and recovery's `parse_set`/`find_sets` apply their distinct policies
 to the same decoded fields.
+`fs_exfat::primitives` exposes raw bitmap, upcase-table and root-system-entry
+decoders with independent validity observations. Strict metadata APIs delegate
+decoding to these primitives and retain rejection policy and diagnostics.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).

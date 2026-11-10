@@ -12,6 +12,9 @@ mod parsing;
 #[path = "primitive_cases/entry_sets.rs"]
 mod entry_sets;
 
+#[path = "primitive_cases/metadata.rs"]
+mod metadata;
+
 #[path = "primitive_cases/chains.rs"]
 mod chains;
 

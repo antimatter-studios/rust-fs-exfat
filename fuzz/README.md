@@ -23,9 +23,9 @@ A crash found by the explorer is a bug. Commit its reproducer to
 |---|---|
 | `boot_sector` | Strict and primitive `BootSector::parse`, primitive `BootSectorHeader::parse` and `BootRegion::parse`, and strict `boot_checksum` |
 | `fat_entry` | `FatEntry::parse` |
-| `allocation_bitmap` | `AllocationBitmap::parse` |
-| `upcase_table` | `UpcaseTable::parse` |
-| `root_metadata` | `RootMetadata::parse` |
+| `allocation_bitmap` | Strict `AllocationBitmap::parse` and primitive `RawAllocationBitmap::parse` |
+| `upcase_table` | Strict `UpcaseTable::parse` and primitive `RawUpcaseTable::parse` |
+| `root_metadata` | Strict `RootMetadata::parse` and primitive `RawRootMetadata::parse` |
 | `directory` | `directory::parse`, primitive `EntryType::parse` and `RawEntrySet::parse` |
 | `timestamp` | `Timestamp::decode` |
 | `timestamps` | `Timestamps::parse` |

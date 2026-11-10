@@ -21,6 +21,7 @@ use fs_exfat::file::File;
 use fs_exfat::metadata::{
     checksum32, set_checksum, AllocationBitmap, FatEntry, RootMetadata, UpcaseTable,
 };
+use fs_exfat::primitives::{RawAllocationBitmap, RawRootMetadata, RawUpcaseTable};
 use fs_exfat::timestamp::{Timestamp, Timestamps};
 use fs_exfat::volume::{ReadLimits, Volume};
 use std::collections::HashSet;
@@ -125,7 +126,14 @@ pub fn allocation_bitmap(data: &[u8]) -> bool {
         return false;
     };
     let raw = u32::from_le_bytes(*head);
+    let primitive = RawAllocationBitmap::parse(bytes, raw);
+    assert_eq!(primitive.bytes, bytes);
+    assert_eq!(
+        primitive.length_ok,
+        bytes.len() as u64 == u64::from(raw).div_ceil(8)
+    );
     if let Ok(bitmap) = AllocationBitmap::parse(bytes.to_vec(), raw) {
+        assert!(primitive.length_ok);
         check_bitmap(&bitmap, bytes, raw);
     }
     if bytes.is_empty() {
@@ -152,12 +160,19 @@ fn check_bitmap(bitmap: &AllocationBitmap, bytes: &[u8], count: u32) {
 }
 
 pub fn upcase_table(data: &[u8]) -> bool {
+    let primitive = RawUpcaseTable::parse(data, checksum32(data));
+    assert_eq!(primitive.data, data);
+    assert!(primitive.checksum_ok);
+    assert!(primitive.mappings.len() <= 65536);
     let _ = UpcaseTable::parse(data, checksum32(data).wrapping_add(1)).map(|_| {
         panic!("a table with the wrong checksum was accepted");
     });
     let Ok(table) = UpcaseTable::parse(data, checksum32(data)) else {
         return false;
     };
+    assert!(primitive.length_ok && primitive.complete && primitive.ascii_ok);
+    assert_eq!(primitive.issue, None);
+    assert_eq!(table.map(u16::MAX), primitive.mappings[65535]);
     for unit in 0u16..128 {
         let expected = if (97..=122).contains(&unit) {
             unit - 32
@@ -182,6 +197,8 @@ pub fn root_metadata(data: &[u8]) -> bool {
         return false;
     };
     let fats = (flags & 3) + 1;
+    let primitive = RawRootMetadata::parse(entries);
+    assert_eq!(primitive.aligned, entries.len().is_multiple_of(32));
     let raw = RootMetadata::parse(entries, fats);
     let mut sealed = entries.to_vec();
     for entry in sealed.chunks_exact_mut(32) {
@@ -193,6 +210,7 @@ pub fn root_metadata(data: &[u8]) -> bool {
     let resealed = RootMetadata::parse(&sealed, fats);
     let mut accepted = false;
     for metadata in [raw, resealed].into_iter().flatten() {
+        assert!(primitive.aligned && primitive.bitmap_present[0] && primitive.upcase_present);
         accepted = true;
         assert!(metadata.bitmaps[0].is_some());
         assert_eq!(metadata.bitmaps[1].is_some(), fats == 2);

@@ -30,6 +30,10 @@
 //! [`bitmap_location`] checks only the declared bitmap's minimum byte length.
 //! [`checked_fat_entry`] and [`checked_bitmap_bit`] accept incomplete snapshots
 //! without imposing volume geometry or interpreting reserved FAT values.
+//!
+//! [`RawAllocationBitmap`], [`RawUpcaseTable`] and [`RawRootMetadata`] retain
+//! damaged metadata and report length, checksum, mapping and presence validity.
+//! The strict metadata API alone decides which observations require rejection.
 
 #[path = "primitive_chains.rs"]
 mod chains;
@@ -599,5 +603,277 @@ pub fn find_sets(data: &[u8], search_end: usize, limits: Limits) -> Vec<EntrySet
 pub fn find_bitmap_entry(root: &[u8]) -> Option<(u32, u64)> {
     root.chunks_exact(ENTRY_SIZE)
         .find(|entry| entry[0] == TYPE_BITMAP)
-        .map(|entry| (u32_at(entry, 20), u64_at(entry, 24)))
+        .map(|entry| {
+            let stream = SystemStream::from_entry(entry);
+            (stream.first_cluster, stream.length)
+        })
+}
+
+/// Rotating-add checksum used by the upcase stream.
+pub fn checksum32(data: &[u8]) -> u32 {
+    data.iter().fold(0u32, |sum, byte| {
+        sum.rotate_right(1).wrapping_add(u32::from(*byte))
+    })
+}
+
+/// Borrowed bitmap bytes, including streams of the wrong declared size.
+#[derive(Clone, Copy, Debug)]
+pub struct RawAllocationBitmap<'a> {
+    pub bytes: &'a [u8],
+    pub cluster_count: u32,
+    pub length_ok: bool,
+}
+
+impl<'a> RawAllocationBitmap<'a> {
+    pub fn parse(bytes: &'a [u8], cluster_count: u32) -> Self {
+        Self {
+            bytes,
+            cluster_count,
+            length_ok: bytes.len() as u64 == u64::from(cluster_count).div_ceil(8),
+        }
+    }
+
+    /// An available heap bit; `None` means outside the heap or missing bytes.
+    pub fn allocated(&self, cluster: u32) -> Option<bool> {
+        let index = cluster.checked_sub(FIRST_CLUSTER)?;
+        if index >= self.cluster_count {
+            return None;
+        }
+        self.bytes
+            .get(index as usize / 8)
+            .map(|byte| byte & (1 << (index % 8)) != 0)
+    }
+}
+
+/// The first structural problem encountered while expanding an upcase stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpcaseIssue {
+    TruncatedRun,
+    RunOutsideRange,
+    ExtraMappings,
+}
+
+/// Raw stream and bounded, possibly partial mappings, independent of validity.
+#[derive(Debug)]
+pub struct RawUpcaseTable<'a> {
+    pub data: &'a [u8],
+    pub mappings: Vec<u16>,
+    pub checksum: u32,
+    pub length_ok: bool,
+    pub checksum_ok: bool,
+    pub issue: Option<UpcaseIssue>,
+    pub complete: bool,
+    pub ascii_ok: bool,
+}
+
+impl<'a> RawUpcaseTable<'a> {
+    pub fn parse(data: &'a [u8], expected_checksum: u32) -> Self {
+        let checksum = checksum32(data);
+        let mut mappings = Vec::with_capacity(65536);
+        let mut words = data.chunks_exact(2).map(|word| u16_at(word, 0));
+        let mut issue = None;
+        while let Some(value) = words.next() {
+            if value == 0xffff && mappings.len() < 65535 {
+                let Some(count) = words.next().map(usize::from) else {
+                    issue = Some(UpcaseIssue::TruncatedRun);
+                    break;
+                };
+                let end = mappings.len() + count;
+                if count == 0 || end > 65536 {
+                    issue = Some(UpcaseIssue::RunOutsideRange);
+                    break;
+                }
+                mappings.extend((mappings.len()..end).map(|unit| unit as u16));
+            } else {
+                if mappings.len() == 65536 {
+                    issue = Some(UpcaseIssue::ExtraMappings);
+                    break;
+                }
+                mappings.push(value);
+            }
+        }
+        let complete = mappings.len() == 65536;
+        let ascii_ok = (0u16..128).all(|unit| {
+            let expected = if (97..=122).contains(&unit) {
+                unit - 32
+            } else {
+                unit
+            };
+            mappings.get(usize::from(unit)) == Some(&expected)
+        });
+        Self {
+            data,
+            mappings,
+            checksum,
+            length_ok: !data.is_empty() && data.len().is_multiple_of(2) && data.len() <= 131072,
+            checksum_ok: checksum == expected_checksum,
+            issue,
+            complete,
+            ascii_ok,
+        }
+    }
+}
+
+/// Raw system-stream location, without cluster or length policy.
+#[derive(Clone, Copy, Debug)]
+pub struct SystemStream {
+    pub first_cluster: u32,
+    pub length: u64,
+}
+
+impl SystemStream {
+    fn from_entry(entry: &[u8]) -> Self {
+        Self {
+            first_cluster: u32_at(entry, 20),
+            length: u64_at(entry, 24),
+        }
+    }
+}
+
+/// System-entry fields and local validity, without duplicate or required-entry policy.
+#[derive(Debug)]
+pub enum RootEntryKind {
+    Bitmap {
+        flags: u8,
+        id: usize,
+        flags_ok: bool,
+        stream: SystemStream,
+    },
+    Upcase {
+        stream: SystemStream,
+        checksum: u32,
+    },
+    Label {
+        length: u8,
+        units: Vec<u16>,
+        value: String,
+        length_ok: bool,
+        characters_ok: bool,
+        utf16_ok: bool,
+    },
+    Guid {
+        secondary_count: u8,
+        flags: u16,
+        value: [u8; 16],
+        checksum: u16,
+        checksum_ok: bool,
+    },
+    File {
+        secondary_count: u8,
+        complete: bool,
+    },
+    Benign {
+        secondary_count: u8,
+        complete: bool,
+    },
+    Unknown,
+}
+
+/// An entry retains its original InUse bit even when its fields are damaged.
+#[derive(Debug)]
+pub struct RawRootEntry {
+    pub entry_type: u8,
+    pub in_use: bool,
+    pub kind: RootEntryKind,
+}
+
+/// Root entries up to the end marker, with presence and alignment observations.
+/// Secondary sets are traversed as units; deleted primaries do not hide entries.
+#[derive(Debug)]
+pub struct RawRootMetadata {
+    pub aligned: bool,
+    pub entries: Vec<RawRootEntry>,
+    pub bitmap_present: [bool; 2],
+    pub upcase_present: bool,
+}
+
+impl RawRootMetadata {
+    pub fn parse(data: &[u8]) -> Self {
+        let mut result = Self {
+            aligned: data.len().is_multiple_of(ENTRY_SIZE),
+            entries: Vec::new(),
+            bitmap_present: [false; 2],
+            upcase_present: false,
+        };
+        let mut position: usize = 0;
+        while let Some(entry) = data.get(position..position.saturating_add(ENTRY_SIZE)) {
+            if entry[0] == 0 {
+                break;
+            }
+            position += ENTRY_SIZE;
+            let in_use = entry[0] & 0x80 != 0;
+            let next = position.saturating_add(usize::from(entry[1]) * ENTRY_SIZE);
+            let kind = match entry[0] | 0x80 {
+                0x81 => {
+                    let id = usize::from(entry[1] & 1);
+                    result.bitmap_present[id] |= in_use;
+                    RootEntryKind::Bitmap {
+                        flags: entry[1],
+                        id,
+                        flags_ok: entry[1] & !1 == 0,
+                        stream: SystemStream::from_entry(entry),
+                    }
+                }
+                0x82 => {
+                    result.upcase_present |= in_use;
+                    RootEntryKind::Upcase {
+                        stream: SystemStream::from_entry(entry),
+                        checksum: u32_at(entry, 4),
+                    }
+                }
+                0x83 => {
+                    let length = entry[1];
+                    let units: Vec<_> = (0..usize::from(length).min(11))
+                        .map(|index| u16_at(entry, 2 + index * 2))
+                        .collect();
+                    let characters_ok = units.iter().all(|unit| {
+                        *unit >= 32 && ![34, 42, 47, 58, 60, 62, 63, 92, 124].contains(unit)
+                    });
+                    let decoded = String::from_utf16(&units);
+                    let utf16_ok = decoded.is_ok();
+                    let value = decoded.unwrap_or_else(|_| String::from_utf16_lossy(&units));
+                    RootEntryKind::Label {
+                        length,
+                        units,
+                        value,
+                        length_ok: length <= 11,
+                        characters_ok,
+                        utf16_ok,
+                    }
+                }
+                0xa0 => RootEntryKind::Guid {
+                    secondary_count: entry[1],
+                    flags: u16_at(entry, 4),
+                    value: entry[6..22].try_into().expect("16 GUID bytes"),
+                    checksum: u16_at(entry, 2),
+                    checksum_ok: entry_set_checksum(entry) == u16_at(entry, 2),
+                },
+                0x85 => {
+                    if in_use {
+                        position = next;
+                    }
+                    RootEntryKind::File {
+                        secondary_count: entry[1],
+                        complete: next <= data.len(),
+                    }
+                }
+                kind if kind & 0x60 == 0x20 => {
+                    if in_use {
+                        position = next;
+                    }
+                    RootEntryKind::Benign {
+                        secondary_count: entry[1],
+                        complete: next <= data.len(),
+                    }
+                }
+                _ => RootEntryKind::Unknown,
+            };
+            result.entries.push(RawRootEntry {
+                entry_type: entry[0],
+                in_use,
+                kind,
+            });
+        }
+        result
+    }
 }

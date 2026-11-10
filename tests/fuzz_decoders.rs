@@ -44,19 +44,19 @@ const TARGETS: &[Target] = &[
     },
     Target {
         name: "allocation_bitmap",
-        decoders: &["AllocationBitmap::parse"],
+        decoders: &["AllocationBitmap::parse", "RawAllocationBitmap::parse"],
         run: shared::allocation_bitmap,
         rounds: 200,
     },
     Target {
         name: "upcase_table",
-        decoders: &["UpcaseTable::parse"],
+        decoders: &["UpcaseTable::parse", "RawUpcaseTable::parse"],
         run: shared::upcase_table,
         rounds: 200,
     },
     Target {
         name: "root_metadata",
-        decoders: &["RootMetadata::parse"],
+        decoders: &["RootMetadata::parse", "RawRootMetadata::parse"],
         run: shared::root_metadata,
         rounds: 400,
     },
