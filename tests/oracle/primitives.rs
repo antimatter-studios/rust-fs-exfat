@@ -41,7 +41,12 @@ fn reference(sector: u64) -> (Vec<u8>, BootSector) {
     (image, boot)
 }
 
-fn chain(image: &[u8], boot: &BootSector, first: u32, contiguous_length: Option<u64>) -> Vec<u8> {
+pub(super) fn chain(
+    image: &[u8],
+    boot: &BootSector,
+    first: u32,
+    contiguous_length: Option<u64>,
+) -> Vec<u8> {
     let mut current = first;
     let mut bytes = Vec::new();
     let mut seen = BTreeSet::new();

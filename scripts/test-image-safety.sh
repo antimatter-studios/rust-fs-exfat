@@ -45,6 +45,10 @@ variants = {
     'missing-fixture-validation': source.replace('    [ -f "$image" ] && [ ! -L "$image" ]\n', ''),
     'foreign-fixture': source.replace('image="$directory/reencoded-fixtures-$sector.dmg"', 'image="$foreign"'),
     'writable-fixture': source.replace('-readonly -nomount -plist "$image"', '-nomount -nobrowse -plist "$image"'),
+    'missing-windows-producer': source.replace('    /usr/bin/python3 scripts/build-windows-oracle.py "$image" "$directory/reference-$sector.dmg" "$sector"\n', ''),
+    'foreign-windows-image': source.replace('image="$directory/windows-$sector.dmg"', 'image="$foreign"'),
+    'writable-windows-image': source.replace('-readonly -nobrowse -mountpoint "$directory/windows-mount-$sector"', '-nobrowse -mountpoint "$directory/windows-mount-$sector"'),
+    'unvalidated-windows-image': source.replace('    [ -f "$image" ] && [ ! -L "$image" ]\n    mkdir "$directory/windows-mount-$sector"', '    mkdir "$directory/windows-mount-$sector"'),
 }
 for name, contents in variants.items():
     if contents == source:
@@ -54,6 +58,12 @@ PY
 for source_file in "$directory/other-verb.bad" "$directory/other-device.bad" "$directory/missing-plist.bad" "$directory/reassignment.bad" "$directory/foreign-receipt.bad" "$directory/receipt-reuse.bad" "$directory/foreign-image.bad" "$directory/foreign-detach.bad" "$directory/unowned-query.bad" "$directory/loop-rebinding.bad" "$directory/heredoc-device.bad" "$directory/purge.bad" "$directory/process-kill.bad" "$directory/libc-flush.bad" "$directory/missing-fixture-producer.bad" "$directory/missing-fixture-validation.bad" "$directory/foreign-fixture.bad" "$directory/writable-fixture.bad"; do
     if bash scripts/check-image-safety.sh "$source_file" > "$directory/rejected.log" 2>&1; then
         echo "image-safety: unsafe mutation was incorrectly accepted: $source_file" >&2
+        exit 1
+    fi
+done
+for source_file in "$directory/missing-windows-producer.bad" "$directory/foreign-windows-image.bad" "$directory/writable-windows-image.bad" "$directory/unvalidated-windows-image.bad"; do
+    if bash scripts/check-image-safety.sh "$source_file" > "$directory/rejected.log" 2>&1; then
+        echo "image-safety: unsafe Windows-layout mutation was incorrectly accepted: $source_file" >&2
         exit 1
     fi
 done

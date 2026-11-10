@@ -101,7 +101,10 @@ mounted read-only, including every path and file's SHA-256. Those oracle tests
 belong on a macOS CI job. Boot and metadata formatter/checker tests and read-only
 mounted label/GUID, complete directory-listing and every-file SHA-256/timestamp
 comparisons are implemented. Windows formatting is
-additional evidence if a suitable harness is available. No Linux VM is needed
+additional evidence if a suitable harness is available. The oracle also checks
+[spec-built Windows-layout fixtures](docs/windows-oracle.md), not images produced
+by Windows, at both sector sizes against the read-only macOS driver and checker.
+No Linux VM is needed
 for the macOS oracle contract.
 
 Only Microsoft's public specification and black-box reference tools are format
