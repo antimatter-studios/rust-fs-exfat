@@ -62,7 +62,7 @@ const TARGETS: &[Target] = &[
     },
     Target {
         name: "directory",
-        decoders: &["directory::parse"],
+        decoders: &["directory::parse", "EntryType::parse", "RawEntrySet::parse"],
         run: shared::directory,
         rounds: 200,
     },

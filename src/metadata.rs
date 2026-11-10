@@ -9,12 +9,7 @@ pub fn checksum32(data: &[u8]) -> u32 {
 }
 
 pub fn set_checksum(data: &[u8]) -> u16 {
-    data.iter()
-        .enumerate()
-        .filter(|(index, _)| !matches!(index, 2 | 3))
-        .fold(0u16, |sum, (_, byte)| {
-            sum.rotate_right(1).wrapping_add(u16::from(*byte))
-        })
+    crate::primitives::entry_set_checksum(data)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,11 +115,7 @@ impl UpcaseTable {
     }
 
     pub fn name_hash(&self, name: &[u16]) -> u16 {
-        name.iter()
-            .flat_map(|unit| self.map(*unit).to_le_bytes())
-            .fold(0u16, |sum, byte| {
-                sum.rotate_right(1).wrapping_add(u16::from(byte))
-            })
+        crate::primitives::name_hash(name, |unit| self.map(unit))
     }
 
     pub fn equal(&self, first: &[u16], second: &[u16]) -> bool {

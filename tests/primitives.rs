@@ -9,6 +9,9 @@ mod boot_layering;
 #[path = "primitive_cases/parse.rs"]
 mod parsing;
 
+#[path = "primitive_cases/entry_sets.rs"]
+mod entry_sets;
+
 #[path = "primitive_cases/chains.rs"]
 mod chains;
 
