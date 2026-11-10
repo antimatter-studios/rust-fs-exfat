@@ -76,5 +76,10 @@ name = "macos_interfaces"
 path = "tests/oracle/interfaces.rs"
 required-features = ["cli"]
 
+[[test]]
+name = "macos_device"
+path = "tests/oracle/device.rs"
+required-features = ["cli"]
+
 [profile.release]
 lto = "thin"

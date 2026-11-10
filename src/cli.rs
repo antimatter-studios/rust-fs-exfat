@@ -1,4 +1,5 @@
 use crate::check;
+use crate::device::AlignedDevice;
 use crate::directory::DirectoryEntry;
 use crate::file::File;
 use crate::interface;
@@ -7,7 +8,7 @@ use crate::timestamp::Timestamp;
 use crate::Error;
 use fs_core::cli::clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
 use fs_core::cli::{self, transfer, CliError, Family, Json, Outcome, Tool};
-use fs_core::{FileDevice, OwnedSlice, ReadOnlyDevice};
+use fs_core::{FileDevice, OwnedSlice};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
@@ -264,7 +265,7 @@ fn fsck_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
             "volume offset is outside the device",
         )));
     }
-    let device = std::sync::Arc::new(ReadOnlyDevice::new(device));
+    let device = std::sync::Arc::new(AlignedDevice::new(device));
     let report = check::check_device(OwnedSlice::new(device, offset, length - offset))
         .map_err(fsck_error)?;
     let healthy = report.healthy();
