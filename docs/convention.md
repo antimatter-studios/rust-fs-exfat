@@ -3,13 +3,17 @@
 ## 1. Purpose and scope
 
 A driver convention is a shared contract for driver layers, evidence and tests.
-It applies to every rust-fs filesystem driver and every rust-img image driver.
+It applies to every rust-fs filesystem driver and every rust-img block device
+driver.
 It is not an exFAT API specification. exFAT is the first implementation case.
 
 The eight agreed rules are in
 [#51](https://github.com/antimatter-studios/rust-fs-exfat/issues/51).
-This document records them without changing them. The numbered rules in the
-status table retain the issue's numbering. Section numbers organize this guide.
+This document records them with the owner's decisions in the comments on #51
+and [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52). Those
+decisions supersede the original second-driver wording of rule 6. The numbered
+rules in the status table retain the issue's numbering. Section numbers organize
+this guide.
 The convention does not require a read-only driver to gain write support.
 
 ## 2. Layers
@@ -34,6 +38,13 @@ Salvage is a peer of the normal APIs, not a mode of the file API.
 The extension row is optional, not a required hop. APIs may call primitives
 directly. Extensions also sit on primitives. They do not own another decoder.
 
+The diagram names filesystem APIs. A rust-img driver instead exposes a **block
+device API**: probe, open, the virtual-to-physical map and salvage of that map.
+Its output is a `BlockRead`, not another volume API. It uses the same primitive
+layering; its salvage adapter is a block device salvage trait. Filesystem
+salvage runs on any supplied `BlockRead`, whether from a raw device or a
+container.
+
 ### Primitive API
 
 Owns byte layouts, field decoding and format algorithms. It returns what the
@@ -49,7 +60,8 @@ These are examples, not a claim that all current helpers meet the convention.
 
 ### Volume API
 
-Owns volume-level operations: probe, open, mount, flush, label, UUID, capacity,
+The name "volume API" belongs to filesystem drivers (`rust-fs-*`), and the API
+takes a `BlockRead`. It owns probe, open, mount, flush, label, UUID, capacity,
 check, repair and format, where supported. It applies its documented strict
 policy to primitive results. It must not decode structures again or make
 salvage depend on a successful strict mount. Unsupported mutating operations
@@ -104,6 +116,12 @@ Primitives return what the bytes say and report damage. Strict APIs reject on
 top of the same primitives. The salvage path accepts damage and reports it.
 Damage alone is not a reason for a primitive or salvage operation to refuse
 otherwise recoverable evidence.
+
+**Primitive boundary — starting position, adjust as needed:** primitives return
+raw values with validity flags and never fail on damage; only the strict layer
+rejects damage. Helpers that skip checks have an `_unchecked` suffix and
+document the precondition the caller must verify. Operational failures below
+are distinct from damage rejection.
 
 The rejection rule is:
 
@@ -163,29 +181,59 @@ types are settled in
 The common trait must not expose exFAT names. Format knowledge stays in the
 driver, below the adapter.
 
+For rust-img drivers (qcow2, vhd, vhdx and vmdk), the same trait uses container
+vocabulary:
+
+- A **candidate** is a header, table entry or footer that may be valid, not a
+  directory entry.
+- The **tree** is the container's mapping from virtual offsets to physical
+  ones, such as qcow2 L1/L2 tables or VHD block allocation.
+- A **materialization plan** rebuilds the virtual disk from surviving extents.
+  The rust-img salvage result feeds filesystem salvage of the disk inside it
+  through a `BlockRead`.
+
+**Damage schema — starting position, adjust as needed:** evidence uses a shared
+core of kind, location, severity and source structure, plus format-specific
+details. exFAT defines the core first; extract the shared damage core when ext4
+arrives. That schema extraction does not move the salvage trait early.
+
 Read-only is a type property. No adapter method takes a writable source device.
 A runtime read-only flag is not a substitute. Materialization is not in-place
-repair. Any output destination is separate from the source; its exact contract
-belongs to #52. exFAT already accepts `BlockRead` and wraps devices in
+repair.
+
+**Trait shape — starting position, adjust as needed:** evidence and plan types
+are plain serializable data without handles. Large results stream to a
+caller-provided sink. The trait takes a `BlockRead`, never a path; the output
+sink must not be the source device. The exact signatures and source-alias
+prevention mechanism belong to #52. exFAT already accepts `BlockRead` and wraps
+devices in
 `ReadOnlyDevice` in [src/device.rs](../src/device.rs) and
 [src/interface.rs](../src/interface.rs). That alone does not prove the missing
 adapter read-only.
 
-Capability flags say what a driver lacks. Callers must be able to distinguish
-an unavailable capability from an empty successful result. Optional extensions
-are also behind flags. Flag names and granularity belong to #52. That issue
+**Capability flags — starting position, adjust as needed:** flags say what a
+driver lacks. An unsupported operation returns `Unsupported` naming the feature.
+An empty successful result always means nothing found, never not supported.
+Optional extensions are also behind flags. Flag names and granularity belong
+to #52. That issue
 expects no missing exFAT capabilities in the first version; this is a target,
 not an implemented fact.
 
-The trait lives in the driver until the agreed rule of three is met:
-**nothing goes into rust-fs-core until a second driver implements it**.
-This is rule 6's exact threshold, despite its name. It does not require three
-implementations. #52 explicitly keeps the first trait in this crate.
+The salvage trait stays in each driver crate until **both ext4 and NTFS
+implement it**; only then does it move to rust-fs-core. Rule of three means
+three drivers: exFAT, ext4 and NTFS. The owner settled this in the comments on
+#51 and #52, replacing the original second-driver threshold.
+
+The proving order is squashfs first for the read-only-format case (section 5a),
+then ext4 as the second implementation, testing a different on-disk design
+with extents and a journal, then NTFS as the third. Squashfs exercises rule 7;
+the core-extraction threshold specifically requires exFAT, ext4 and NTFS.
 
 ## 5. Common set and extension rule
 
-The common set stays small. A verb belongs there only if every filesystem can
-support its format-neutral meaning. It must describe evidence or an operation,
+The common set stays small. A verb belongs there only if every filesystem or
+block device driver can support its format-neutral meaning. It must describe
+evidence or an operation,
 not an exFAT structure. The six verbs above are the agreed starting set.
 Before adding another verb, check it against the other drivers' needs, as #52
 requires. If it does not pass that test, keep it as a flagged extension.
@@ -205,7 +253,9 @@ Existing exFAT work illustrates the boundary:
   `chain_islands` already provide supporting logic
   ([src/primitive_chains.rs](../src/primitive_chains.rs)), not the full report.
 - [#42](https://github.com/antimatter-studios/rust-fs-exfat/issues/42) remains
-  open, but compressed upcase decoding already exists in `UpcaseTable::parse`
+  open. **#42 — starting position, adjust as needed:** treat it as acceptance
+  work and reconcile its criteria against this convention first. Compressed
+  upcase decoding already exists in `UpcaseTable::parse`
   ([src/metadata.rs](../src/metadata.rs)). Lookup uses the volume table
   ([src/path.rs](../src/path.rs)). Do not treat the open issue as proof that
   decoding is absent. Move that decoding under primitives through
@@ -230,6 +280,10 @@ and materializing a plan still apply. Deleted-entry discovery and deleted-chain
 interpretation do not apply where the format has no such concept. Flags must
 make that distinction visible; absence is not an error or a clean scan result.
 
+Squashfs is the first read-only format to prove rule 7: its salvage surface
+omits deletion-specific parts, and its compressed blocks provide a validity
+check. This proof comes before ext4 and NTFS in the proving order.
+
 A read-only implementation is not the same as a read-only format. exFAT's
 current driver is read-only by type, yet its primitives recognize deleted entry
 sets ([src/primitives.rs](../src/primitives.rs)). exFAT therefore does not prove
@@ -240,7 +294,8 @@ behavior without inventing deleted-file support for those formats.
 
 [#53](https://github.com/antimatter-studios/rust-fs-exfat/issues/53) builds the
 reusable test set in this crate, with an exFAT runner. Every driver runs it
-against its own adapter and volume API. The reusable module contains no
+against its own adapter and strict API: the volume API for rust-fs drivers,
+the block device API for rust-img drivers. The reusable module contains no
 exFAT-specific names. It must check that:
 
 - Adapter verbs return consistent evidence across candidates, extents and trees.
@@ -248,6 +303,10 @@ exFAT-specific names. It must check that:
 - Salvage reports damaged input instead of rejecting it for that damage.
 - The strict API rejects the same damaged input under its validity contract.
 - Capability flags match behavior, including absent deletion-specific parts.
+- Unsupported operations name the feature in `Unsupported`; an empty result
+  means nothing found.
+- Evidence and plans serialize without handles; large results stream to the
+  caller's sink, which must not alias the source device.
 
 An unsupported capability is not a passing exercise of that capability.
 Existing exFAT primitive, strict-reader and read-only tests are supporting
@@ -259,9 +318,10 @@ evidence, not a substitute for this adapter suite
 ## 7. exFAT status against the eight rules
 
 Snapshot: main at `6b63a7d142626d0fcf9804514abf1defb4730924`, checked on
-2026-11-10. Every linked work item below was checked with `gh issue view`.
-All are open in this snapshot. #39 is an open PR, not a merged fix. Work in
-other branches does not count as implemented on main.
+2026-11-10. Work items #38 through #53 were checked with `gh issue view`,
+including fsck #39 and layering #45–#50. All are open in this snapshot. #39
+is an open PR, not a merged fix; #45 waits for #38 to land. Work in other
+branches does not count as implemented on main.
 
 **Met** means the checked implementation respects the rule. **Partial** means
 supporting pieces exist but the rule is not complete. **Not met** means the
@@ -270,13 +330,13 @@ that exFAT is an inherently read-only format.
 
 | Rule from #51 | Status | Checked state and remaining work |
 |---|---|---|
-| 1. All APIs sit on primitives; only primitives decode structures. | partial | Primitives exist, but strict paths still decode structures or duplicate chain/read logic: [src/boot.rs](../src/boot.rs), [src/directory.rs](../src/directory.rs), [src/metadata.rs](../src/metadata.rs), [src/volume.rs](../src/volume.rs), [src/file.rs](../src/file.rs). Close through [#46](https://github.com/antimatter-studios/rust-fs-exfat/issues/46) and children [#47](https://github.com/antimatter-studios/rust-fs-exfat/issues/47), [#48](https://github.com/antimatter-studios/rust-fs-exfat/issues/48), [#49](https://github.com/antimatter-studios/rust-fs-exfat/issues/49), [#50](https://github.com/antimatter-studios/rust-fs-exfat/issues/50). |
+| 1. All APIs sit on primitives; only primitives decode structures. | partial | Primitives exist, but strict paths still decode structures or duplicate chain/read logic: [src/boot.rs](../src/boot.rs), [src/directory.rs](../src/directory.rs), [src/metadata.rs](../src/metadata.rs), [src/volume.rs](../src/volume.rs), [src/file.rs](../src/file.rs), [src/check.rs](../src/check.rs). Close through [#46](https://github.com/antimatter-studios/rust-fs-exfat/issues/46) and children [#45](https://github.com/antimatter-studios/rust-fs-exfat/issues/45) (after #38 lands), [#47](https://github.com/antimatter-studios/rust-fs-exfat/issues/47), [#48](https://github.com/antimatter-studios/rust-fs-exfat/issues/48), [#49](https://github.com/antimatter-studios/rust-fs-exfat/issues/49), [#50](https://github.com/antimatter-studios/rust-fs-exfat/issues/50). |
 | 2. Primitives are permissive; strict rejection sits above them; salvage reports damage. | partial | [src/primitives.rs](../src/primitives.rs) retains some damaged candidates, but also filters them. Strict parsing is separate, and [src/check.rs](../src/check.rs) has audit caps. Complete [#46](https://github.com/antimatter-studios/rust-fs-exfat/issues/46), review permissive evidence in [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52), fix limits via [#38](https://github.com/antimatter-studios/rust-fs-exfat/issues/38) / [#39](https://github.com/antimatter-studios/rust-fs-exfat/pull/39), and add deviation reporting in [#44](https://github.com/antimatter-studios/rust-fs-exfat/issues/44). |
 | 3. Salvage is read-only by type, separate, and returns evidence rather than trusted files. | partial | [src/device.rs](../src/device.rs) has the read-only type boundary; [src/primitives.rs](../src/primitives.rs) returns candidate entry sets. There is no complete salvage surface for orphans and conflicts among the exports in [src/lib.rs](../src/lib.rs). Implement [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) and prove it with [#53](https://github.com/antimatter-studios/rust-fs-exfat/issues/53). |
 | 4. Each driver implements the six-verb common salvage trait, with capabilities. | not met | No adapter trait or capability surface is exported by [src/lib.rs](../src/lib.rs). [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) defines and implements it. |
 | 5. Only universal verbs are common; everything else is a flagged extension. | not met | No common trait or extension flags exist in [src/lib.rs](../src/lib.rs). [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) establishes that boundary. Format evidence work is tracked by [#40](https://github.com/antimatter-studios/rust-fs-exfat/issues/40), [#41](https://github.com/antimatter-studios/rust-fs-exfat/issues/41), [#42](https://github.com/antimatter-studios/rust-fs-exfat/issues/42), [#43](https://github.com/antimatter-studios/rust-fs-exfat/issues/43) and [#44](https://github.com/antimatter-studios/rust-fs-exfat/issues/44), with current support described in section 5. |
-| 6. Nothing moves to rust-fs-core until a second driver implements it. | met | exFAT format helpers remain in [src/primitives.rs](../src/primitives.rs), [src/primitive_chains.rs](../src/primitive_chains.rs) and [src/primitive_structures.rs](../src/primitive_structures.rs); there is no extracted salvage trait. No current gap. [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) must keep the first trait here. |
-| 7. Read-only images get salvage minus deletion-specific parts. | not met | The shared capability surface needed to express this case does not exist yet. exFAT's live/deleted parser in [src/primitives.rs](../src/primitives.rs) does not demonstrate an inherently read-only format. Define the contract in [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) and its capability tests in [#53](https://github.com/antimatter-studios/rust-fs-exfat/issues/53). |
+| 6. The salvage trait stays in driver crates until exFAT, ext4 and NTFS implement it, then moves to rust-fs-core. | met | exFAT format helpers remain in [src/primitives.rs](../src/primitives.rs), [src/primitive_chains.rs](../src/primitive_chains.rs) and [src/primitive_structures.rs](../src/primitive_structures.rs); there is no extracted salvage trait. No current gap. [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) keeps the trait local until both ext4 and NTFS implement it. |
+| 7. Read-only images get salvage minus deletion-specific parts. | not met | The shared capability surface needed to express this case does not exist yet. exFAT's live/deleted parser in [src/primitives.rs](../src/primitives.rs) does not demonstrate an inherently read-only format. Squashfs is the first proving format. Define the contract in [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) and its capability tests in [#53](https://github.com/antimatter-studios/rust-fs-exfat/issues/53). |
 | 8. Each driver runs a conformance set against its adapter. | not met | [tests/primitives.rs](../tests/primitives.rs), [tests/read_only.rs](../tests/read_only.rs) and [tests/check.rs](../tests/check.rs) test existing APIs, not a common adapter. [#53](https://github.com/antimatter-studios/rust-fs-exfat/issues/53) supplies the reusable module and exFAT runner after [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52). |
 
 Summary: **1 met, 3 partial, 4 not met**. This document closes the documentation
@@ -284,31 +344,38 @@ task, not the implementation gaps.
 
 ## 8. Open questions
 
-These questions do not change the eight rules.
+These questions do not reopen the owner decisions above or change the eight
+rules. The remaining design details belong to #52, with conformance in #53:
 
 1. Which recognition failures may return no candidate, and which must return
    damaged evidence? Resolve filesystem-name rejection and checksum-dependent
    plausibility filtering in [src/primitives.rs](../src/primitives.rs) under
-   #46 and #52. Also settle how safe wrappers handle raw slice preconditions.
+   #46 and #52. The raw-value/validity-flag boundary and `_unchecked` naming
+   are the starting position, not unresolved alternatives.
 2. What are the trait's signatures, evidence identities, partial-result types
-   and recovery-plan representation? #52 owns those decisions. In particular,
-   how does materialization deliver output and prevent source aliasing?
+   and recovery-plan representation within the serializable-data and streaming
+   sink design? How is source aliasing prevented when enforcing the separate
+   output-sink requirement?
 3. Which capability bits describe missing operations, deletion-specific parts
-   and extensions? What result represents an unsupported part? #52 defines
-   them; #53 checks their behavior.
-4. Which damage details are common, and which are driver extensions? Decide
-   how offsets, severity and specification references from #44 fit evidence
-   without adding exFAT names to the trait.
-5. Which read-only format will first exercise the non-deletion contract, and
-   which driver will provide the second implementation before any core move?
-   exFAT alone cannot supply that evidence. #52 and #53 are the current work.
-6. Should the label "rule of three" be renamed to match the agreed
-   second-driver threshold? Until then, the literal rule in #51 governs.
-7. Does #42 need remaining acceptance work, or only issue reconciliation?
-   Compressed decoding and lookup already exist in
-   [src/metadata.rs](../src/metadata.rs) and [src/path.rs](../src/path.rs).
-   Its open state alone does not answer whether its full acceptance criteria
-   have been met.
-8. What do candidates and tree rebuilding mean for a rust-img container driver
-   that has no native filesystem tree? #52 must check the common verbs against
-   those drivers too, without inventing on-disk objects they do not have.
+   and extensions? The `Unsupported` versus empty-result behavior is settled
+   as the starting position; names and granularity remain open.
+4. What concrete types represent the shared damage fields, and how do #44's
+   byte offsets and specification references map into the shared core and
+   format-specific details without adding exFAT names to the trait?
+
+The following are recorded decisions to begin implementation, not unanswered
+questions:
+
+- **Damage schema — starting position, adjust as needed:** shared kind,
+  location, severity and source structure plus format-specific details; exFAT
+  defines the core first, with shared-core extraction when ext4 arrives.
+- **Primitive boundary — starting position, adjust as needed:** raw values
+  with validity flags, no failure on damage, rejection only in the strict
+  layer; `_unchecked` helpers document their caller-verified preconditions.
+- **Trait shape — starting position, adjust as needed:** serializable evidence
+  and plans without handles, large results streamed to a caller sink,
+  `BlockRead` input rather than a path, output sink distinct from the source.
+- **Capability flags — starting position, adjust as needed:** `Unsupported`
+  names the feature; an empty result means nothing found, never not supported.
+- **#42 — starting position, adjust as needed:** acceptance work, with its
+  criteria reconciled against this convention before proceeding.
