@@ -1,5 +1,7 @@
 use fs_exfat::primitives::{find_sets, Limits, ENTRY_SIZE};
 
+mod support;
+
 #[path = "primitive_cases/boot.rs"]
 mod boot;
 
@@ -17,6 +19,12 @@ mod metadata;
 
 #[path = "primitive_cases/chains.rs"]
 mod chains;
+
+#[path = "primitive_cases/stream_reads.rs"]
+mod stream_reads;
+
+#[path = "primitive_cases/stream_policy.rs"]
+mod stream_policy;
 
 #[cfg(feature = "test-support")]
 #[path = "primitive_cases/structures.rs"]

@@ -37,6 +37,10 @@ to the same decoded fields.
 `fs_exfat::primitives` exposes raw bitmap, upcase-table and root-system-entry
 decoders with independent validity observations. Strict metadata APIs delegate
 decoding to these primitives and retain rejection policy and diagnostics.
+Strict FAT lookups, chain traversal and cluster read mapping delegate to
+`fs_exfat::primitives`. Its lazy chain reports retain raw FAT words and damage
+flags without requiring a full FAT snapshot. Volume and file APIs retain
+allocation, system-stream overlap, read-budget and ValidDataLength policy.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).

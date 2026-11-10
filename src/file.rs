@@ -1,4 +1,5 @@
 use crate::directory::{DirectoryEntry, Stream};
+use crate::primitives;
 use crate::volume::Volume;
 use crate::{Error, Result};
 use fs_core::BlockRead;
@@ -45,21 +46,16 @@ impl<'volume, Device: BlockRead> File<'volume, Device> {
             .saturating_sub(offset)
             .min(count as u64) as usize;
         let cluster_size = self.volume.boot.cluster_size();
-        let mut copied = 0;
-        while copied < valid {
-            let position = offset + copied as u64;
-            let index = usize::try_from(position / cluster_size).map_err(|_| Error::Bounds)?;
-            let within = position % cluster_size;
-            let chunk = (cluster_size - within).min((valid - copied) as u64) as usize;
+        for chunk in primitives::cluster_reads(offset, valid, cluster_size) {
+            let index = usize::try_from(chunk.cluster_index).map_err(|_| Error::Bounds)?;
             let cluster = *self
                 .clusters
                 .get(index)
                 .ok_or(Error::Invalid("short file chain"))?;
-            let physical = self.volume.boot.cluster_offset(cluster)? + within;
+            let physical = self.volume.boot.cluster_offset(cluster)? + chunk.within;
             self.volume
                 .reader
-                .read_at(physical, &mut output[copied..copied + chunk])?;
-            copied += chunk;
+                .read_at(physical, &mut output[chunk.output])?;
         }
         Ok(count)
     }

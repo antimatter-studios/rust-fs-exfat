@@ -47,9 +47,11 @@ pub use structures::{
 };
 
 pub use chains::{
-    allocation_class, boot_check, chain_head, chain_islands, cluster_offset, clusters_for,
-    compute_predecessors, compute_stats, decode_fat, is_allocated, predecessor, root_chain,
-    valid_cluster, AllocationStats, BootCheck, ChainGroup, Island, StreamClusters, ALLOC_ALLOCATED,
+    allocation_class, boot_check, chain_head, chain_islands, cluster_offset, cluster_reads,
+    clusters_for, compute_predecessors, compute_stats, contiguous_clusters, decode_fat,
+    decode_fat_entry, is_allocated, predecessor, read_fat_entry, root_chain, valid_cluster,
+    walk_fat_chain, AllocationStats, BootCheck, ChainGroup, ChainPosition, ClusterRead,
+    FatChainStep, FatEntryReport, FatValue, Island, StreamClusters, ALLOC_ALLOCATED,
     ALLOC_FREE_FAT, ALLOC_FREE_ZERO, ISLAND_END_BROKEN, ISLAND_END_EOF, ISLAND_END_JOINS_ANOTHER,
 };
 
