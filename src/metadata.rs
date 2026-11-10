@@ -1,5 +1,6 @@
 use crate::primitives::{
-    self, RawAllocationBitmap, RawRootMetadata, RawUpcaseTable, RootEntryKind, UpcaseIssue,
+    self, FatEntryReport, FatValue, RawAllocationBitmap, RawRootMetadata, RawUpcaseTable,
+    RootEntryKind, UpcaseIssue,
 };
 use crate::{Error, Result};
 
@@ -25,14 +26,16 @@ pub enum FatEntry {
 
 impl FatEntry {
     pub fn parse(value: u32, cluster_count: u32) -> Result<Self> {
-        match value {
-            0 => Ok(Self::Free),
-            0xffff_fff7 => Ok(Self::Bad),
-            END_OF_CHAIN => Ok(Self::End),
-            next if next >= 2 && u64::from(next) < u64::from(cluster_count) + 2 => {
-                Ok(Self::Next(next))
-            }
-            _ => Err(Error::Invalid("reserved or out-of-range FAT entry")),
+        Self::from_report(primitives::decode_fat_entry(value, cluster_count))
+    }
+
+    pub(crate) fn from_report(entry: FatEntryReport) -> Result<Self> {
+        match entry.kind {
+            FatValue::Free => Ok(Self::Free),
+            FatValue::Bad => Ok(Self::Bad),
+            FatValue::End => Ok(Self::End),
+            FatValue::Next(next) => Ok(Self::Next(next)),
+            FatValue::Reserved => Err(Error::Invalid("reserved or out-of-range FAT entry")),
         }
     }
 }

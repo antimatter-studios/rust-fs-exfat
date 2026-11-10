@@ -3,6 +3,7 @@ use crate::device::Reader;
 use crate::directory::{self, DirectoryEntry, Stream};
 use crate::file::File;
 use crate::metadata::{AllocationBitmap, FatEntry, RootMetadata, SystemStream, UpcaseTable};
+use crate::primitives::{self, FatChainStep, FatEntryReport};
 use crate::{Error, Result};
 use fs_core::BlockRead;
 use std::collections::HashSet;
@@ -138,11 +139,11 @@ impl<Device: BlockRead> Volume<Device> {
             return Ok(Vec::new());
         }
         let clusters = if stream.no_fat_chain {
-            let end = u64::from(stream.first_cluster) + count as u64;
-            if end > u64::from(self.boot.cluster_count) + 2 {
+            let range = primitives::contiguous_clusters(stream.first_cluster, count as u64);
+            if range.end > u64::from(self.boot.cluster_count) + 2 {
                 return Err(Error::Invalid("contiguous stream exceeds heap"));
             }
-            (stream.first_cluster..end as u32).collect()
+            range.map(|cluster| cluster as u32).collect()
         } else {
             self.cluster_chain(stream.first_cluster)?
         };
@@ -160,7 +161,7 @@ impl<Device: BlockRead> Volume<Device> {
     }
 
     pub fn fat_entry(&self, cluster: u32) -> Result<FatEntry> {
-        fat_entry(&self.reader, &self.boot, cluster)
+        FatEntry::from_report(fat_entry(&self.reader, &self.boot, cluster)?)
     }
 
     pub fn cluster_chain(&self, first: u32) -> Result<Vec<u32>> {
@@ -178,15 +179,14 @@ fn fat_entry<Device: BlockRead>(
     reader: &Reader<Device>,
     boot: &BootSector,
     cluster: u32,
-) -> Result<FatEntry> {
+) -> Result<FatEntryReport> {
     boot.cluster_offset(cluster)?;
     let active = u64::from(boot.volume_flags & 1);
     let offset = (u64::from(boot.fat_offset) + active * u64::from(boot.fat_length))
-        * boot.bytes_per_sector()
-        + u64::from(cluster) * 4;
-    let mut bytes = [0; 4];
-    reader.read_at(offset, &mut bytes)?;
-    FatEntry::parse(u32::from_le_bytes(bytes), boot.cluster_count)
+        * boot.bytes_per_sector();
+    primitives::read_fat_entry(offset, cluster, boot.cluster_count, |offset, output| {
+        reader.read_at(offset, output)
+    })
 }
 
 fn chain<Device: BlockRead>(
@@ -196,25 +196,32 @@ fn chain<Device: BlockRead>(
     limits: ReadLimits,
 ) -> Result<Vec<u32>> {
     let mut clusters = Vec::new();
-    let mut seen = HashSet::new();
-    let mut current = first;
-    loop {
-        boot.cluster_offset(current)?;
-        if clusters.len() >= limits.max_chain_clusters {
-            return Err(Error::Unsupported("chain exceeds read limits"));
-        }
-        if !seen.insert(current) {
-            return Err(Error::Invalid("FAT chain cycle"));
-        }
-        clusters.push(current);
-        match fat_entry(reader, boot, current)? {
-            FatEntry::End => return Ok(clusters),
-            FatEntry::Next(next) => current = next,
-            FatEntry::Free | FatEntry::Bad => {
-                return Err(Error::Invalid("free or bad cluster in FAT chain"))
+    for step in primitives::walk_fat_chain(first, boot.cluster_count, |cluster| {
+        fat_entry(reader, boot, cluster)
+    }) {
+        match step? {
+            FatChainStep::Cluster(position) => {
+                if !position.valid {
+                    return Err(Error::Invalid("cluster outside heap"));
+                }
+                if clusters.len() >= limits.max_chain_clusters {
+                    return Err(Error::Unsupported("chain exceeds read limits"));
+                }
+                if position.cycle {
+                    return Err(Error::Invalid("FAT chain cycle"));
+                }
+                clusters.push(position.cluster);
             }
+            FatChainStep::Entry { entry, .. } => match FatEntry::from_report(entry)? {
+                FatEntry::End => return Ok(clusters),
+                FatEntry::Next(_) => {}
+                FatEntry::Free | FatEntry::Bad => {
+                    return Err(Error::Invalid("free or bad cluster in FAT chain"))
+                }
+            },
         }
     }
+    Err(Error::Invalid("free or bad cluster in FAT chain"))
 }
 
 fn system_stream<Device: BlockRead>(
@@ -248,18 +255,16 @@ pub(crate) fn read_chain<Device: BlockRead>(
         .map_err(|_| Error::Unsupported("metadata allocation failed"))?;
     output.resize(length, 0);
     let mut copied = 0;
-    for cluster in clusters {
-        if copied == length {
-            break;
-        }
-        let count = usize::try_from(boot.cluster_size())
-            .map_err(|_| Error::Bounds)?
-            .min(length - copied);
+    for chunk in primitives::cluster_reads(0, length, boot.cluster_size()) {
+        let index = usize::try_from(chunk.cluster_index).map_err(|_| Error::Bounds)?;
+        let Some(cluster) = clusters.get(index) else {
+            return Err(Error::Invalid("short metadata chain"));
+        };
         reader.read_at(
             boot.cluster_offset(*cluster)?,
-            &mut output[copied..copied + count],
+            &mut output[chunk.output.clone()],
         )?;
-        copied += count;
+        copied = chunk.output.end;
     }
     if copied != length {
         return Err(Error::Invalid("short metadata chain"));

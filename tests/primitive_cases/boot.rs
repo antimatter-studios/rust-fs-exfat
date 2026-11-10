@@ -1,8 +1,5 @@
-#[path = "../support/mod.rs"]
-mod support;
-
+use crate::support::{put32, seal_boot, volume};
 use fs_exfat::primitives::{BootRegion, BootSector, BootSectorHeader};
-use support::{put32, seal_boot, volume};
 
 #[test]
 fn damaged_boot_headers_return_fields_and_identity_flags() {

@@ -1,6 +1,8 @@
 use super::{
-    boot_checksum, stored_boot_checksum, u32_at, BootSector, FAT_BAD, FAT_END, FIRST_CLUSTER,
+    boot_checksum, checked_fat_entry, stored_boot_checksum, u32_at, BootSector, FAT_BAD, FAT_END,
+    FIRST_CLUSTER,
 };
+use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::HashSet;
 
@@ -41,6 +43,156 @@ pub struct BootCheck {
 pub struct StreamClusters {
     pub clusters: Vec<u32>,
     pub needed: u64,
+}
+
+/// The meaning of a FAT word, without rejecting free, damaged or reserved links.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FatValue {
+    Free,
+    Next(u32),
+    Bad,
+    End,
+    Reserved,
+}
+
+/// A raw FAT word and its classification against the supplied cluster count.
+/// Free and bad markers are valid words, not promises of a usable chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FatEntryReport {
+    pub value: u32,
+    pub kind: FatValue,
+    pub valid: bool,
+}
+
+pub fn decode_fat_entry(value: u32, cluster_count: u32) -> FatEntryReport {
+    let kind = match value {
+        0 => FatValue::Free,
+        FAT_BAD => FatValue::Bad,
+        FAT_END => FatValue::End,
+        next if (u64::from(FIRST_CLUSTER)..u64::from(cluster_count) + 2)
+            .contains(&u64::from(next)) =>
+        {
+            FatValue::Next(next)
+        }
+        _ => FatValue::Reserved,
+    };
+    FatEntryReport {
+        value,
+        kind,
+        valid: kind != FatValue::Reserved,
+    }
+}
+
+/// Reads one raw FAT word from an already selected FAT's byte offset. Only
+/// arithmetic and I/O failures are errors; damaged words remain reports.
+pub fn read_fat_entry(
+    fat_offset: u64,
+    cluster: u32,
+    cluster_count: u32,
+    mut read: impl FnMut(u64, &mut [u8]) -> Result<()>,
+) -> Result<FatEntryReport> {
+    let offset = fat_offset
+        .checked_add(u64::from(cluster) * 4)
+        .ok_or(Error::Bounds)?;
+    let mut bytes = [0; 4];
+    read(offset, &mut bytes)?;
+    Ok(decode_fat_entry(
+        checked_fat_entry(&bytes, 0).unwrap(),
+        cluster_count,
+    ))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChainPosition {
+    pub cluster: u32,
+    pub valid: bool,
+    pub cycle: bool,
+}
+
+/// Positions precede their FAT reads, allowing a caller to enforce its own
+/// budget and validity policy before any allocation or I/O for that position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FatChainStep {
+    Cluster(ChainPosition),
+    Entry { cluster: u32, entry: FatEntryReport },
+}
+
+/// Walks a FAT lazily, retaining raw words and reporting the first repeated or
+/// out-of-range position. Free, bad, reserved and end words finish the walk.
+/// No FAT snapshot or caller-owned cluster list is allocated here.
+pub fn walk_fat_chain(
+    first: u32,
+    cluster_count: u32,
+    mut read: impl FnMut(u32) -> Result<FatEntryReport>,
+) -> impl Iterator<Item = Result<FatChainStep>> {
+    let mut current = Some(first);
+    let mut pending = None;
+    let mut seen = HashSet::new();
+    std::iter::from_fn(move || {
+        if let Some(cluster) = pending.take() {
+            seen.insert(cluster);
+            return Some(match read(cluster) {
+                Ok(entry) => {
+                    if let FatValue::Next(next) = entry.kind {
+                        current = Some(next);
+                    }
+                    Ok(FatChainStep::Entry { cluster, entry })
+                }
+                Err(error) => Err(error),
+            });
+        }
+        let cluster = current.take()?;
+        let valid =
+            (u64::from(FIRST_CLUSTER)..u64::from(cluster_count) + 2).contains(&u64::from(cluster));
+        let cycle = seen.contains(&cluster);
+        if valid && !cycle {
+            pending = Some(cluster);
+        }
+        Some(Ok(FatChainStep::Cluster(ChainPosition {
+            cluster,
+            valid,
+            cycle,
+        })))
+    })
+}
+
+/// A stream's raw contiguous claim, without clipping it to the cluster heap.
+/// The count is bounded by the on-disk length divided by the cluster size.
+pub fn contiguous_clusters(first: u32, count: u64) -> std::ops::Range<u64> {
+    u64::from(first)..u64::from(first) + count
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClusterRead {
+    pub cluster_index: u64,
+    pub within: u64,
+    pub output: std::ops::Range<usize>,
+}
+
+/// Maps an already bounded stream read into cluster-sized chunks, without
+/// looking up clusters or applying allocation, length or ValidDataLength policy.
+/// A zero cluster size yields no chunks; callers assess geometry themselves.
+pub fn cluster_reads(
+    offset: u64,
+    length: usize,
+    cluster_size: u64,
+) -> impl Iterator<Item = ClusterRead> {
+    let mut copied = 0;
+    std::iter::from_fn(move || {
+        if copied == length || cluster_size == 0 {
+            return None;
+        }
+        let position = offset + copied as u64;
+        let within = position % cluster_size;
+        let count = (cluster_size - within).min((length - copied) as u64) as usize;
+        let output = copied..copied + count;
+        copied += count;
+        Some(ClusterRead {
+            cluster_index: position / cluster_size,
+            within,
+            output,
+        })
+    })
 }
 
 /// The chain ends with the FAT's end marker.
