@@ -236,6 +236,33 @@ PY
     device=''
     attached=0
 done
+for sector in 512 4096; do
+    image="$directory/windows-$sector.dmg"
+    /usr/bin/python3 scripts/build-windows-oracle.py "$image" "$directory/reference-$sector.dmg" "$sector"
+    [ -f "$image" ] && [ ! -L "$image" ]
+    mkdir "$directory/windows-mount-$sector"
+    /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/windows-mount-$sector" -plist "$image" > "$directory/attach.plist"
+    accept_receipt
+    /sbin/fsck_exfat -n "$device"
+    /usr/bin/python3 - "$directory/windows-mount-$sector" "$directory/windows-files-$sector.txt" <<'PY'
+from pathlib import Path
+import hashlib, os, sys, unicodedata
+root = Path(sys.argv[1])
+if not os.statvfs(root).f_flag & os.ST_RDONLY:
+    raise SystemExit('oracle: Windows-layout image must be mounted read-only')
+records = []
+for item in root.iterdir():
+    if item.is_symlink() or not item.is_file():
+        raise SystemExit('oracle: unexpected entry in Windows-layout image')
+    name = unicodedata.normalize('NFC', item.name)
+    records.append(f'{name}\t{item.stat().st_size}\t{hashlib.sha256(item.read_bytes()).hexdigest()}\n')
+with open(sys.argv[2], 'w') as output:
+    output.writelines(sorted(records))
+PY
+    /usr/bin/hdiutil detach "$device"
+    device=''
+    attached=0
+done
 EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces --test macos_fuzz_seeds -- --nocapture
 for sector in 512 4096; do
     image="$directory/reencoded-fixtures-$sector.dmg"

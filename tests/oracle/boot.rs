@@ -3,6 +3,7 @@ mod support;
 
 mod primitives;
 mod scale;
+mod windows;
 
 #[cfg(feature = "test-support")]
 mod fixtures;

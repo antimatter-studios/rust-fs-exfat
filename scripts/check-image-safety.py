@@ -39,6 +39,9 @@ def check(source):
     initialization = 'directory="$(mktemp -d "$PWD/tmp/oracle.XXXXXX")"'
     image_binding = 'image="$directory/reference-$sector.dmg"'
     fixture_binding = 'image="$directory/reencoded-fixtures-$sector.dmg"'
+    windows_binding = 'image="$directory/windows-$sector.dmg"'
+    windows_producer = '/usr/bin/python3 scripts/build-windows-oracle.py "$image" "$directory/reference-$sector.dmg" "$sector"'
+    windows_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/windows-mount-$sector" -plist "$image" > "$directory/attach.plist"'
     fixture_regular = '[ -f "$image" ] && [ ! -L "$image" ]'
     fixture_test = 'EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces --test macos_fuzz_seeds -- --nocapture'
     fixture_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"'
@@ -48,6 +51,7 @@ def check(source):
     detach = '/usr/bin/hdiutil detach "$device"'
     attachments = {
         fixture_attach,
+        windows_attach,
         '/usr/bin/hdiutil attach -blocksize "$sector" -nomount -nobrowse -plist "$image" > "$directory/attach.plist"',
         '/usr/bin/hdiutil attach -blocksize "$sector" -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"',
         '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"',
@@ -61,12 +65,16 @@ def check(source):
         refuse("images must be bound to this run's fresh private temporary directory")
     if lines.count(fixture_binding) != 1 or lines.count(fixture_test) != 1:
         refuse("reencoded fixtures require the reviewed test producer and private image binding")
+    if lines.count(windows_binding) != 1 or lines.count(windows_producer) != 1:
+        refuse("Windows-layout fixtures require the reviewed producer and private image binding")
     active = False
     created = False
     receipt_pending = False
     image_bound = False
     fixture_image = False
     fixtures_ready = False
+    windows_image = False
+    windows_ready = False
     for line in lines:
         if not line:
             continue
@@ -80,6 +88,20 @@ def check(source):
             refuse("a receipt cannot be reused without a fresh image attachment")
         if line == initialization:
             continue
+        if line == windows_binding:
+            if active:
+                refuse("an attached image cannot be rebound")
+            image_bound = True
+            fixture_image = False
+            windows_image = True
+            windows_ready = False
+            created = False
+            continue
+        if line == windows_producer:
+            if not windows_image or active or created:
+                refuse("Windows-layout generation requires its detached private image binding")
+            windows_ready = True
+            continue
         if line == fixture_test:
             if active:
                 refuse("fixture generation requires detached reference images")
@@ -90,10 +112,11 @@ def check(source):
                 refuse("fixture attachment requires this run's completed fixture producer")
             image_bound = True
             fixture_image = True
+            windows_image = False
             created = False
             continue
         if line == fixture_regular:
-            if not fixture_image or active:
+            if not (fixture_image or (windows_image and windows_ready)) or active:
                 refuse("fixture validation requires its detached private image binding")
             created = True
             continue
@@ -102,6 +125,7 @@ def check(source):
                 refuse("an attached image cannot be rebound")
             image_bound = True
             fixture_image = False
+            windows_image = False
             created = False
             continue
         if line == create:
@@ -114,6 +138,8 @@ def check(source):
                 refuse("attach requires this run's created, detached image")
             if fixture_image and line != fixture_attach:
                 refuse("reencoded fixture images must be attached read-only")
+            if windows_image != (line == windows_attach):
+                refuse("Windows-layout fixtures require their own read-only attachment")
             receipt_pending = True
             continue
         if line == detach or line in device_commands:

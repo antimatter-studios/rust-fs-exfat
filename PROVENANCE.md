@@ -242,3 +242,13 @@ command's own plist output. Images are detached before the Rust reader runs.
 Mounted-driver listing/hash differentials cover the Rust reader, C ABI and CLI;
 synthetic corruption tests are not independent format evidence. Fuzz seeds are cut
 from these reference images, and fuzzing is not independent format evidence either.
+
+The Windows-layout fixture kind is specification-built, not Windows-produced.
+`scripts/build-windows-oracle.py` is a test-only builder derived from Microsoft's
+public specification, without any third-party formatter implementation or image.
+It reuses only the recommended compressed upcase table from this run's newfs_exfat
+image, checking its length and specification checksum before relocating it.
+The macOS read-only driver and fsck_exfat independently validate these fixtures;
+the existing permissive primitive reader and raw oracle decoders compare their
+boot geometry, both checksums, every bitmap bit and all 65,536 upcase mappings
+with the strict driver. See `docs/windows-oracle.md` for layout and limitations.
