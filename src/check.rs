@@ -1,8 +1,12 @@
-use crate::boot::{BootDifference, BootRegions};
+#[path = "check_audit.rs"]
+mod audit;
+
+pub use audit::{check_device, check_device_with_budget, MAX_AUDIT_MEMORY_BYTES};
+
+use crate::boot::BootDifference;
 use crate::volume::Volume;
-use crate::{Error, Result};
+use crate::Result;
 use fs_core::BlockRead;
-use std::collections::HashSet;
 
 #[derive(Debug)]
 pub struct CheckReport {
@@ -23,59 +27,5 @@ impl CheckReport {
 }
 
 pub fn check<Device: BlockRead>(volume: &Volume<Device>) -> Result<CheckReport> {
-    let boot = volume.boot();
-    let limit = volume.limits().max_chain_clusters;
-    if u64::from(boot.cluster_count) > limit as u64 {
-        return Err(Error::Unsupported(
-            "check exceeds the allocation audit limit",
-        ));
-    }
-    let mut referenced = HashSet::new();
-    let mut claim = |clusters: Vec<u32>| -> Result<()> {
-        for cluster in clusters {
-            if !referenced.insert(cluster) {
-                return Err(Error::Invalid("cross-linked allocation"));
-            }
-        }
-        Ok(())
-    };
-    claim(volume.cluster_chain(boot.root_cluster)?)?;
-    for bitmap in volume.metadata().bitmaps.iter().flatten() {
-        claim(volume.cluster_chain(bitmap.first_cluster)?)?;
-    }
-    claim(volume.cluster_chain(volume.metadata().upcase.first_cluster)?)?;
-    let mut pending = vec![volume.root_directory()?];
-    let mut files = 0u64;
-    let mut directories = 1u64;
-    while let Some(entries) = pending.pop() {
-        for entry in entries {
-            if files + directories >= limit as u64 {
-                return Err(Error::Unsupported(
-                    "check exceeds the directory entry limit",
-                ));
-            }
-            claim(volume.stream_clusters(entry.stream())?)?;
-            if entry.is_directory() {
-                directories += 1;
-                pending.push(volume.read_directory(&entry)?);
-            } else {
-                files += 1;
-            }
-        }
-    }
-    let mut allocated_clusters = 0;
-    for cluster in 2..boot.cluster_count + 2 {
-        allocated_clusters += u64::from(volume.bitmap().allocated(cluster)?);
-    }
-    let referenced_clusters = referenced.len() as u64;
-    Ok(CheckReport {
-        files,
-        directories,
-        allocated_clusters,
-        referenced_clusters,
-        unreferenced_clusters: allocated_clusters - referenced_clusters,
-        dirty: boot.volume_flags & 2 != 0,
-        media_failure: boot.volume_flags & 4 != 0,
-        boot_differences: BootRegions::read(&volume.reader)?.differences,
-    })
+    audit::check_reader(&volume.reader, MAX_AUDIT_MEMORY_BYTES)
 }

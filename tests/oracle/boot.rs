@@ -2,6 +2,7 @@
 mod support;
 
 mod primitives;
+mod scale;
 
 #[cfg(feature = "test-support")]
 mod fixtures;

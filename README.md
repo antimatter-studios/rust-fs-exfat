@@ -57,9 +57,14 @@ Only the destination is written; the source always stays read-only.
 
 `fsck.exfat` is check-only, with no repair mode. It checks boot copies, metadata,
 entry sets, chain allocation, cross-links and unreferenced allocated clusters.
-Dirty/media-failure flags are reported without clearing them. The audit is
-bounded to 1,048,576 clusters and entries; larger volumes fail explicitly rather
-than receive a partial clean bill. Exit statuses are 0 clean, 4 uncorrected
+Dirty/media-failure flags are reported without clearing them. The audit supports
+every valid exFAT cluster count, without a fixed cluster or entry cap. Allocation
+and ownership bitmaps use 1/4 byte per cluster together; FAT and directories are
+streamed in 64 KiB chunks. The total audit memory ceiling is 1,537 MiB, including
+budgeted directory workspace. Insufficient memory, exhausted workspace or an
+incomplete read fails explicitly, never with a partial clean bill. See the
+[audit memory contract](docs/fsck-memory.md) for exact bounds and library APIs.
+Exit statuses are 0 clean, 4 uncorrected
 inconsistencies, 8 I/O or unsupported audit limits, and 16 usage errors.
 
 ## Building and testing
