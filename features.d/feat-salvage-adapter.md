@@ -1,0 +1,3 @@
+## Reading
+
+| Salvage adapter | Experimental; a format-neutral trait for the six salvage verbs with capability flags, read-only by type through `&dyn BlockRead` sources and `io::Write` output; the exFAT implementation runs on the primitives without a strict mount, finds live, deleted and damaged entry sets, walks contiguous and FAT claims, rebuilds parent claims with orphans and conflicts, reports boot, root-chain and root-entry damage, and materializes plans with per-byte provenance; evidence is synthetic-only | Unreleased (#52) | #52 | `src/salvage_adapter.rs`, `src/salvage_exfat.rs`, `tests/salvage.rs` |

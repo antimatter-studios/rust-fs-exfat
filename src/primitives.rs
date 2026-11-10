@@ -788,6 +788,8 @@ pub enum RootEntryKind {
 /// An entry retains its original InUse bit even when its fields are damaged.
 #[derive(Debug)]
 pub struct RawRootEntry {
+    /// Byte offset of the entry within the parsed data.
+    pub offset: usize,
     pub entry_type: u8,
     pub in_use: bool,
     pub kind: RootEntryKind,
@@ -816,6 +818,7 @@ impl RawRootMetadata {
             if entry[0] == 0 {
                 break;
             }
+            let offset = position;
             position += ENTRY_SIZE;
             let in_use = entry[0] & 0x80 != 0;
             let next = position.saturating_add(usize::from(entry[1]) * ENTRY_SIZE);
@@ -885,6 +888,7 @@ impl RawRootMetadata {
                 _ => RootEntryKind::Unknown,
             };
             result.entries.push(RawRootEntry {
+                offset,
                 entry_type: entry[0],
                 in_use,
                 kind,
