@@ -29,11 +29,47 @@ use support::{file_set, metadata_volume, put16, put32, put64, seal_boot, seal_se
 
 pub fn boot_sector(data: &[u8]) -> bool {
     let permissive = fs_exfat::primitives::BootSector::parse(data).ok();
+    let header = fs_exfat::primitives::BootSectorHeader::parse(data).ok();
+    assert_eq!(header.is_some(), data.len() >= 512);
+    if let Some(header) = &header {
+        assert_eq!(header.jump_valid, data[..3] == [0xeb, 0x76, 0x90]);
+        assert_eq!(header.file_system_name_valid, &data[3..11] == b"EXFAT   ");
+        assert_eq!(
+            header.must_be_zero_valid,
+            data[11..64].iter().all(|byte| *byte == 0)
+        );
+        assert_eq!(header.sector.signature_ok, data[510..512] == [0x55, 0xaa]);
+        assert_eq!(header.file_system_name_valid, permissive.is_some());
+        if let Some(permissive) = &permissive {
+            assert_eq!(&header.sector, permissive);
+        }
+    }
+    let mut padded = vec![0; 12 * 512];
+    let length = data.len().min(padded.len());
+    padded[..length].copy_from_slice(&data[..length]);
+    let region = fs_exfat::primitives::BootRegion::parse(&padded, 512).unwrap();
+    assert_eq!(
+        region.computed_checksum,
+        boot_checksum(&padded, 512).unwrap()
+    );
+    assert_eq!(
+        region.header,
+        fs_exfat::primitives::BootSectorHeader::parse(&padded).unwrap()
+    );
     if let Some(boot) = &permissive {
         assert_eq!(boot.file_system_name, "EXFAT   ");
         assert_eq!(boot.signature_ok, data[510..512] == [0x55, 0xaa]);
     }
     for sector in [512, 1024, 2048, 4096] {
+        let region = fs_exfat::primitives::BootRegion::parse(data, sector);
+        assert_eq!(region.is_ok(), data.len() >= 12 * sector);
+        if let Ok(region) = region {
+            assert_eq!(
+                region.computed_checksum,
+                boot_checksum(data, sector).unwrap()
+            );
+            assert_eq!(&region.header, header.as_ref().unwrap());
+        }
         let Ok(checksum) = boot_checksum(data, sector) else {
             continue;
         };

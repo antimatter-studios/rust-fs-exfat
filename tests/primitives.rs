@@ -1,5 +1,11 @@
 use fs_exfat::primitives::{find_sets, Limits, ENTRY_SIZE};
 
+#[path = "primitive_cases/boot.rs"]
+mod boot;
+
+#[path = "primitive_cases/boot_layering.rs"]
+mod boot_layering;
+
 #[path = "primitive_cases/parse.rs"]
 mod parsing;
 

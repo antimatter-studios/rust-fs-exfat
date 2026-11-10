@@ -1,5 +1,5 @@
 use crate::device::Reader;
-use crate::{Error, Result};
+use crate::{primitives, Error, Result};
 use fs_core::BlockRead;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,47 +20,39 @@ pub struct BootSector {
     pub percent_in_use: u8,
 }
 
-fn word(data: &[u8], offset: usize) -> u16 {
-    u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap())
-}
-
-fn dword(data: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
-}
-
-fn qword(data: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
-}
-
 impl BootSector {
     pub fn parse(data: &[u8]) -> Result<Self> {
-        if data.len() < 512 {
-            return Err(Error::Invalid("short boot sector"));
-        }
-        if data[..3] != [0xeb, 0x76, 0x90]
-            || &data[3..11] != b"EXFAT   "
-            || data[11..64].iter().any(|byte| *byte != 0)
-            || word(data, 510) != 0xaa55
+        let header = primitives::BootSectorHeader::parse(data)
+            .map_err(|_| Error::Invalid("short boot sector"))?;
+        Self::from_primitive(header)
+    }
+
+    fn from_primitive(header: primitives::BootSectorHeader) -> Result<Self> {
+        if !header.jump_valid
+            || !header.file_system_name_valid
+            || !header.must_be_zero_valid
+            || !header.sector.signature_ok
         {
             return Err(Error::Invalid(
                 "boot identity, jump, zero field or signature",
             ));
         }
+        let fields = header.sector;
         let boot = Self {
-            partition_offset: qword(data, 64),
-            volume_length: qword(data, 72),
-            fat_offset: dword(data, 80),
-            fat_length: dword(data, 84),
-            cluster_heap_offset: dword(data, 88),
-            cluster_count: dword(data, 92),
-            root_cluster: dword(data, 96),
-            volume_serial: dword(data, 100),
-            revision: word(data, 104),
-            volume_flags: word(data, 106),
-            bytes_per_sector_shift: data[108],
-            sectors_per_cluster_shift: data[109],
-            number_of_fats: data[110],
-            percent_in_use: data[112],
+            partition_offset: fields.partition_offset,
+            volume_length: fields.volume_length,
+            fat_offset: fields.fat_offset,
+            fat_length: fields.fat_length,
+            cluster_heap_offset: fields.cluster_heap_offset,
+            cluster_count: fields.cluster_count,
+            root_cluster: fields.root_cluster,
+            volume_serial: fields.volume_serial,
+            revision: fields.revision,
+            volume_flags: fields.volume_flags,
+            bytes_per_sector_shift: fields.bytes_per_sector_shift,
+            sectors_per_cluster_shift: fields.sectors_per_cluster_shift,
+            number_of_fats: fields.number_of_fats,
+            percent_in_use: fields.percent_in_use,
         };
         boot.validate()?;
         Ok(boot)
@@ -138,13 +130,7 @@ pub fn boot_checksum(region: &[u8], bytes_per_sector: usize) -> Result<u32> {
     let data = region
         .get(..bytes_per_sector * 11)
         .ok_or(Error::Invalid("short boot region"))?;
-    Ok(data
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !matches!(index, 106 | 107 | 112))
-        .fold(0u32, |checksum, (_, byte)| {
-            checksum.rotate_right(1).wrapping_add(u32::from(*byte))
-        }))
+    Ok(primitives::boot_checksum(data, bytes_per_sector))
 }
 
 #[derive(Debug)]
@@ -159,11 +145,8 @@ pub struct BootCopy {
 
 impl BootCopy {
     fn inspect(data: &[u8], sector_size: usize, device_size: u64) -> Result<Self> {
-        let computed_checksum = boot_checksum(data, sector_size)?;
-        let stored = data
-            .get(sector_size * 11..sector_size * 12)
-            .ok_or(Error::Invalid("short checksum sector"))?;
-        let sector = BootSector::parse(data);
+        let raw = primitives::BootRegion::parse(data, sector_size)?;
+        let sector = BootSector::from_primitive(raw.header);
         let fits_device = sector.as_ref().is_ok_and(|boot| {
             boot.bytes_per_sector() == sector_size as u64
                 && boot
@@ -173,13 +156,10 @@ impl BootCopy {
         });
         Ok(Self {
             sector,
-            computed_checksum,
-            stored_checksum: dword(stored, 0),
-            checksum_valid: stored
-                .chunks_exact(4)
-                .all(|entry| dword(entry, 0) == computed_checksum),
-            extended_signatures_valid: (1..=8)
-                .all(|index| dword(data, (index + 1) * sector_size - 4) == 0xaa55_0000),
+            computed_checksum: raw.computed_checksum,
+            stored_checksum: raw.stored_checksum,
+            checksum_valid: raw.checksum_valid,
+            extended_signatures_valid: raw.extended_signatures_valid,
             fits_device,
         })
     }
@@ -216,8 +196,11 @@ impl BootRegions {
     pub fn read<Device: BlockRead>(reader: &Reader<Device>) -> Result<Self> {
         let mut prefix = [0; 512];
         reader.read_at(0, &mut prefix)?;
-        let initial = if (9..=12).contains(&prefix[108]) {
-            Some(Self::read_with_shift(reader, prefix[108])?)
+        let shift = primitives::BootSectorHeader::parse(&prefix)?
+            .sector
+            .bytes_per_sector_shift;
+        let initial = if (9..=12).contains(&shift) {
+            Some(Self::read_with_shift(reader, shift)?)
         } else {
             None
         };

@@ -1,8 +1,8 @@
 use fs_exfat::primitives::{
     boot_checksum, decode_timestamp, decode_timestamp_with_offset, decode_utc_offset,
     find_bitmap_entry, find_sets, parse_set, set_checksum, stored_boot_checksum, u16_at, u32_at,
-    u64_at, BootSector, EntrySet, Limits, BOOT_REGION_SECTORS, ENTRY_SIZE, FAT_BAD, FAT_END,
-    FIRST_CLUSTER,
+    u64_at, BootRegion, BootSector, EntrySet, Limits, BOOT_REGION_SECTORS, ENTRY_SIZE, FAT_BAD,
+    FAT_END, FIRST_CLUSTER,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -136,6 +136,16 @@ fn primitive_boot_fields_and_checksums_match_macos_formatter_and_checker() {
             let region = &image[copy as usize..(copy + BOOT_REGION_SECTORS * sector) as usize];
             let stored = stored_boot_checksum(region, sector as usize);
             assert_eq!(boot_checksum(region, sector as usize), stored);
+            let raw = BootRegion::parse(region, sector as usize).unwrap();
+            assert!(raw.header.jump_valid);
+            assert!(raw.header.file_system_name_valid);
+            assert!(raw.header.must_be_zero_valid);
+            assert!(raw.header.sector.signature_ok);
+            assert!(raw.checksum_valid);
+            assert!(raw.extended_signatures_valid);
+            assert_eq!(raw.stored_checksum, stored);
+            assert_eq!(raw.computed_checksum, stored);
+            assert_eq!(raw.header.sector, BootSector::parse(region).unwrap());
             for word in region[11 * sector as usize..].chunks_exact(4) {
                 assert_eq!(u32_at(word, 0), stored);
             }
