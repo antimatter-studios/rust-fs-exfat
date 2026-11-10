@@ -34,12 +34,26 @@
 //! [`RawAllocationBitmap`], [`RawUpcaseTable`] and [`RawRootMetadata`] retain
 //! damaged metadata and report length, checksum, mapping and presence validity.
 //! The strict metadata API alone decides which observations require rejection.
+//!
+//! [`FatWindow`] and [`StreamCursor`] read in fixed 64 KiB chunks, and
+//! [`walk_allocation`] leaves cycle detection to a caller-owned bitmap rather
+//! than allocating per-cluster state. [`directory_record`] frames streamed entry
+//! sets; bitmap claims, population and coverage operate on borrowed slices.
+//! The allocation audit retains its budget, rejection and completeness policy.
 
 #[path = "primitive_chains.rs"]
 mod chains;
 
 #[path = "primitive_structures.rs"]
 mod structures;
+
+#[path = "primitive_streaming.rs"]
+mod streaming;
+
+pub use streaming::{
+    bitmap_contains_all, bitmap_count, claim_bitmap_cluster, directory_record, walk_allocation,
+    DirectoryRecord, FatWindow, StreamCursor, StreamReadError, VolumeState,
+};
 
 pub use structures::{
     bitmap_location, checked_bitmap_bit, checked_fat_entry, inspect_structures, read_structures,

@@ -2,6 +2,12 @@ use fs_exfat::primitives::{find_sets, Limits, ENTRY_SIZE};
 
 mod support;
 
+#[path = "primitive_cases/audit_layering.rs"]
+mod audit_layering;
+
+#[path = "primitive_cases/audit_streams.rs"]
+mod audit_streams;
+
 #[path = "primitive_cases/boot.rs"]
 mod boot;
 

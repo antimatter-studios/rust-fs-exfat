@@ -22,6 +22,15 @@ byte cache reads only bounded chunks of the selected active FAT. Directory data
 also uses a 64 KiB buffer, and an entry set occupies at most 8 KiB, including sets
 split across clusters. No file-content data is needed.
 
+`primitives::FatWindow` and `primitives::StreamCursor` own those fixed-size
+buffers. `primitives::walk_allocation` exposes each position before reading its
+FAT link and allocates no cycle set; the audit's existing ownership bitmap stops
+cycles and cross-links before that read. Primitive entry framing and bitmap
+operations share the same raw decoding layer as the strict metadata and recovery
+APIs. Audit rejection order, error messages, directory traversal and budget
+accounting remain in `check_audit.rs`; a primitive observation is not a clean
+verdict.
+
 The exFAT format maximum, `0xfffffff5` = 4,294,967,285 clusters, requires
 536,870,911 bytes for each bitmap: 1,073,741,822 bytes together, two bytes less
 than 1 GiB. Thus the default ceiling of **1,537 MiB** permits every valid cluster
