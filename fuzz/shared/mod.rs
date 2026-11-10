@@ -211,9 +211,11 @@ pub fn directory(data: &[u8]) -> bool {
     };
     let (boot, upcase) = geometry();
     let root = flags & 1 != 0;
+    check_raw_entry_set(entries);
     let raw = directory::parse(entries, boot, upcase, root);
     let mut sealed = entries.to_vec();
     reseal_sets(&mut sealed, upcase);
+    check_raw_entry_set(&sealed);
     let resealed = directory::parse(&sealed, boot, upcase, root);
     let mut accepted = false;
     for listing in [raw, resealed].into_iter().flatten() {
@@ -230,6 +232,42 @@ pub fn directory(data: &[u8]) -> bool {
         }
     }
     accepted
+}
+
+fn check_raw_entry_set(data: &[u8]) {
+    if let Some(entry_type) = fs_exfat::primitives::EntryType::parse(data) {
+        assert_eq!(entry_type.value, data[0]);
+        assert_eq!(entry_type.in_use, data[0] & 0x80 != 0);
+        assert_eq!(entry_type.secondary, data[0] & 0x40 != 0);
+        assert_eq!(entry_type.benign, data[0] & 0x20 != 0);
+    }
+    let Some(set) = fs_exfat::primitives::RawEntrySet::parse(data) else {
+        return;
+    };
+    assert_eq!(set.bytes.len(), (usize::from(data[1]) + 1) * 32);
+    assert_eq!(set.primary.raw, data[..32]);
+    assert_eq!(set.secondaries.len(), usize::from(data[1]));
+    assert_eq!(
+        set.checksum_ok,
+        set_checksum(set.bytes) == u16::from_le_bytes(data[2..4].try_into().unwrap())
+    );
+    let name = set.name();
+    assert_eq!(name.utf16_ok, String::from_utf16(&name.utf16).is_ok());
+    assert_eq!(name.text, String::from_utf16_lossy(&name.utf16));
+    if let Some(stream) = &set.stream {
+        assert_eq!(stream.first_cluster, u32_at(data, 52).unwrap());
+        assert_eq!(
+            stream.data_length,
+            u64::from_le_bytes(data[56..64].try_into().unwrap())
+        );
+        assert!(name.utf16.len() <= usize::from(stream.name_length));
+        assert_eq!(
+            set.name_complete,
+            name.utf16.len() == usize::from(stream.name_length)
+        );
+    } else {
+        assert!(!set.name_complete);
+    }
 }
 
 pub fn timestamp(data: &[u8]) -> bool {

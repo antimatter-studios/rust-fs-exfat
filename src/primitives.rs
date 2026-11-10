@@ -327,16 +327,182 @@ pub fn u64_at(data: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(data[offset..offset + 8].try_into().expect("eight bytes"))
 }
 
+/// Raw entry type and its format-defined flags, without rejecting unknown types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EntryType {
+    pub value: u8,
+    pub in_use: bool,
+    pub secondary: bool,
+    pub benign: bool,
+}
+
+impl EntryType {
+    pub fn parse(data: &[u8]) -> Option<Self> {
+        let value = *data.first()?;
+        Some(Self {
+            value,
+            in_use: value & 0x80 != 0,
+            secondary: value & 0x40 != 0,
+            benign: value & 0x20 != 0,
+        })
+    }
+}
+
+/// Primary entry fields, also available for non-file primary types.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FilePrimary {
+    pub raw: [u8; ENTRY_SIZE],
+    pub entry_type: EntryType,
+    pub secondary_count: u8,
+    pub stored_checksum: u16,
+    pub attributes: u16,
+}
+
+/// Stream fields at the first secondary slot, regardless of its type or flags.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StreamExtension {
+    pub entry_type: EntryType,
+    pub flags: u8,
+    pub allocation_possible: bool,
+    pub no_fat_chain: bool,
+    pub name_length: u8,
+    pub name_hash: u16,
+    pub valid_data_length: u64,
+    pub first_cluster: u32,
+    pub data_length: u64,
+}
+
+/// Name-slot fields without imposing entry order, flags or UTF-16 validity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileNameEntry {
+    pub entry_type: EntryType,
+    pub flags: u8,
+    pub utf16: [u16; NAME_CHARS_PER_ENTRY],
+}
+
+/// A decoded name retains its original code units even when rendering is lossy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntrySetName {
+    pub utf16: Vec<u16>,
+    pub text: String,
+    pub utf16_ok: bool,
+}
+
+/// A complete declared set, including damaged files and unknown benign sets.
+/// Only missing bytes prevent decoding; strict and recovery policies remain
+/// separate. `checksum_ok` checks the actual bytes, without restoring InUse.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawEntrySet<'a> {
+    pub bytes: &'a [u8],
+    pub primary: FilePrimary,
+    pub stream: Option<StreamExtension>,
+    pub secondaries: Vec<EntryType>,
+    pub names: Vec<FileNameEntry>,
+    pub name_complete: bool,
+    pub checksum_ok: bool,
+}
+
+impl<'a> RawEntrySet<'a> {
+    pub fn parse(data: &'a [u8]) -> Option<Self> {
+        let primary = data.get(..ENTRY_SIZE)?;
+        let secondary_count = primary[1];
+        let bytes = data.get(..(usize::from(secondary_count) + 1) * ENTRY_SIZE)?;
+        let primary = FilePrimary {
+            raw: primary.try_into().unwrap(),
+            entry_type: EntryType::parse(primary)?,
+            secondary_count,
+            stored_checksum: u16_at(primary, 2),
+            attributes: u16_at(primary, 4),
+        };
+        let stream = bytes
+            .get(ENTRY_SIZE..ENTRY_SIZE * 2)
+            .map(|entry| StreamExtension {
+                entry_type: EntryType::parse(entry).unwrap(),
+                flags: entry[1],
+                allocation_possible: entry[1] & 1 != 0,
+                no_fat_chain: entry[1] & STREAM_FLAG_NO_FAT_CHAIN != 0,
+                name_length: entry[3],
+                name_hash: u16_at(entry, 4),
+                valid_data_length: u64_at(entry, 8),
+                first_cluster: u32_at(entry, 20),
+                data_length: u64_at(entry, 24),
+            });
+        let name_entries = stream.as_ref().map_or(0, |stream| {
+            usize::from(stream.name_length).div_ceil(NAME_CHARS_PER_ENTRY)
+        });
+        let names: Vec<_> = bytes[ENTRY_SIZE..]
+            .chunks_exact(ENTRY_SIZE)
+            .skip(1)
+            .take(name_entries)
+            .map(|entry| FileNameEntry {
+                entry_type: EntryType::parse(entry).unwrap(),
+                flags: entry[1],
+                utf16: std::array::from_fn(|index| u16_at(entry, 2 + index * 2)),
+            })
+            .collect();
+        let name_complete = stream.is_some() && names.len() == name_entries;
+        Some(Self {
+            bytes,
+            checksum_ok: entry_set_checksum(bytes) == primary.stored_checksum,
+            primary,
+            stream,
+            secondaries: bytes[ENTRY_SIZE..]
+                .chunks_exact(ENTRY_SIZE)
+                .map(|entry| EntryType::parse(entry).unwrap())
+                .collect(),
+            names,
+            name_complete,
+        })
+    }
+
+    pub fn name(&self) -> EntrySetName {
+        let length = self
+            .stream
+            .as_ref()
+            .map_or(0, |stream| usize::from(stream.name_length));
+        let utf16: Vec<_> = self
+            .names
+            .iter()
+            .flat_map(|entry| entry.utf16)
+            .take(length)
+            .collect();
+        let decoded = String::from_utf16(&utf16);
+        EntrySetName {
+            utf16_ok: decoded.is_ok(),
+            text: decoded.unwrap_or_else(|_| String::from_utf16_lossy(&utf16)),
+            utf16,
+        }
+    }
+}
+
+/// NameHash using the caller's volume-specific upcase mapping.
+pub fn name_hash(name: &[u16], upcase: impl Fn(u16) -> u16) -> u16 {
+    name.iter()
+        .flat_map(|unit| upcase(*unit).to_le_bytes())
+        .fold(0u16, |sum, byte| {
+            sum.rotate_right(1).wrapping_add(u16::from(byte))
+        })
+}
+
+/// SetChecksum over the actual bytes, excluding the stored checksum itself.
+pub fn entry_set_checksum(set: &[u8]) -> u16 {
+    checksum_entries(set, false)
+}
+
 /// SetChecksum over a whole set. Deleted entries clear InUse, so the bit is
 /// restored on each entry's first byte before summing; that lets a deleted
 /// set's stored checksum validate.
 pub fn set_checksum(set: &[u8]) -> u16 {
+    checksum_entries(set, true)
+}
+
+fn checksum_entries(set: &[u8], restore_in_use: bool) -> u16 {
     let mut checksum = 0u16;
     for (index, &byte) in set.iter().enumerate() {
         if index == 2 || index == 3 {
             continue;
         }
-        let value = if index % ENTRY_SIZE == 0 {
+        let value = if restore_in_use && index % ENTRY_SIZE == 0 {
             byte | 0x80
         } else {
             byte
@@ -349,50 +515,38 @@ pub fn set_checksum(set: &[u8]) -> u16 {
 /// Parses the entry set at `position`. Returns `None` when the bytes there do
 /// not have the structure of a file entry set.
 pub fn parse_set(data: &[u8], position: usize, limits: Limits) -> Option<EntrySet> {
-    let header = data.get(position..position + ENTRY_SIZE * 2)?;
-    if header[0] != TYPE_FILE && header[0] != TYPE_FILE_DELETED {
+    let raw = RawEntrySet::parse(data.get(position..)?)?;
+    if raw.primary.entry_type.value != TYPE_FILE
+        && raw.primary.entry_type.value != TYPE_FILE_DELETED
+    {
         return None;
     }
-    if header[ENTRY_SIZE] != TYPE_STREAM && header[ENTRY_SIZE] != TYPE_STREAM_DELETED {
+    let stream = raw.stream.as_ref()?;
+    if stream.entry_type.value != TYPE_STREAM && stream.entry_type.value != TYPE_STREAM_DELETED {
         return None;
     }
-    let secondary_count = usize::from(header[1]);
+    let secondary_count = usize::from(raw.primary.secondary_count);
     if !(MIN_SECONDARY_COUNT..=MAX_SECONDARY_COUNT).contains(&secondary_count) {
         return None;
     }
-    let slots = secondary_count + 1;
-    let set = data.get(position..position + ENTRY_SIZE * slots)?;
-    let stream = &set[ENTRY_SIZE..ENTRY_SIZE * 2];
-    let name_length = usize::from(stream[3]);
-    if name_length == 0 {
+    let set = raw.bytes;
+    if stream.name_length == 0 || !raw.name_complete {
         return None;
     }
-    let name_entries = name_length.div_ceil(NAME_CHARS_PER_ENTRY);
-    if name_entries + 1 > secondary_count {
+    if raw.names.iter().any(|entry| {
+        entry.entry_type.value != TYPE_NAME && entry.entry_type.value != TYPE_NAME_DELETED
+    }) {
         return None;
     }
-    let mut units = Vec::with_capacity(name_length);
-    for index in 0..name_entries {
-        let entry = &set[ENTRY_SIZE * (2 + index)..ENTRY_SIZE * (3 + index)];
-        if entry[0] != TYPE_NAME && entry[0] != TYPE_NAME_DELETED {
-            return None;
-        }
-        units.extend(
-            entry[2..ENTRY_SIZE]
-                .chunks_exact(2)
-                .map(|pair| u16_at(pair, 0)),
-        );
-    }
-    units.truncate(name_length);
-
-    let checksum_ok = set_checksum(set) == u16_at(set, 2);
-    let attributes = u16_at(set, 4);
-    let first_cluster = u32_at(stream, 20);
-    let length = u64_at(stream, 24);
+    let name = raw.name();
+    let checksum_ok = set_checksum(set) == raw.primary.stored_checksum;
+    let attributes = raw.primary.attributes;
+    let first_cluster = stream.first_cluster;
+    let length = stream.data_length;
     if !checksum_ok {
         // Without a checksum, accept only values that could plausibly be real.
         let capacity = u64::from(limits.cluster_count) * limits.cluster_size;
-        let name_ok = units.iter().all(|&unit| unit >= 0x20);
+        let name_ok = name.utf16.iter().all(|&unit| unit >= 0x20);
         if attributes & !ATTRIBUTE_VALID_MASK != 0
             || length > capacity
             || !name_ok
@@ -403,19 +557,19 @@ pub fn parse_set(data: &[u8], position: usize, limits: Limits) -> Option<EntrySe
     }
     Some(EntrySet {
         offset: position,
-        name: String::from_utf16_lossy(&units),
-        in_use: set[0] == TYPE_FILE,
+        name: name.text,
+        in_use: raw.primary.entry_type.in_use,
         checksum_ok,
         attributes,
         is_dir: attributes & ATTRIBUTE_DIRECTORY != 0,
         first_cluster,
         length,
-        valid_length: u64_at(stream, 8),
-        no_fat_chain: stream[1] & STREAM_FLAG_NO_FAT_CHAIN != 0,
+        valid_length: stream.valid_data_length,
+        no_fat_chain: stream.no_fat_chain,
         created: decode_timestamp_with_offset(u32_at(set, 8), set[22]),
         modified: decode_timestamp_with_offset(u32_at(set, 12), set[23]),
         accessed: decode_timestamp_with_offset(u32_at(set, 16), set[24]),
-        slots,
+        slots: secondary_count + 1,
     })
 }
 

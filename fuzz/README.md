@@ -26,7 +26,7 @@ A crash found by the explorer is a bug. Commit its reproducer to
 | `allocation_bitmap` | `AllocationBitmap::parse` |
 | `upcase_table` | `UpcaseTable::parse` |
 | `root_metadata` | `RootMetadata::parse` |
-| `directory` | `directory::parse` |
+| `directory` | `directory::parse`, primitive `EntryType::parse` and `RawEntrySet::parse` |
 | `timestamp` | `Timestamp::decode` |
 | `timestamps` | `Timestamps::parse` |
 | `image` | a synthetic volume opened, walked, read, looked up and checked |

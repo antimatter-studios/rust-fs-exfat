@@ -179,3 +179,82 @@ fn benign_primary_sets_require_a_checksum_and_critical_entries_fail() {
     seal_set(&mut data[..32]);
     assert!(parse(&data, volume.boot(), volume.upcase(), false).is_err());
 }
+
+#[test]
+fn primitive_backed_validation_keeps_error_messages_and_precedence() {
+    let volume = Volume::open(Bytes(metadata_volume())).unwrap();
+    let valid = file_set("hello", 0x20, 0, 0, false);
+    for (offset, value, expected) in [
+        (32, 0x40, "directory set checksum or secondary type"),
+        (32, 0xc1, "file stream extension missing or invalid"),
+        (33, 0, "file stream extension missing or invalid"),
+        (35, 0, "file name length or secondary count"),
+        (35, 16, "file name length or secondary count"),
+        (64, 0xc0, "file name entry order or flags"),
+        (65, 1, "file name entry order or flags"),
+        (36, 0, "file name character or hash"),
+        (66, 1, "file name character or hash"),
+    ] {
+        let mut damaged = valid.clone();
+        damaged[offset] = value;
+        seal_set(&mut damaged);
+        assert!(
+            matches!(
+                parse(&damaged, volume.boot(), volume.upcase(), false),
+                Err(fs_exfat::Error::Invalid(message)) if message == expected
+            ),
+            "offset {offset}: expected {expected}"
+        );
+        damaged[2] ^= 1;
+        assert!(matches!(
+            parse(&damaged, volume.boot(), volume.upcase(), false),
+            Err(fs_exfat::Error::Invalid(
+                "directory set checksum or secondary type"
+            ))
+        ));
+    }
+    for secondary_count in [0, 1] {
+        let mut damaged = valid.clone();
+        damaged[1] = secondary_count;
+        let length = (usize::from(secondary_count) + 1) * 32;
+        seal_set(&mut damaged[..length]);
+        assert!(matches!(
+            parse(&damaged, volume.boot(), volume.upcase(), false),
+            Err(fs_exfat::Error::Invalid(
+                "file stream extension missing or invalid"
+            ))
+        ));
+    }
+}
+
+#[test]
+fn strict_sets_keep_benign_secondaries_beyond_the_recovery_candidate_limit() {
+    let volume = Volume::open(Bytes(metadata_volume())).unwrap();
+    let mut set = file_set("hello", 0x20, 0, 0, false);
+    for _ in 0..17 {
+        let mut entry = [0; 32];
+        entry[0] = 0xe0;
+        set.extend(entry);
+    }
+    set[1] = 19;
+    seal_set(&mut set);
+    let entries = parse(&set, volume.boot(), volume.upcase(), false).unwrap();
+    assert_eq!(entries[0].name(), "hello");
+    assert!(fs_exfat::primitives::parse_set(
+        &set,
+        0,
+        fs_exfat::primitives::Limits {
+            cluster_count: volume.boot().cluster_count,
+            cluster_size: volume.boot().cluster_size(),
+        }
+    )
+    .is_none());
+    set[96] = 0xc0;
+    seal_set(&mut set);
+    assert!(matches!(
+        parse(&set, volume.boot(), volume.upcase(), false),
+        Err(fs_exfat::Error::Unsupported(
+            "unknown critical file secondary"
+        ))
+    ));
+}

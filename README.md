@@ -29,6 +29,11 @@ The library is `fs_exfat`. Strict entry points accept `fs_core::BlockRead` only;
 devices are held behind `ReadOnlyDevice`, never a writable device trait or a
 runtime writable flag. Reads passed to a device are aligned to 512 bytes.
 See [features](docs/features.md) and [provenance](PROVENANCE.md).
+Directory entry types, primary/stream/name fields, UTF-16 names, entry-set
+checksums and name hashes are decoded by `fs_exfat::primitives`. Its
+`RawEntrySet` retains damaged values and validity flags; strict directory
+validation and recovery's `parse_set`/`find_sets` apply their distinct policies
+to the same decoded fields.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).
