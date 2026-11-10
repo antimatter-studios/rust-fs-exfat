@@ -12,10 +12,10 @@ the oracle's static-library link test.
 Each test tier uses rust-fs-core's tier.sh, refuses skipped and ignored tests,
 and checks a minimum executed count. Logs stay in tmp/logs/.
 
-| Tier | Measured on 2026-11-04 | Budget | Executed floor |
+| Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | Fuzz-gate cold target: 198 lines, 9877 bytes; build-first: 159 lines, 8625 bytes, with 79 tests | 230 lines, 12000 bytes, allowing clean-build diagnostics | 79 |
-| oracle | Cold target: 199 lines, 7759 bytes including ABI/CLI comparisons, the linked C caller, the seed cut and the unaligned mount | 240 lines, 16000 bytes, allowing formatter/checker diagnostics | 8 |
+| unit | 2026-11-10 scale-regression cold target: 280 lines, 14518 bytes, 149 tests; final geometry-extension cached target: 243 lines, 13441 bytes, 150 tests | 290 lines, 15000 bytes, allowing clean-build diagnostics | 150 |
+| oracle | 2026-11-10: 223 lines, 11070 bytes, 25 tests including large-volume and million-entry comparisons | 270 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
 
@@ -64,8 +64,12 @@ The C ABI and CLI are exercised on the same independent images. Complete ABI and
 CLI listings and every file's SHA-256 match the mounted driver. The C compiler
 also links the static library and reads a reference-created file on each sector
 size. Check-only fsck agrees with the reference checker on those clean images;
-synthetic tests cover cross-links, lost clusters, dirty state and explicit audit
-limits. CLI tests cover verified extraction, source protection and repair refusal.
+scale tests additionally compare high-cluster cross-links, lost clusters and a
+million-entry root with the platform checker. Synthetic tests cover the format
+maximum, dirty state, resource refusal and injected I/O failure. The scale images
+are sparse or streamed files under this worktree's ignored `tmp/`; see the
+[audit memory contract](fsck-memory.md). CLI tests cover verified extraction,
+source protection and repair refusal.
 
 Before any image operation, the safety guard checks the reviewed receipt parser,
 cleanup, fresh image binding and attach/query/detach ordering. Only the exact

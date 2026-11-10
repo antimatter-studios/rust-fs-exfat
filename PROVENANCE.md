@@ -1,5 +1,20 @@
 # Provenance
 
+## Complete allocation audits
+
+For #38, the check-only audit streams the active FAT and directories and tracks
+ownership in a cluster bitset. The allocation bitmap and upcase table are read
+from their validated system-stream lengths, independently of extraction limits.
+This is new code based on the public exFAT specification and existing strict
+decoders; no other filesystem implementation is an input.
+
+The macOS oracle formats a newly created large sparse image with `newfs_exfat`
+and compares check-only results with `fsck_exfat -n`. Additional specification-
+built sparse/streamed images cross-validate high-cluster ownership failures and
+a million-entry root with the platform checker. The format-maximum boundary and
+resource/I/O refusal tests are synthetic evidence only. The budget and exact
+per-cluster cost are documented in `docs/fsck-memory.md`.
+
 ## Permissive structure snapshots
 
 For #35, on 2026-11-09 the owner authorized the current Captain Salvage

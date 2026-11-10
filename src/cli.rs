@@ -7,7 +7,7 @@ use crate::timestamp::Timestamp;
 use crate::Error;
 use fs_core::cli::clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
 use fs_core::cli::{self, transfer, CliError, Family, Json, Outcome, Tool};
-use fs_core::OwnedSlice;
+use fs_core::{FileDevice, OwnedSlice, ReadOnlyDevice};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
@@ -90,7 +90,7 @@ fn fsck_command() -> Command {
         .arg(offset())
         .arg(Arg::new("no-repair").short('n').long("no-repair").action(ArgAction::SetTrue).help("Check only (always enabled; repairs are impossible)"))
         .args(cli::format_args())
-        .after_help("Checks both boot copies, system metadata, directory entry sets, allocation ownership and file chains.\nThe allocation and entry audit is bounded to 1,048,576 clusters/entries.\nExit codes: 0 clean, 4 uncorrected inconsistencies, 8 I/O or unsupported audit limits, 16 usage.\nThere is no repair mode.")
+        .after_help("Checks both boot copies, system metadata, directory entry sets, allocation ownership and file chains.\nAll exFAT cluster counts are supported: bitmap and ownership use 1/4 byte per cluster, with a 1,537 MiB audit payload ceiling.\nFAT and directories are streamed in 64 KiB chunks; directory workspace is budgeted, not entry-count limited.\nAn exhausted budget or incomplete audit fails explicitly; no partial clean result is emitted.\nExit codes: 0 clean, 4 uncorrected inconsistencies, 8 I/O or unsupported audit limits, 16 usage.\nThere is no repair mode.")
 }
 
 fn error(error: Error) -> CliError {
@@ -257,8 +257,16 @@ fn fsck_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
     if !offset.is_multiple_of(512) {
         return Err(CliError::usage("--offset must be aligned to 512 bytes").with_code(16));
     }
-    let volume = interface::open_path(image, offset).map_err(fsck_error)?;
-    let report = check::check(&volume).map_err(fsck_error)?;
+    let device = FileDevice::open(image).map_err(|problem| fsck_error(problem.into()))?;
+    let length = fs_core::BlockRead::size_bytes(&device);
+    if offset >= length {
+        return Err(fsck_error(Error::Invalid(
+            "volume offset is outside the device",
+        )));
+    }
+    let device = std::sync::Arc::new(ReadOnlyDevice::new(device));
+    let report = check::check_device(OwnedSlice::new(device, offset, length - offset))
+        .map_err(fsck_error)?;
     let healthy = report.healthy();
     let differences = report
         .boot_differences
