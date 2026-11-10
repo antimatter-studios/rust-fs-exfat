@@ -100,34 +100,56 @@ pub struct BootSector {
     pub signature_ok: bool,
 }
 
-impl BootSector {
+/// Raw boot fields and identity diagnostics, including unrecognized filesystem
+/// names. Only a buffer shorter than 512 bytes is rejected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootSectorHeader {
+    pub sector: BootSector,
+    pub jump_valid: bool,
+    pub file_system_name_valid: bool,
+    pub must_be_zero_valid: bool,
+}
+
+impl BootSectorHeader {
     pub fn parse(sector: &[u8]) -> Result<Self> {
         if sector.len() < 512 {
             return Err(Error::Invalid("boot sector is shorter than 512 bytes"));
         }
-        if &sector[3..11] != b"EXFAT   " {
+        Ok(Self {
+            sector: BootSector {
+                file_system_name: String::from_utf8_lossy(&sector[3..11]).into_owned(),
+                partition_offset: u64_at(sector, 64),
+                volume_length: u64_at(sector, 72),
+                fat_offset: u32_at(sector, 80),
+                fat_length: u32_at(sector, 84),
+                cluster_heap_offset: u32_at(sector, 88),
+                cluster_count: u32_at(sector, 92),
+                root_cluster: u32_at(sector, 96),
+                volume_serial: u32_at(sector, 100),
+                revision: u16_at(sector, 104),
+                volume_flags: u16_at(sector, 106),
+                bytes_per_sector_shift: sector[108],
+                sectors_per_cluster_shift: sector[109],
+                number_of_fats: sector[110],
+                percent_in_use: sector[112],
+                signature_ok: sector[510] == 0x55 && sector[511] == 0xAA,
+            },
+            jump_valid: sector[..3] == [0xeb, 0x76, 0x90],
+            file_system_name_valid: &sector[3..11] == b"EXFAT   ",
+            must_be_zero_valid: sector[11..64].iter().all(|byte| *byte == 0),
+        })
+    }
+}
+
+impl BootSector {
+    pub fn parse(sector: &[u8]) -> Result<Self> {
+        let header = BootSectorHeader::parse(sector)?;
+        if !header.file_system_name_valid {
             return Err(Error::Invalid(
                 "no exFAT signature at offset 3: this is not an exFAT volume",
             ));
         }
-        Ok(Self {
-            file_system_name: String::from_utf8_lossy(&sector[3..11]).into_owned(),
-            partition_offset: u64_at(sector, 64),
-            volume_length: u64_at(sector, 72),
-            fat_offset: u32_at(sector, 80),
-            fat_length: u32_at(sector, 84),
-            cluster_heap_offset: u32_at(sector, 88),
-            cluster_count: u32_at(sector, 92),
-            root_cluster: u32_at(sector, 96),
-            volume_serial: u32_at(sector, 100),
-            revision: u16_at(sector, 104),
-            volume_flags: u16_at(sector, 106),
-            bytes_per_sector_shift: sector[108],
-            sectors_per_cluster_shift: sector[109],
-            number_of_fats: sector[110],
-            percent_in_use: sector[112],
-            signature_ok: sector[510] == 0x55 && sector[511] == 0xAA,
-        })
+        Ok(header.sector)
     }
 
     pub fn bytes_per_sector(&self) -> u64 {
@@ -171,6 +193,43 @@ pub fn boot_checksum(region: &[u8], bytes_per_sector: usize) -> u32 {
 /// Panics when that word is not present.
 pub fn stored_boot_checksum(region: &[u8], bytes_per_sector: usize) -> u32 {
     u32_at(region, bytes_per_sector * 11)
+}
+
+/// A complete boot copy with raw fields and checksum/signature diagnostics.
+/// Damaged identities, geometry, checksum repetitions and extended signatures
+/// are retained, not rejected. Sector size and complete buffers are required.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootRegion {
+    pub header: BootSectorHeader,
+    pub computed_checksum: u32,
+    pub stored_checksum: u32,
+    pub checksum_valid: bool,
+    pub extended_signatures_valid: bool,
+}
+
+impl BootRegion {
+    pub fn parse(region: &[u8], bytes_per_sector: usize) -> Result<Self> {
+        if !matches!(bytes_per_sector, 512 | 1024 | 2048 | 4096) {
+            return Err(Error::Invalid("checksum sector size"));
+        }
+        if region.len() < bytes_per_sector * 11 {
+            return Err(Error::Invalid("short boot region"));
+        }
+        let stored = region
+            .get(bytes_per_sector * 11..bytes_per_sector * 12)
+            .ok_or(Error::Invalid("short checksum sector"))?;
+        let computed_checksum = boot_checksum(region, bytes_per_sector);
+        Ok(Self {
+            header: BootSectorHeader::parse(region)?,
+            computed_checksum,
+            stored_checksum: stored_boot_checksum(region, bytes_per_sector),
+            checksum_valid: stored
+                .chunks_exact(4)
+                .all(|entry| u32_at(entry, 0) == computed_checksum),
+            extended_signatures_valid: (1..=8)
+                .all(|index| u32_at(region, (index + 1) * bytes_per_sector - 4) == 0xaa55_0000),
+        })
+    }
 }
 
 /// Decodes a two-second-resolution timestamp, without calendar-day validation.

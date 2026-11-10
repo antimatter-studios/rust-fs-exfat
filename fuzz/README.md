@@ -21,7 +21,7 @@ A crash found by the explorer is a bug. Commit its reproducer to
 
 | Target | Decoder |
 |---|---|
-| `boot_sector` | Strict and primitive `BootSector::parse`, and strict `boot_checksum` |
+| `boot_sector` | Strict and primitive `BootSector::parse`, primitive `BootSectorHeader::parse` and `BootRegion::parse`, and strict `boot_checksum` |
 | `fat_entry` | `FatEntry::parse` |
 | `allocation_bitmap` | `AllocationBitmap::parse` |
 | `upcase_table` | `UpcaseTable::parse` |
