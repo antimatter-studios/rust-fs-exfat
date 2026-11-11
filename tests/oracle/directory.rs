@@ -41,8 +41,9 @@ fn walk<Device: BlockRead>(
 
 #[test]
 fn every_directory_path_and_file_size_match_the_read_only_macos_driver() {
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
     for sector in [512, 4096] {
         let image = directory.join(format!("reference-{sector}.dmg"));
         assert!(std::fs::symlink_metadata(&image)

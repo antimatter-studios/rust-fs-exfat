@@ -13,7 +13,7 @@
 # until then nothing may be skipped.
 set -uo pipefail
 
-all="changes unit fixtures images test-arm64 oracle-macos package semver msrv cli provenance scripts"
+all="changes unit fixtures images test test-arm64 oracle-macos package semver msrv cli provenance scripts"
 full_only=" "
 vm_only=" "
 

@@ -1,6 +1,6 @@
 //! Cuts the fuzz corpus from images an independent formatter wrote and the macOS
 //! driver populated, and proves each seed reaches past its decoder's first check.
-//! `EXFAT_FUZZ_SEEDS_OUT=$PWD/fuzz/corpus chore test:oracle` writes the seeds there.
+//! `EXFAT_FUZZ_SEEDS_OUT=$PWD/fuzz/corpus chore test:oracle-macos` writes the seeds there.
 
 #[path = "../../fuzz/shared/mod.rs"]
 mod shared;
@@ -51,8 +51,9 @@ fn prefixed(prefix: &[u8], body: &[u8]) -> Vec<u8> {
 
 #[test]
 fn seeds_cut_from_reference_images_reach_past_each_decoders_first_check() {
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
     let out = std::env::var_os("EXFAT_FUZZ_SEEDS_OUT").map(PathBuf::from);
     let write = |target: &str, name: &str, bytes: &[u8]| {
         if let Some(out) = &out {

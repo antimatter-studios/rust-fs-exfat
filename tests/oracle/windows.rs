@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 fn directory() -> PathBuf {
     std::env::var("EXFAT_ORACLE_DIR")
-        .expect("run chore test:oracle on macOS")
+        .expect("run chore test:oracle-macos on macOS")
         .into()
 }
 

@@ -2,7 +2,7 @@
 
 ## Decision and provenance
 
-Issue #22 adds a second fixture kind to `chore test:oracle`: `windows`, alongside
+Issue #22 adds a second fixture kind to `chore test:oracle-macos`: `windows`, alongside
 the existing macOS `reference` images. These are **spec-built Windows-layout
 fixtures, not Windows-produced images**. No licence-clean published Windows image
 was verified, so no external image is redistributed. The builder is test

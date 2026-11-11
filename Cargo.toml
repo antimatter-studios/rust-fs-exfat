@@ -106,3 +106,7 @@ lto = "thin"
 [[test]]
 name = "images"
 path = "tests/images.rs"
+
+[[test]]
+name = "exfatprogs"
+path = "tests/exfatprogs.rs"

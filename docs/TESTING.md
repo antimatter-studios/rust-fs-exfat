@@ -56,9 +56,9 @@ flush calls before checking the actual runner. This addresses #12.
 
 The unit tier and the macOS-only oracle tier are explicit, separate tasks.
 `chore test` requires both. Missing tools and non-macOS oracle invocation fail,
-naming `chore test:oracle`. CI's `unit` (x86_64) and `test-arm64` (aarch64)
+naming `chore test:oracle-macos`. CI's `unit` (x86_64) and `test-arm64` (aarch64)
 jobs run `chore test:unit` on Linux; `oracle-macos` runs it and then
-`chore test:oracle` on macOS. No decoder test is ignored.
+`chore test:oracle-macos` on macOS. No decoder test is ignored.
 
 Directory sets spanning FAT-linked clusters and contiguous subdirectories are
 validated. Fresh images are populated through the macOS driver, then remounted

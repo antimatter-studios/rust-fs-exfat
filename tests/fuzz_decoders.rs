@@ -215,7 +215,7 @@ fn exercise(target: &'static Target) {
     let seeds = seeds_of(target.name);
     assert!(
         !seeds.is_empty(),
-        "fuzz/corpus/{} has no seeds; chore test:oracle regenerates them with EXFAT_FUZZ_SEEDS_OUT",
+        "fuzz/corpus/{} has no seeds; chore test:oracle-macos regenerates them with EXFAT_FUZZ_SEEDS_OUT",
         target.name
     );
     let (done, finished) = mpsc::channel();

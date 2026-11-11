@@ -10,8 +10,9 @@ use support::Bytes;
 
 #[test]
 fn case_insensitive_lookup_and_failures_match_the_read_only_macos_driver() {
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
     for sector in [512, 4096] {
         let image = directory.join(format!("reference-{sector}.dmg"));
         assert!(std::fs::symlink_metadata(&image)

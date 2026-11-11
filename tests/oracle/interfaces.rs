@@ -58,7 +58,7 @@ unsafe fn abi_listing(
 fn interfaces_match_the_reference_driver_and_check_only_oracle() {
     let directory = PathBuf::from(
         std::env::var_os("EXFAT_ORACLE_DIR")
-            .expect("run chore test:oracle to generate independent macOS images"),
+            .expect("run chore test:oracle-macos to generate independent macOS images"),
     );
     let binary = env!("CARGO_BIN_EXE_rust-fs-exfat");
     for sector in [512, 4096] {

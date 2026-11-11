@@ -20,7 +20,7 @@ const READ_STEP: usize = 1000;
 
 fn oracle_directory() -> PathBuf {
     std::env::var("EXFAT_ORACLE_DIR")
-        .expect("run chore test:oracle on macOS to create independent reference images")
+        .expect("run chore test:oracle-macos on macOS to create independent reference images")
         .into()
 }
 

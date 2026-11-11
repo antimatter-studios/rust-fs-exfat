@@ -20,7 +20,7 @@ use support::Bytes;
 fn macos_formatted_and_written_volumes_break_no_specification_rule() {
     let directory = PathBuf::from(
         std::env::var("EXFAT_ORACLE_DIR")
-            .expect("run chore test:oracle on macOS to create independent reference images"),
+            .expect("run chore test:oracle-macos on macOS to create independent reference images"),
     );
     for sector in [512, 4096] {
         let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
@@ -45,7 +45,7 @@ fn macos_formatted_and_written_volumes_break_no_specification_rule() {
 fn macos_formatter_and_checker_agree_with_both_boot_regions() {
     let directory = PathBuf::from(
         std::env::var("EXFAT_ORACLE_DIR")
-            .expect("run chore test:oracle on macOS to create independent reference images"),
+            .expect("run chore test:oracle-macos on macOS to create independent reference images"),
     );
     for sector in [512, 4096] {
         let image = directory.join(format!("reference-{sector}.dmg"));

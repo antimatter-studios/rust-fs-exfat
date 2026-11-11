@@ -23,11 +23,12 @@ name: ci
 #                 the harness VM under KVM on x86_64 after `chore siblings`
 #                 and `chore tools`, handed to the other jobs as an
 #                 artifact.
-#   images        (#121) the fixtures artifact read back with no VM;
-#                 `chore test:images` (#122) takes it over.
-#   test          (#120-#125) x86_64, where GitHub gives us KVM: `chore
-#                 lint` and `chore test`, with every exfatprogs call, every
-#                 kernel mount and every relan/exfat call inside the VM.
+#   images        (#122) `chore test:images`: the fixtures artifact read
+#                 with no VM, against the kernel's listing of each image.
+#   test          x86_64, where GitHub gives us KVM: the Linux oracles,
+#                 every exfatprogs call (`chore test:oracle`, #123), and
+#                 then every kernel mount and every relan/exfat call
+#                 (#124, #125), inside the VM.
 #   test-arm64    aarch64 matters on its own (c_char is unsigned there, and
 #                 Apple Silicon hosts run on it) but GitHub's arm64 runners
 #                 have NO KVM, so no VM can run: this job runs the tiers
@@ -35,11 +36,10 @@ name: ci
 #                 `chore test:images` once the fixtures exist (#122).
 #   suite-in-vm   (#126) `chore test:vm`: the whole suite compiled and run
 #                 inside the guest, the way a macOS host runs the Linux one.
-#   oracle-macos  `chore test:unit` on macOS, then `chore test:oracle`:
-#                 macOS's own newfs_exfat, fsck_exfat -n and read-only
-#                 driver, the independent oracle that needs no VM -- only a
-#                 Mac. #123 renames the task test:oracle-macos when the
-#                 exfatprogs oracle takes test:oracle.
+#   oracle-macos  `chore test:unit` and `chore test:images` on macOS, then
+#                 `chore test:oracle-macos`: macOS's own newfs_exfat,
+#                 fsck_exfat -n and read-only driver, the independent
+#                 oracle that needs no VM -- only a Mac.
 #   package       `chore test:package`: `cargo package` verifies the crate
 #                 as published, and a copy proves packaging leaves nothing a
 #                 later test build links (#5).
@@ -348,6 +348,88 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  test:
+    # x86_64, where GitHub gives us KVM: the Linux oracles, every call inside
+    # the harness guest. exfatprogs (`chore test:oracle`, #123) judges every
+    # fixture; the kernel (#124) and relan/exfat (#125) join this job. The
+    # runner's own exfatprogs is made unusable first, so a test that ran a
+    # tool on the host would fail here as well as in tests/test_contract.rs.
+    name: test (x86_64, oracles in the VM)
+    needs: fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-fs-exfat/target
+          key: ${{ runner.os }}-x86_64-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-x86_64-cargo-
+      - name: PyYAML
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/python/bin/pip" install --quiet PyYAML==6.0.3
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - name: chore siblings
+        run: chore siblings
+      - name: KVM, QEMU and Vagrant
+        id: vm-host
+        run: ../fs-linux-test-harness/scripts/ci-setup-linux.sh
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.vagrant.d/boxes
+          key: ${{ steps.vm-host.outputs.box-cache-key }}
+      - name: chore tools
+        run: chore tools
+      - name: The fixtures, from the fixtures job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fixtures
+          path: rust-fs-exfat/test-disks
+      - name: Make the runner's own exfatprogs unusable
+        run: |
+          set -eu
+          for tool in mkfs.exfat fsck.exfat dump.exfat exfatlabel tune.exfat; do
+            path="$(command -v "$tool" 2>/dev/null || true)"
+            [ -n "$path" ] || continue
+            sudo mv "$path" "$path.host-copy"
+            printf '#!/bin/sh\necho "::error::%s ran on the runner; the oracle tools belong in the VM" >&2\nexit 97\n' \
+              "$tool" | sudo tee "$path" >/dev/null
+            sudo chmod +x "$path"
+            echo "poisoned $path"
+          done
+      - name: chore test:oracle
+        id: tier
+        run: chore test:oracle
+      - name: Keep the tier logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-test
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+      - name: chore vm:status (the VM is down again)
+        run: '! chore vm:status'
+
   # ---------------------------------------------------------------------
   # THE REST OF THE VM HALF GOES HERE (#122-#126): `test` (x86_64, KVM:
   # `chore lint` and `chore test` with the oracles in the guest) and
@@ -470,8 +552,8 @@ jobs:
           path: rust-fs-exfat/test-disks
       - name: chore test:images
         run: chore test:images
-      - name: chore test:oracle
-        run: chore test:oracle
+      - name: chore test:oracle-macos
+        run: chore test:oracle-macos
       - name: Keep the tier logs
         if: always() && steps.tier.outcome != 'skipped'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -701,7 +783,7 @@ jobs:
     name: ci-ok
     if: always()
     # (#122-#126) test and suite-in-vm join this list.
-    needs: [changes, unit, fixtures, images, test-arm64, oracle-macos, package, semver, msrv, cli, provenance, scripts]
+    needs: [changes, unit, fixtures, images, test, test-arm64, oracle-macos, package, semver, msrv, cli, provenance, scripts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -17,6 +17,11 @@ chore_min_version: 0.19.0
 #   chore test:images  tests that read the fixtures but need no VM: the
 #                      strict reader, the audit and salvage against the
 #                      kernel's listing of each image
+#   chore test:oracle  exfatprogs reads every fixture IN THE GUEST: fsck.exfat
+#                      -n for consistency, dump.exfat field for field
+#   chore test:oracle-macos
+#                      macOS's newfs_exfat, fsck_exfat -n and read-only
+#                      driver, on a Mac host
 #   chore vm:*         the harness's tasks: boot, provision (scripts/vm-setup.sh:
 #                      exfatprogs and the kernel's exfat module), tear down
 #
@@ -170,9 +175,10 @@ tasks:
     # 488 / 29,403 with one slow-test notice and 489 / 29,565 with two), plus
     # one 69-byte line for tests/cli.rs's check that the cli tier's sample
     # volume is the one the cargo tests build (#127). CI runs `chore build`
-    # first, so the log holds no cold build.
+    # first, so the log holds no cold build. tests/test_contract.rs (#123)
+    # adds 12 lines and 525 bytes, measured on a macOS host: 505 / 30,295.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 493 29770 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write --test write_files --test cli_write && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 505 30295 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write --test write_files --test cli_write --test test_contract && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:images:
     desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'
@@ -190,11 +196,31 @@ tasks:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 70 2800 -- cargo test --locked --release --features cli,test-support --test images'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored images 7
   test:oracle:
+    desc: 'exfatprogs judges every fixture: fsck.exfat -n and dump.exfat, every call made inside the harness VM'
+    # tests/exfatprogs.rs, through tests/guest_support: one guest call per
+    # image, each tagged `[oracle vm]`. --show-output keeps those lines, the
+    # evidence of what was checked, in tmp/logs/oracle.log. scripts/test.sh
+    # runs cargo as a harness session, so the VM it boots comes down when
+    # the tier ends. tests/test_contract.rs (unit tier) fails the suite if a
+    # test runs a Linux tool on the host.
+    #
+    # BUDGET: 107 lines / 5,718 bytes from a cold build on a macOS host, 69 /
+    # 4,553 warm (#123); 140 / 7,500 is about 30% over the cold run. FLOOR: both
+    # tests.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 310 16000 -- bash scripts/test-oracle.sh'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 25
+      - scripts/tools.sh --check
+      - test-disks/build-fixtures.sh --check
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 140 7500 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 2
+  test:oracle-macos:
+    desc: 'macOS newfs_exfat, fsck_exfat -n and the read-only macOS driver, on a Mac host'
+    # The host oracle that was test:oracle before exfatprogs took the name
+    # (#123). Its log is still tmp/logs/oracle-macos.log.
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 310 16000 -- bash scripts/test-oracle.sh'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle-macos 25
   test:
-    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:package', 'chore test:scripts']
+    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:oracle-macos', 'chore test:package', 'chore test:scripts']
   fuzz:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'
