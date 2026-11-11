@@ -1,0 +1,3 @@
+## Reading
+
+| Reserved bytes in salvage's noise filter | Experimental; `parse_set`, `find_sets` and salvage's candidate scan reject a checksum-failed File entry set whose File reserved bytes 6-7 or 25-31 (section 7.4, Table 27) or Stream Extension reserved bytes 2, 6-7 or 16-19 (section 7.6, Table 33) are not zero; a set whose checksum matches is kept as written, and the `file-reserved` and `stream-reserved` deviation rules still note its reserved bytes; the macOS oracle confirms every set macOS writes keeps them zero | Unreleased (#92) | #92 | `src/primitives.rs`, `tests/primitive_cases/parse.rs`, `tests/oracle/primitives.rs` |
