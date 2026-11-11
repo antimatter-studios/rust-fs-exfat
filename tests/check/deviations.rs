@@ -751,3 +751,64 @@ fn deviations_beyond_the_listing_limit_are_counted() {
     assert_eq!(report.omitted.get(&Rule::EndOfDirectory), Some(&6));
     assert_eq!(report.count(Rule::EndOfDirectory), 70);
 }
+
+/// The interface image grown to 1000 clusters, with an Up-case Table of 512
+/// clusters at cluster 10: a valid compressed table of 261888 bytes, Table
+/// 24's 128 mappings then an identity run of one per character up to FFFFh.
+fn long_upcase_image() -> Vec<u8> {
+    let mut bytes = image();
+    both_boot(&mut bytes, |region| {
+        support::put32(region, 92, 1000);
+        // Clusters 2, 3 and 5 to 9, and the 512 of the table: 519 of 1000.
+        region[112] = 51;
+    });
+    let mut words: Vec<u16> = (0..0x80u16)
+        .map(|unit| match unit {
+            0x61..=0x7A => unit - 0x20,
+            _ => unit,
+        })
+        .collect();
+    for _ in 0x80..=0xFFFF {
+        words.extend([0xFFFF, 1]);
+    }
+    let table: Vec<u8> = words.iter().flat_map(|word| word.to_le_bytes()).collect();
+    assert!(table.len() > 128 * 1024);
+    let first = 10usize;
+    let clusters = table.len().div_ceil(SECTOR);
+    let at = ROOT + (first - 2) * SECTOR;
+    put(&mut bytes, at, &table);
+    for cluster in first..first + clusters {
+        let next = if cluster + 1 == first + clusters {
+            0xFFFF_FFFF
+        } else {
+            cluster as u32 + 1
+        };
+        support::put32(&mut bytes, FAT + cluster * 4, next);
+        let index = cluster - 2;
+        bytes[BITMAP + index / 8] |= 1 << (index % 8);
+    }
+    support::put64(&mut bytes, ROOT + 24, 125);
+    support::put32(&mut bytes, ROOT + 52, first as u32);
+    support::put64(&mut bytes, ROOT + 56, table.len() as u64);
+    support::put32(
+        &mut bytes,
+        ROOT + 36,
+        fs_exfat::metadata::checksum32(&table),
+    );
+    // The table's old cluster, 4, is freed.
+    support::put32(&mut bytes, FAT + 4 * 4, 0);
+    bytes[BITMAP] &= !(1 << 2);
+    bytes
+}
+
+#[test]
+fn a_compressed_upcase_table_longer_than_128_kib_is_accepted() {
+    // Sections 7.2.4 (through 6.3.6 and 6.2.3), 7.2.5 and 7.2.5.1 set no
+    // maximum DataLength for the Up-case Table (#76).
+    let bytes = long_upcase_image();
+    fs_exfat::volume::Volume::open(Bytes(bytes.clone())).unwrap();
+    check_device(Bytes(bytes.clone())).unwrap();
+    let report = deviations(&bytes);
+    assert_eq!(report.of(Rule::UpcaseCoverage).count(), 0, "{report:?}");
+    assert!(report.skipped.is_empty(), "{report:?}");
+}

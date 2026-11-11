@@ -147,3 +147,29 @@ fn zero_count_identity_run_is_read_as_no_mappings() {
     assert!(raw.usable());
     assert!(UpcaseTable::parse(&data, checksum32(&data)).is_ok());
 }
+
+/// A valid compressed table longer than an uncompressed one: Table 24's 128
+/// mappings, then an identity run of one for each character from 0080h to
+/// FFFFh, 261888 bytes in all.
+fn long_compressed() -> Vec<u16> {
+    let mut words: Vec<u16> = (0..0x80).map(latin1_upcase).collect();
+    for _ in 0x80..=0xFFFF {
+        words.extend([0xFFFF, 1]);
+    }
+    words
+}
+
+#[test]
+fn a_compressed_table_longer_than_128_kib_is_read() {
+    // Sections 7.2.4 (through 6.3.6 and 6.2.3), 7.2.5 and 7.2.5.1 set no
+    // maximum DataLength for the Up-case Table; they only require it to map
+    // exactly 0000h to FFFFh (#76).
+    let data = bytes(&long_compressed());
+    assert!(data.len() > 128 * 1024);
+    let raw = RawUpcaseTable::parse(&data, checksum32(&data));
+    assert_eq!(raw.issue, None);
+    assert!(raw.complete && raw.ascii_ok && raw.checksum_ok);
+    assert!(raw.length_ok);
+    assert!(raw.usable());
+    assert!(UpcaseTable::parse(&data, checksum32(&data)).is_ok());
+}

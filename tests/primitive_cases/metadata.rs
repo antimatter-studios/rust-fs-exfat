@@ -91,9 +91,12 @@ fn upcase_damage_reports_partial_tables_without_rejection() {
     let mut bytes = upcase_bytes();
     bytes.extend_from_slice(&[0, 0]);
     let raw = RawUpcaseTable::parse(&bytes, checksum32(&bytes));
-    assert!(!raw.length_ok);
+    // No rule caps the length (#76); the word past FFFFh's mapping is the
+    // fault.
+    assert!(raw.length_ok);
     assert!(raw.complete);
     assert_eq!(raw.issue, Some(UpcaseIssue::ExtraMappings));
+    assert!(!raw.usable());
     bytes.truncate(131072);
     bytes[0] = 1;
     let raw = RawUpcaseTable::parse(&bytes, checksum32(&bytes));

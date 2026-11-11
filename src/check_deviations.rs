@@ -19,7 +19,6 @@ use fs_core::BlockRead;
 
 const SECTOR_SIZES: [usize; 4] = [512, 1024, 2048, 4096];
 const MAX_DIRECTORY_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_UPCASE_BYTES: u64 = 128 * 1024;
 /// Bitmap bytes past ClusterCount's that are read to check the Reserved bits.
 const BITMAP_RESERVED_TAIL: u64 = 64 * 1024;
 
@@ -490,12 +489,22 @@ impl<Device: BlockRead> Scan<'_, Device> {
             return None;
         };
         let length = allocation.data_length;
-        if length == 0 || length > MAX_UPCASE_BYTES || length % 2 != 0 {
+        // Sections 7.2.4, 7.2.5 and 7.2.5.1 set no maximum DataLength (#76):
+        // a compressed table may be longer than an uncompressed one. Only an
+        // empty stream or a partial word cannot hold the mappings; a longer
+        // read is bounded by the chain and the memory budget.
+        if length == 0 || length % 2 != 0 {
             self.out
                 .report(Rule::UpcaseCoverage, allocation.entry + 24, 8, || {
                     format!("DataLength {length} cannot hold mappings for exactly 0000h to FFFFh")
                 });
             skip(&mut self.out);
+            return None;
+        }
+        if length > self.memory as u64 {
+            self.out.skip(
+                "name hashes and duplicate names: the Up-case Table exceeds the memory budget",
+            );
             return None;
         }
         let Some((bytes, clusters, true)) =
