@@ -93,6 +93,17 @@ fn walk(
         assert_eq!(entry.valid_length, u64_at(raw, 40));
         assert_eq!(entry.length, u64_at(raw, 56));
         assert_eq!(entry.no_fat_chain, raw[33] & 2 != 0);
+        // Salvage takes a set whose checksum fails as noise when these are
+        // not zero, so every set macOS writes must keep them zero: File
+        // bytes 6-7 and 25-31 (section 7.4) and Stream Extension bytes 2,
+        // 6-7 and 16-19 (section 7.6).
+        for range in [6..8, 25..32, 34..35, 38..40, 48..52] {
+            assert!(
+                raw[range.clone()].iter().all(|&byte| byte == 0),
+                "{prefix}{}: reserved bytes {range:?} of a macOS-written set",
+                entry.name
+            );
+        }
         assert_eq!(parse_set(bytes, entry.offset, limits).unwrap(), entry);
         let path: String = format!("{prefix}{}", entry.name).nfc().collect();
         if entry.is_dir {

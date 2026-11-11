@@ -241,6 +241,42 @@ fn a_matching_set_checksum_bypasses_only_the_plausibility_filters() {
     assert!(!parse_set(&bytes, 0, LIMITS).unwrap().checksum_ok);
 }
 
+/// Reserved bytes of a set: File bytes 6-7 and 25-31 (section 7.4, Table 27)
+/// and Stream Extension bytes 2, 6-7 and 16-19 (section 7.6, Table 33), the
+/// stream following the 32-byte File entry.
+const RESERVED_BYTES: [usize; 16] = [6, 7, 25, 26, 27, 28, 29, 30, 31, 34, 38, 39, 48, 49, 50, 51];
+
+#[test]
+fn a_failed_checksum_with_non_zero_reserved_bytes_is_noise_and_a_matching_one_is_kept() {
+    let clean = permissive_set();
+    let mut failed = clean.clone();
+    failed[2] ^= 1;
+    assert!(!parse_set(&failed, 0, LIMITS).unwrap().checksum_ok);
+    let expected = parse_set(&clean, 0, LIMITS).unwrap();
+    for offset in RESERVED_BYTES {
+        for value in [1, 0x80, 0xff] {
+            let mut bytes = clean.clone();
+            bytes[offset] = value;
+            seal_permissive_set(&mut bytes);
+            assert_eq!(
+                parse_set(&bytes, 0, LIMITS).as_ref(),
+                Some(&expected),
+                "a matching checksum keeps the set as written: offset {offset}, value {value}"
+            );
+            bytes[2] ^= 1;
+            assert!(
+                parse_set(&bytes, 0, LIMITS).is_none(),
+                "offset {offset}, value {value}"
+            );
+            let mut data = bytes.clone();
+            data.extend(&clean);
+            let found = find_sets(&data, data.len(), LIMITS);
+            assert_eq!(found.len(), 1, "offset {offset}, value {value}");
+            assert_eq!(found[0].offset, bytes.len());
+        }
+    }
+}
+
 #[test]
 fn malformed_set_structure_is_rejected_even_with_a_matching_checksum() {
     let original = permissive_set();

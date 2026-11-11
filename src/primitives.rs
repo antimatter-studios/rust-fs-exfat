@@ -618,6 +618,7 @@ pub fn parse_set(data: &[u8], position: usize, limits: Limits) -> Option<EntrySe
             || length > capacity
             || !name_ok
             || !(first_cluster == 0 || limits.valid_cluster(first_cluster))
+            || !reserved_zero(set)
         {
             return None;
         }
@@ -638,6 +639,28 @@ pub fn parse_set(data: &[u8], position: usize, limits: Limits) -> Option<EntrySe
         accessed: decode_timestamp_with_offset(u32_at(set, 16), set[24]),
         slots: secondary_count + 1,
     })
+}
+
+/// Reserved bytes as (offset, length): File entry Reserved1 and Reserved2
+/// (section 7.4, Table 27), then Stream Extension Reserved1, Reserved2 and
+/// Reserved3 (section 7.6, Table 33) offset by the File entry before it. The
+/// `file-reserved` and `stream-reserved` deviation rules check the same bytes.
+const SET_RESERVED: [(usize, usize); 5] = [
+    (6, 2),
+    (25, 7),
+    (ENTRY_SIZE + 2, 1),
+    (ENTRY_SIZE + 6, 2),
+    (ENTRY_SIZE + 16, 4),
+];
+
+/// A writer that follows the specification leaves reserved bytes zero, so a
+/// set whose checksum cannot vouch for it and whose reserved bytes are not
+/// zero is taken as noise. A set whose checksum matches is kept as written:
+/// its reserved bytes are a writer's choice, not damage.
+fn reserved_zero(set: &[u8]) -> bool {
+    SET_RESERVED
+        .iter()
+        .all(|&(start, length)| set[start..start + length].iter().all(|&byte| byte == 0))
 }
 
 /// Finds every entry set starting within `data[..search_end]`. Sets may extend
