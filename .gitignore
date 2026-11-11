@@ -4,3 +4,4 @@
 /test-disks/*.img
 /test-disks/*.dmg
 /.vm-share/
+/test-disks/*.img.*
