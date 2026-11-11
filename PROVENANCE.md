@@ -170,6 +170,20 @@ harness. Damaged-only fixtures preserve partial walks, out-of-range FAT values,
 convergent predecessors, headless cycles, raw bitmap preconditions and boot-copy
 mismatches; no strict-reader validation is added.
 
+The stale FAT chain listing (#41) is new code derived from specification
+sections 4.1.3, 5.1, 7.1 and 8.1: only the Allocation Bitmap records
+allocation, no FAT value marks a cluster free, and freeing updates the FAT only
+"if necessary", so a free cluster may keep any entry. The specification does
+not say whether implementations clear such entries. On a newly formatted image,
+the macOS driver zeroed the FAT entries of a deleted fragmented file and of a
+truncated file's freed tail, so its images hold no such chains.
+`tests/oracle/primitive_chains.rs` therefore compares the listing with the raw
+bytes of the macOS reference images, then frees the driver-written fragmented
+file by its InUse and bitmap bits alone and checks that the listing returns the
+FAT chain macOS wrote, whose clusters hash to the driver's own read. Ends,
+breaks, joins, loops and unreadable records are synthetic-only evidence built
+from the specification.
+
 Image setup uses only the device in its own attachment receipt. There is no
 system-wide flush; detaching that image completes its writes. The safety guard
 has positive and negative checks and gates lint and the image-safety workflow.

@@ -8,6 +8,7 @@
 //! | Report damage | [`primitives::BootRegion`], [`primitives::boot_check`], [`primitives::VolumeState`], [`primitives::RawRootMetadata`], [`primitives::RawUpcaseTable`] |
 //! | Read by extent | positioned source reads |
 //! | Materialize | the trait's provided method over read by extent |
+//! | Stale FAT chains (extension) | [`primitives::stale_chains`] over [`primitives::RawAllocationBitmap`] and active-FAT words |
 //!
 //! Geometry comes from the first usable boot copy: a checksum-valid main copy,
 //! then a checksum-valid backup, then either copy with the exFAT name. No
@@ -30,6 +31,11 @@ use fs_core::BlockRead;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+
+#[path = "salvage_stale.rs"]
+mod stale;
+
+pub use stale::{StaleChain, StaleChainReport, StaleEntry};
 
 const SECTOR: u64 = 512;
 /// A file entry set holds at most one primary and eighteen secondaries.

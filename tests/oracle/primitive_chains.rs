@@ -5,6 +5,7 @@ use fs_exfat::primitives::{
     valid_cluster, BootSector, ChainGroup, ALLOC_ALLOCATED, ALLOC_FREE_FAT, ALLOC_FREE_ZERO,
     BOOT_REGION_SECTORS, FAT_END, FIRST_CLUSTER, ISLAND_END_EOF,
 };
+use fs_exfat::salvage::{ExfatSalvage, StaleChain, StaleEnd};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use unicode_normalization::UnicodeNormalization;
@@ -260,5 +261,106 @@ fn primitive_stream_clusters_recover_every_driver_file_and_directory_at_both_sec
         }
         assert_eq!(files, expected_files.len());
         assert!(files > 180);
+    }
+}
+
+/// Free clusters with non-zero FAT entries, read straight from the bytes.
+fn free_fat_clusters(image: &[u8], boot: &BootSector) -> BTreeSet<u32> {
+    let fat = raw_fat(image, boot);
+    let bitmap = bitmap(image, boot);
+    (FIRST_CLUSTER..boot.last_cluster_exclusive())
+        .filter(|&cluster| !bitmap_bit(&bitmap, cluster) && fat[cluster as usize] != 0)
+        .collect()
+}
+
+fn stale_listing(image: &[u8]) -> Vec<StaleChain> {
+    let source = crate::support::Bytes(image.to_vec());
+    let mut chains = Vec::new();
+    let report = ExfatSalvage::probe(&source)
+        .stale_chains(&source, &mut chains)
+        .unwrap();
+    assert_eq!(report.unclassified, 0);
+    assert!(report.unreadable.is_empty() && !report.stopped);
+    chains
+}
+
+fn listed(chains: &[StaleChain]) -> BTreeSet<u32> {
+    chains
+        .iter()
+        .flat_map(|chain| chain.entries.iter().map(|entry| entry.cluster))
+        .collect()
+}
+
+/// macOS clears a freed cluster's FAT entry, so its images hold none to list.
+/// The specification does not require that (sections 7.1 and 8.1): an
+/// implementation may free a file by clearing only its InUse bits and bitmap
+/// bits. Doing exactly that to the macOS-written fragmented.bin must list the
+/// FAT chain macOS wrote, and its clusters must still hold the bytes the
+/// read-only macOS driver hashed.
+#[test]
+fn stale_chains_match_the_formatter_fat_and_a_freed_driver_chain() {
+    for sector in [512, 4096] {
+        let (image, boot) = reference(sector);
+        assert_eq!(
+            listed(&stale_listing(&image)),
+            free_fat_clusters(&image, &boot)
+        );
+
+        let fat = raw_fat(&image, &boot);
+        let root = chain(&image, &boot, boot.root_cluster, None);
+        let mut entries = BTreeMap::new();
+        walk(&image, &boot, &root, "", &mut entries);
+        let file = &entries["fragmented.bin"];
+        assert!(!file.no_fat_chain);
+        let clusters = raw_chain(&fat, file.first_cluster);
+        assert!(clusters.windows(2).any(|pair| pair[1] != pair[0] + 1));
+
+        let mut freed = image.clone();
+        let root_at = |position: usize| {
+            let cluster =
+                raw_chain(&fat, boot.root_cluster)[position / boot.cluster_size() as usize];
+            raw_offset(&boot, cluster) + position % boot.cluster_size() as usize
+        };
+        for slot in 0..file.slots {
+            freed[root_at(file.offset + slot * 32)] &= 0x7f;
+        }
+        let (first, _) = find_bitmap_entry(&root).unwrap();
+        for &cluster in &clusters {
+            let index = (cluster - FIRST_CLUSTER) as usize;
+            freed[raw_offset(&boot, first) + index / 8] &= !(1 << (index % 8));
+        }
+        let chains = stale_listing(&freed);
+        assert_eq!(listed(&chains), free_fat_clusters(&freed, &boot));
+        let chain = chains
+            .iter()
+            .find(|chain| chain.head() == Some(clusters[0]))
+            .expect("the freed chain is listed from its first cluster");
+        let links: Vec<_> = chain
+            .entries
+            .iter()
+            .map(|entry| (entry.cluster, entry.value))
+            .collect();
+        let mut expected: Vec<_> = clusters.windows(2).map(|pair| (pair[0], pair[1])).collect();
+        expected.push((*clusters.last().unwrap(), FAT_END));
+        assert_eq!(links, expected);
+        assert_eq!(chain.end, StaleEnd::End);
+
+        let mut bytes: Vec<u8> = chain
+            .extents
+            .iter()
+            .flat_map(|extent| {
+                freed[extent.offset as usize..(extent.offset + extent.length) as usize].to_vec()
+            })
+            .collect();
+        bytes.truncate(file.length as usize);
+        let hashes =
+            std::fs::read_to_string(oracle_directory().join(format!("files-{sector}.txt")))
+                .unwrap();
+        let expected = hashes
+            .lines()
+            .find(|line| line.ends_with("\tfragmented.bin"))
+            .and_then(|line| line.split('\t').nth(1))
+            .unwrap();
+        assert_eq!(format!("{:x}", Sha256::digest(&bytes)), expected);
     }
 }

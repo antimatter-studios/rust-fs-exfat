@@ -106,11 +106,12 @@ Own format-specific operations outside the common set. They are exposed behind
 capability flags. Their format knowledge stays in driver primitives. They must
 not add an exFAT-only verb to the common trait or duplicate a decoder.
 
-exFAT example: `primitives::allocation_class` in
-[src/primitive_chains.rs](../src/primitive_chains.rs) distinguishes free clusters
-with nonzero FAT entries. This is existing supporting logic, not a flagged
-extension interface. That interface is not present in
-[src/lib.rs](../src/lib.rs).
+exFAT example: `ExfatSalvage::stale_chains` in
+[src/salvage_stale.rs](../src/salvage_stale.rs) lists free clusters with
+nonzero FAT entries and the chains they link (#41). It is a method of the exFAT
+adapter, not of the common trait, and its format knowledge is
+`primitives::stale_chains` in [src/primitive_stale.rs](../src/primitive_stale.rs).
+It has no capability flag yet; see section 8.
 
 ## 3. Strict versus permissive
 
@@ -282,9 +283,10 @@ Existing exFAT work illustrates the boundary:
   active FAT, and opening loads the active bitmap
   ([src/volume.rs](../src/volume.rs)). There is no both-copy comparison there.
 - [#41](https://github.com/antimatter-studios/rust-fs-exfat/issues/41) adds a
-  report of stale FAT chains on free clusters. `allocation_class` and
-  `chain_islands` already provide supporting logic
-  ([src/primitive_chains.rs](../src/primitive_chains.rs)), not the full report.
+  report of stale FAT chains on free clusters as the exFAT adapter's
+  `stale_chains` extension, not a common verb. It is evidence, not damage: the
+  specification lets a free cluster keep any FAT entry, so `report_damage` and
+  the strict API ignore these chains.
 - [#42](https://github.com/antimatter-studios/rust-fs-exfat/issues/42) remains
   open. **#42 — starting position, adjust as needed:** treat it as acceptance
   work and reconcile its criteria against this convention first. Compressed
@@ -402,7 +404,10 @@ rules. The remaining design details belong to #52, with conformance in #53:
 3. Which capability bits describe missing operations, deletion-specific parts
    and extensions? The `Unsupported` versus empty-result behavior is settled
    as the starting position. #52 names one flag per verb and two deletion
-   flags; extension flags wait for the first extension.
+   flags; extension flags wait for the first extension. The first, exFAT's
+   `stale_chains` (#41), is reached through the concrete adapter type, so it
+   has no flag yet; a flag for it would not belong in the format-neutral
+   `Feature` set.
 4. What concrete types represent the shared damage fields, and how do #44's
    byte offsets and specification references map into the shared core and
    format-specific details without adding exFAT names to the trait?

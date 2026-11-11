@@ -48,7 +48,9 @@ directory workspace budgeting and the complete-report requirement stay in
 primitives alone. It needs no strict mount, takes sources only as `BlockRead`,
 and returns candidates, extent walks, parent claims and damage as serializable
 evidence rather than trusted files. Plans materialize into a caller's
-`io::Write`, never into the source.
+`io::Write`, never into the source. As an exFAT extension outside the common
+trait, `ExfatSalvage::stale_chains` lists free clusters whose FAT entries are
+non-zero, which the specification allows, with the chains they still link.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).
