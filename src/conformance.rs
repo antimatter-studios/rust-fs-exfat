@@ -46,8 +46,8 @@
 use crate::salvage::{
     Candidate, CandidateState, Capabilities, ClusterLayout, Damage, DamageKind, DamageReport,
     Extent, ExtentWalk, Feature, Integrity, MaterializeReport, MaterializedRange, Parent, Plan,
-    PlanFault, PlanRead, PlanReader, PlanStep, SalvageAdapter, SalvageError, ScanReport, Severity,
-    Sink, Tree, WalkEnd,
+    PlanCheck, PlanFault, PlanRead, PlanReader, PlanStep, SalvageAdapter, SalvageError, ScanReport,
+    Severity, Sink, Tree, WalkEnd,
 };
 use fs_core::BlockRead;
 use serde::de::DeserializeOwned;
@@ -411,6 +411,8 @@ impl<D: Driver> Run<'_, D> {
         ) -> Result<MaterializeReport, SalvageError> = Adapter::<D>::materialize;
         let _: fn(&Adapter<D>) -> Result<ClusterLayout, SalvageError> =
             Adapter::<D>::cluster_layout;
+        let _: fn(&Adapter<D>, &Plan, u64) -> Result<PlanCheck, SalvageError> =
+            Adapter::<D>::check_plan;
         let _: for<'a> fn(
             &'a Adapter<D>,
             &'a dyn BlockRead,
@@ -428,6 +430,7 @@ impl<D: Driver> Run<'_, D> {
         plain_data::<Plan>();
         plain_data::<MaterializeReport>();
         plain_data::<PlanRead>();
+        plain_data::<PlanCheck>();
         plain_data::<Capabilities>();
         self.check(Rule::Consistency, "types", true, String::new);
     }
@@ -1166,6 +1169,15 @@ impl<D: Driver> Run<'_, D> {
             Ok(report) => {
                 self.provenance(subject, &plan, &report, &output);
                 self.positioned(subject, &plan, &report, &output);
+                let check = adapter.check_plan(&plan, size);
+                self.check(
+                    Rule::Consistency,
+                    case,
+                    check
+                        .as_ref()
+                        .is_ok_and(|check| check.length == report.length && check.valid_length == report.length),
+                    || format!("checking the plan without reading disagrees with materializing it: {check:?}"),
+                );
             }
             Err(error) => self.failed(subject, "materialize", &error),
         }
@@ -1176,6 +1188,13 @@ impl<D: Driver> Run<'_, D> {
         ]);
         let mut output = Vec::new();
         let result = adapter.materialize(*image, &past, &mut output);
+        let check = adapter.check_plan(&past, size);
+        self.check(
+            Rule::Consistency,
+            case,
+            matches!(check, Err(SalvageError::Bounds)),
+            || format!("checking a plan reaching past the source did not refuse it: {check:?}"),
+        );
         self.check(
             Rule::Consistency,
             case,
