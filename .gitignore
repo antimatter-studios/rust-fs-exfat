@@ -3,3 +3,4 @@
 /tmp/
 /test-disks/*.img
 /test-disks/*.dmg
+/.vm-share/

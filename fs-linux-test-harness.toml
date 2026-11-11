@@ -1,0 +1,29 @@
+# fs-linux-test-harness consumer config (see ../fs-linux-test-harness/README.md).
+#
+# EVERYTHING THAT IS LINUX HAPPENS IN HERE. The fixtures, which the Linux
+# kernel's exfat driver populates through a loop mount; every exfatprogs
+# oracle (mkfs.exfat, fsck.exfat, dump.exfat), because exfatprogs on a
+# workstation is whatever that machine has and a Mac has none; the kernel
+# oracle, which loop-mounts the fixtures; and, on a host that is not Linux,
+# the suite itself.
+#
+# macOS's own exFAT tools (newfs_exfat, fsck_exfat, the read-only driver)
+# are a different oracle and stay on a Mac host: `chore test:oracle-macos`.
+
+[project]
+name = "rust-fs-exfat"
+
+[setup]
+# Runs as root INSIDE the VM; installs exfatprogs, loads the kernel's exfat
+# module, and installs what a Rust build needs in the guest.
+script = "scripts/vm-setup.sh"
+
+[share]
+dir = ".vm-share"
+
+[vm]
+memory = "4G"
+cpus = 4
+disk = "16G"
+ssh_port = 50131
+deadline_minutes = 480
