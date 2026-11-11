@@ -128,3 +128,32 @@ fn a_damaged_table_is_reported_and_lookups_fall_back_to_table_24() {
     assert_eq!(missing.entry, None);
     assert!(!missing.usable && missing.extents.is_empty());
 }
+
+#[test]
+fn a_checksum_valid_table_that_is_incomplete_or_breaks_table_24_is_reported() {
+    // Table 24's 128 mappings and nothing after them: the TableChecksum
+    // matches and the encoding is sound, but section 7.2.5.1 has the table
+    // map every character from 0000h to FFFFh.
+    let mut short = vec![0xFFFF, 0x61];
+    short.extend(0x41..=0x5A);
+    short.extend([0xFFFF, 0x80 - 0x7B]);
+    // All 65536 characters mapped to themselves, so 'a' stays 'a': complete
+    // and checksum-valid, but not Table 24's mappings (section 7.2.5).
+    let identity = [0xFFFF, 0xFFFF, 0xFFFF];
+    for words in [&short[..], &identity[..]] {
+        let builder = with_table(words);
+        let found = damage(&Bytes(builder.image.clone()));
+        let table = Extent::new(position(4), 2 * words.len() as u64);
+        assert!(
+            !found
+                .iter()
+                .any(|damage| damage.kind == DamageKind::Checksum),
+            "{found:?}"
+        );
+        assert!(!report(&builder).usable);
+        assert!(
+            has(&found, DamageKind::Malformed, table, "upcase table"),
+            "{words:04x?}: {found:?}"
+        );
+    }
+}

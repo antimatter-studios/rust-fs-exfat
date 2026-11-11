@@ -3,7 +3,8 @@
 
 use fs_core::BlockRead;
 use fs_exfat::fixtures::{
-    self, boot_field, entry_set, BootField, Builder, CLUSTER, FAT_OFFSET, ROOT_CLUSTER, SECTOR,
+    self, boot_field, entry_set, upcase_entry, upcase_table, BootField, Builder, CLUSTER,
+    FAT_OFFSET, ROOT_CLUSTER, SECTOR,
 };
 use fs_exfat::primitives::{
     find_sets, BootSectorHeader, Limits, RawRootMetadata, ENTRY_SIZE, FAT_END,
@@ -545,7 +546,18 @@ fn the_tree_keeps_parents_orphans_and_conflicts() {
 
 #[test]
 fn damage_reports_name_only_what_is_wrong() {
-    let found = damage(&Bytes(fixtures::build_volume()));
+    // The fixture volume with a real Up-case Table in place of its
+    // placeholder of 100 zero bytes, which maps only 50 characters (#77):
+    // Table 24, a-z to A-Z, then every other character to itself, so all of
+    // 0000h to FFFFh (sections 7.2.5 and 7.2.5.1), in the compressed form.
+    let mut words = vec![0xFFFF, 0x61];
+    words.extend(0x41..=0x5A);
+    words.extend([0xFFFF, 0xFFFF - 0x7A]);
+    let table = upcase_table(&words);
+    let mut builder = volume();
+    builder.put(4, 0, &table);
+    builder.put(ROOT_CLUSTER, 32, &upcase_entry(4, &table));
+    let found = damage(&Bytes(builder.image));
     assert_eq!(found.len(), 2, "{found:?}");
     for (offset, structure) in [(0, "main boot region"), (12, "backup boot region")] {
         let sector = SECTOR as u64;
