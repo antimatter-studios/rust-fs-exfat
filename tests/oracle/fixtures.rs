@@ -89,7 +89,7 @@ fn named_fixture_fields_match_formatter_entry_bytes_and_boot_offsets() {
 
 fn directory() -> PathBuf {
     std::env::var("EXFAT_ORACLE_DIR")
-        .expect("run chore test:oracle on macOS to create independent reference images")
+        .expect("run chore test:oracle-macos on macOS to create independent reference images")
         .into()
 }
 

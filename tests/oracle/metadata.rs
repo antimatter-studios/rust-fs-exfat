@@ -9,8 +9,9 @@ use support::Bytes;
 
 #[test]
 fn macos_formatter_system_metadata_is_readable() {
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
     for sector in [512, 4096] {
         let image = directory.join(format!("reference-{sector}.dmg"));
         assert!(std::fs::symlink_metadata(&image)
@@ -78,8 +79,9 @@ fn macos_formatter_writes_the_compressed_recommended_upcase_table() {
     // Section 7.2.5.1: the recommended table, in compressed form, has
     // TableChecksum E619D30Dh. newfs_exfat writes it, and the strict reader
     // and salvage expand it to the same 65536 mappings (#42).
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
     for sector in [512, 4096] {
         let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
         let source = Bytes(image.clone());

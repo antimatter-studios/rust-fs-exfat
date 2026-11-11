@@ -18,7 +18,7 @@ mod salvage_scan;
 
 fn oracle_directory() -> PathBuf {
     std::env::var("EXFAT_ORACLE_DIR")
-        .expect("run chore test:oracle on macOS to create independent reference images")
+        .expect("run chore test:oracle-macos on macOS to create independent reference images")
         .into()
 }
 
@@ -255,7 +255,7 @@ fn primitive_timestamp_strings_match_macos_stat_at_the_preserved_two_second_prec
             assert_eq!(text.as_deref(), Some(decoded.as_str()));
             comparisons.push_str(&format!("{decoded}\t{}\n", fields[field]));
         }
-        let mut python = Command::new("/usr/bin/python3").args(["-c", "import datetime, sys\nfor line in sys.stdin:\n    text, millis = line.strip().split('\\t')\n    observed = int(datetime.datetime.fromisoformat(text).timestamp())\n    expected = int(millis) // 2000 * 2\n    assert observed == expected, (text, observed, expected)\n"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("chore test:oracle requires /usr/bin/python3");
+        let mut python = Command::new("/usr/bin/python3").args(["-c", "import datetime, sys\nfor line in sys.stdin:\n    text, millis = line.strip().split('\\t')\n    observed = int(datetime.datetime.fromisoformat(text).timestamp())\n    expected = int(millis) // 2000 * 2\n    assert observed == expected, (text, observed, expected)\n"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("chore test:oracle-macos requires /usr/bin/python3");
         python
             .stdin
             .take()

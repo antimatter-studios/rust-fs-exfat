@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 bash scripts/check-image-safety.sh "$0"
-[ "$(uname -s)" = Darwin ] || { echo 'oracle: macOS is required; run chore test:oracle on macOS' >&2; exit 1; }
+[ "$(uname -s)" = Darwin ] || { echo 'oracle: macOS is required; run chore test:oracle-macos on macOS' >&2; exit 1; }
 for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil; do
-    [ -x "$tool" ] || { echo "oracle: $tool is required by chore test:oracle" >&2; exit 1; }
+    [ -x "$tool" ] || { echo "oracle: $tool is required by chore test:oracle-macos" >&2; exit 1; }
 done
 # From macOS 27 the disk image tool prints a notice on every create, attach and
 # detach that the verb is deprecated. The notice describes the host tool, not

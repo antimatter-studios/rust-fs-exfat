@@ -62,6 +62,11 @@ impl AllocationBitmap {
             .allocated(cluster)
             .ok_or(Error::Invalid("bitmap cluster outside heap"))
     }
+
+    /// The number of clusters the bitmap records as allocated.
+    pub fn allocated_count(&self) -> u64 {
+        primitives::bitmap_count(&self.bytes, self.cluster_count)
+    }
 }
 
 #[derive(Debug)]

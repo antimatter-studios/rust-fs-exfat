@@ -185,7 +185,7 @@ name or bitmap validation is introduced into these primitives.
 with macOS formatter/checker output, every live directory entry with read-only
 driver listings, bitmap locations with formatter output, and timestamp strings
 with driver stat timestamps at their preserved two-second precision. These tests
-run on both 512- and 4096-byte-sector images in `chore test:oracle` without using
+run on both 512- and 4096-byte-sector images in `chore test:oracle-macos` without using
 the strict decoder as an oracle. Synthetic primitive fixtures are limited to
 permissive and malformed cases, not evidence for healthy format correctness.
 
@@ -304,7 +304,7 @@ extended signatures, bounded reads, independent reports for both boot copies,
 and an explicit comparison of the copies. It does not reuse the starting code's
 salvage scanner, fixed-sector assumption or unchecked geometry.
 
-Synthetic tests test malformed boot structures. `chore test:oracle` creates new
+Synthetic tests test malformed boot structures. `chore test:oracle-macos` creates new
 64 MiB images with macOS hdiutil, formats them with newfs_exfat at 512 and 4096
 bytes per sector, checks them with fsck_exfat -n, and compares both decoded boot
 copies with the formatter's geometry. Device nodes come only from each attach

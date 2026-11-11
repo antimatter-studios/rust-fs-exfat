@@ -238,9 +238,22 @@ Use the pinned Rust toolchain and a fresh CARGO_TARGET_DIR for concurrent work.
 Strict APIs accept only BlockRead and wrap devices in ReadOnlyDevice. No write
 feature, repair or formatter belongs here. fsck.exfat will be check-only.
 
-Use macOS newfs_exfat, fsck_exfat -n and the read-only mounted macOS driver as
-independent oracles on generated images. Missing prerequisites fail, never skip.
-Linux VM configuration from the template does not apply to these host oracles.
+The independent oracles, none of which is this crate:
+
+- exfatprogs (mkfs.exfat, fsck.exfat -n, dump.exfat) and the Linux kernel's
+  exfat driver, in the fs-linux-test-harness guest (`chore test:oracle`,
+  `chore test:kernel`). The kernel also writes the fixtures (`chore fixtures`).
+- relan/exfat, a third implementation built in the guest at a pinned commit
+  (`chore test:third`).
+- macOS newfs_exfat, fsck_exfat -n and the read-only mounted macOS driver, on a
+  Mac host (`chore test:oracle-macos`).
+
+The Linux tools run in the guest and never on the host: tests reach them only
+through tests/guest_support, and tests/test_contract.rs fails the suite
+otherwise. The template's Linux VM configuration applies, as rust-fs-ext4's
+chores.yml sets it out; the macOS oracle stays a host oracle. Missing prerequisites fail, never skip.
+Test only images you create: fixtures are built in the guest, and the macOS
+oracle attaches only images it made.
 
 Add changelog.d and features.d fragments for behavior changes; keep the features
 table honest about synthetic-only evidence until oracle tests exist.
