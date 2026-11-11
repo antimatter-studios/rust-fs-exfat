@@ -223,7 +223,7 @@ from the specification.
 Salvage's reading of entry sets split across distant directory clusters
 (#99) is new code derived from specification sections 6 and 6.3.2: a
 directory's entries lie over its cluster chain, and a primary's secondary
-entries immediately follow it. `tests/oracle/salvage_scan.rs` rebuilds every
+entries immediately follow it. `tests/oracle/salvage.rs` rebuilds every
 file the read-only macOS driver returns from salvage candidates alone on both
 macOS reference images, whose root directories macOS fragmented; sets split
 across three or more distant clusters, and splits with no FAT link, are

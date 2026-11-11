@@ -1,0 +1,3 @@
+## Validation
+
+| Salvage adapter platform differential | Supported on macOS; on volumes newfs_exfat formatted and the macOS driver wrote, at 512 and 4096 bytes per sector, `find_candidates` reports every file and directory the read-only driver lists as a live, checksum-verified set and nothing else, including sets whose slots cross into a non-adjacent root cluster (#99), `rebuild_tree` places each under the driver's parent with no orphan or conflict, `walk_extents` with `materialize` or `read_extent`, cut at ValidDataLength, reproduces each file's SHA-256 as the driver read it, and `report_damage` reports nothing | Unreleased (#97) | #97 | `tests/oracle/salvage.rs`, `scripts/test-oracle.sh` |
