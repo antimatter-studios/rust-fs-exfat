@@ -17,6 +17,9 @@ pub struct Memory {
     /// Writes left before every later write fails; `u64::MAX` never fails.
     pub writes_left: Arc<AtomicU64>,
     pub writable: bool,
+    /// The only transfer alignment the device accepts, as a raw device with
+    /// larger logical blocks does: anything else fails with InvalidInput.
+    pub block: u64,
 }
 
 impl Memory {
@@ -25,7 +28,21 @@ impl Memory {
             bytes: Arc::new(Mutex::new(bytes)),
             writes_left: Arc::new(AtomicU64::new(u64::MAX)),
             writable: true,
+            block: 512,
         }
+    }
+
+    /// The same device, refusing transfers not aligned to `block` bytes.
+    pub fn with_block(mut self, block: u64) -> Self {
+        self.block = block;
+        self
+    }
+
+    fn aligned(&self, offset: u64, length: usize) -> fs_core::Result<()> {
+        if !offset.is_multiple_of(self.block) || !(length as u64).is_multiple_of(self.block) {
+            return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into());
+        }
+        Ok(())
     }
 
     pub fn snapshot(&self) -> Vec<u8> {
@@ -37,6 +54,7 @@ impl BlockRead for Memory {
     fn read_at(&self, offset: u64, output: &mut [u8]) -> fs_core::Result<()> {
         assert_eq!(offset % 512, 0, "reads are whole sectors");
         assert_eq!(output.len() % 512, 0, "reads are whole sectors");
+        self.aligned(offset, output.len())?;
         let bytes = self.bytes.lock().unwrap();
         let start = offset as usize;
         let source = bytes
@@ -60,6 +78,7 @@ impl BlockDevice for Memory {
         if !self.writable {
             return Err(fs_core::Error::ReadOnly);
         }
+        self.aligned(offset, data.len())?;
         let left = self.writes_left.load(Ordering::SeqCst);
         if left == 0 {
             return Err(fs_core::Error::Custom("injected write failure".into()));
