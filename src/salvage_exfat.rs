@@ -14,7 +14,14 @@
 //! | Both TexFAT FAT and bitmap copies compared (extension) | [`primitives::FatLayout`], [`primitives::fat_differences`] and [`primitives::bitmap_differences`] |
 //!
 //! Geometry comes from the first usable boot copy: a checksum-valid main copy,
-//! then a checksum-valid backup, then either copy with the exFAT name. No
+//! then a checksum-valid backup, then either copy with the exFAT name.
+//! VolumeFlags, and so ActiveFat and the volume state, comes from the Main
+//! Boot Sector whenever that sector is readable and valid, even where its
+//! region fails the checksum: section 3.1.13.1 "ActiveFat Field" calls the
+//! backup's VolumeFlags stale, and section 4 "File Allocation Table Region"
+//! makes only the Main Boot Sector's VolumeFlags current and the inactive FAT
+//! stale. Only when the main sector gives none are the backup's flags used,
+//! and the damage report says so. No
 //! strict boot, metadata or allocation policy is applied, and no strict mount
 //! is needed. Claims are mapped through the active FAT and its Allocation
 //! Bitmap; [`ExfatSalvage::with_fat`] maps them through the other pair of a
@@ -27,9 +34,9 @@ use super::adapter::{
 };
 use crate::device::AlignedDevice;
 use crate::primitives::{
-    self, BootRegion, BootSector, EntrySet, FatChainStep, FatCopy, FatLayout, FatValue, FatWindow,
-    Limits, RawRootMetadata, RawUpcaseTable, RootEntryKind, SystemStream, UpcaseIssue, VolumeState,
-    BOOT_REGION_SECTORS, ENTRY_SIZE, FIRST_CLUSTER,
+    self, BootRegion, BootSector, BootSectorHeader, EntrySet, FatChainStep, FatCopy, FatLayout,
+    FatValue, FatWindow, Limits, RawRootMetadata, RawUpcaseTable, RootEntryKind, SystemStream,
+    UpcaseIssue, VolumeState, BOOT_REGION_SECTORS, ENTRY_SIZE, FIRST_CLUSTER,
 };
 use crate::Error;
 use fs_core::BlockRead;
@@ -103,7 +110,9 @@ pub struct ExfatSalvage {
 impl ExfatSalvage {
     /// Reads both boot copies permissively and keeps the first usable
     /// geometry. Never fails: unreadable or damaged copies leave none, and
-    /// geometry-free verbs still work.
+    /// geometry-free verbs still work. Geometry taken from the backup still
+    /// takes its VolumeFlags from the Main Boot Sector when that sector can
+    /// be read and is valid (sections 3.1.13.1 and 4).
     pub fn probe(source: &dyn BlockRead) -> Self {
         let mut copies = Vec::new();
         for shift in 9..=12u8 {
@@ -123,7 +132,8 @@ impl ExfatSalvage {
             .filter(|(_, region)| region.header.file_system_name_valid);
         let geometry = checksummed
             .chain(named)
-            .find_map(|(offset, region)| Geometry::new(&region.header.sector, Some(*offset)));
+            .find_map(|(offset, region)| Geometry::new(&region.header.sector, Some(*offset)))
+            .map(|geometry| geometry.with_current_flags(source));
         Self { geometry }
     }
 
@@ -330,8 +340,19 @@ impl ExfatSalvage {
         let Some(geometry) = &self.geometry else {
             return ControlFlow::Continue(());
         };
-        let boot_offset = geometry.origin.unwrap_or(0);
-        let flags = Extent::new(boot_offset + BOOT_VOLUME_FLAGS, 2);
+        if geometry.stale_flags() {
+            out.add(
+                DamageKind::Missing,
+                Severity::Warning,
+                Extent::new(BOOT_VOLUME_FLAGS, 2),
+                "main boot region",
+                "the Main Boot Sector gives no current VolumeFlags; ActiveFat, \
+                 VolumeDirty and MediaFailure come from the backup's stale copy"
+                    .into(),
+            )?;
+        }
+        let flags_offset = geometry.flags_origin.unwrap_or(0);
+        let flags = Extent::new(flags_offset + BOOT_VOLUME_FLAGS, 2);
         let state = VolumeState::from_flags(geometry.boot.volume_flags);
         if state.media_failure {
             out.add(
@@ -482,6 +503,10 @@ struct Geometry {
     boot: BootSector,
     /// The boot copy's offset on the source, when it came from one.
     origin: Option<u64>,
+    /// The offset of the boot sector `boot.volume_flags` was read from: the
+    /// main one, or the backup when the main one gave none. `None` for
+    /// caller-supplied fields.
+    flags_origin: Option<u64>,
     sector: u64,
     cluster: u64,
     heap: u64,
@@ -508,6 +533,7 @@ impl Geometry {
         Some(Self {
             boot: boot.clone(),
             origin,
+            flags_origin: origin,
             sector: boot.bytes_per_sector(),
             cluster: boot.cluster_size(),
             heap: boot.heap_offset(),
@@ -515,6 +541,41 @@ impl Geometry {
             fat: layout.offset(layout.active)?,
             fat_bytes: layout.length,
         })
+    }
+
+    /// Geometry from the backup boot region, with VolumeFlags replaced by
+    /// the Main Boot Sector's when that sector is readable and valid.
+    ///
+    /// Section 3.1.13.1 "ActiveFat Field" says the backup's VolumeFlags is
+    /// stale, and section 4 "File Allocation Table Region" says only the
+    /// Main Boot Sector's VolumeFlags is current and the inactive FAT is
+    /// stale. The boot checksum skips VolumeFlags (section 3.4), so a main
+    /// region failing its checksum still holds the current ActiveFat,
+    /// VolumeDirty and MediaFailure. A main sector that cannot be read, or
+    /// that its own JumpBoot, FileSystemName or BootSignature invalidates
+    /// (sections 3.1.1, 3.1.2 and 3.1.20), gives none: the backup's flags are
+    /// kept and [`ExfatSalvage::report_damage`] reports their source.
+    fn with_current_flags(self, source: &dyn BlockRead) -> Self {
+        if self.origin.is_none_or(|origin| origin == 0) {
+            return self;
+        }
+        let Some(flags) = main_volume_flags(source, self.sector) else {
+            return self;
+        };
+        let mut boot = self.boot.clone();
+        boot.volume_flags = flags;
+        match Geometry::new(&boot, self.origin) {
+            Some(geometry) => Self {
+                flags_origin: Some(0),
+                ..geometry
+            },
+            None => self,
+        }
+    }
+
+    /// Whether VolumeFlags came from the backup boot sector's stale copy.
+    fn stale_flags(&self) -> bool {
+        self.flags_origin.is_some_and(|origin| origin != 0)
     }
 
     /// The same geometry over `copy`'s FAT and Allocation Bitmap, when the
@@ -851,6 +912,18 @@ fn read_source(source: &dyn BlockRead, offset: u64, output: &mut [u8]) -> crate:
     AlignedDevice::new(source)
         .read_at(offset, output)
         .map_err(Error::Device)
+}
+
+/// The Main Boot Sector's VolumeFlags, when that sector is readable and its
+/// JumpBoot, FileSystemName and BootSignature do not invalidate it (sections
+/// 3.1.1, 3.1.2 and 3.1.20). Its region's checksum is not required: the
+/// checksum skips VolumeFlags (section 3.4).
+fn main_volume_flags(source: &dyn BlockRead, sector: u64) -> Option<u16> {
+    let mut bytes = vec![0; sector as usize];
+    read_source(source, 0, &mut bytes).ok()?;
+    let header = BootSectorHeader::parse(&bytes).ok()?;
+    (header.jump_valid && header.file_system_name_valid && header.sector.signature_ok)
+        .then_some(header.sector.volume_flags)
 }
 
 fn read_boot_region(source: &dyn BlockRead, offset: u64, sector: u64) -> Option<BootRegion> {
