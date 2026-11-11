@@ -34,6 +34,8 @@ mod copies;
 #[path = "salvage_cases/secondary_count.rs"]
 mod secondary_count;
 
+#[path = "salvage_cases/fragmented.rs"]
+mod fragmented;
 #[path = "salvage_cases/plans.rs"]
 mod plans;
 

@@ -1,0 +1,3 @@
+## Reading
+
+| Entry sets split across distant directory clusters in salvage | Experimental; salvage's candidate scan follows the FAT from a File entry set that runs past its cluster and reports the set when its checksum matches, with its location in the first cluster and `EntrySetDetail::continuation` naming the rest; with no FAT link or no geometry, nothing joins the parts; the macOS oracle rebuilds every file the read-only driver returns from salvage candidates alone on both reference images | Unreleased (#99) | #99 | `src/salvage_exfat.rs`, `tests/salvage_cases/fragmented.rs`, `tests/oracle/salvage_scan.rs` |

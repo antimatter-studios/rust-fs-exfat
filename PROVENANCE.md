@@ -210,6 +210,15 @@ FAT chain macOS wrote, whose clusters hash to the driver's own read. Ends,
 breaks, joins, loops and unreadable records are synthetic-only evidence built
 from the specification.
 
+Salvage's reading of entry sets split across distant directory clusters
+(#99) is new code derived from specification sections 6 and 6.3.2: a
+directory's entries lie over its cluster chain, and a primary's secondary
+entries immediately follow it. `tests/oracle/salvage_scan.rs` rebuilds every
+file the read-only macOS driver returns from salvage candidates alone on both
+macOS reference images, whose root directories macOS fragmented; sets split
+across three or more distant clusters, and splits with no FAT link, are
+synthetic-only evidence.
+
 The uninterpreted directory entry listing and counts (#43) are new code derived
 from specification sections 6.2.1, 6.3.1.2.2, 6.3.2, 6.3.3, 6.4.1.2, 7, 7.8,
 7.9, 7.10 and 8.2: the EntryType ranges and InUse bit, the revision 1.00 entry

@@ -2,7 +2,7 @@
 //!
 //! | Verb | Primitives used |
 //! |---|---|
-//! | Find candidates | [`primitives::parse_set`] over streamed windows, as [`primitives::find_sets`] does over one buffer |
+//! | Find candidates | [`primitives::parse_set`] over streamed windows, as [`primitives::find_sets`] does over one buffer, and across the clusters a [`primitives::walk_fat_chain`] links when a set runs past its cluster into a distant one |
 //! | Walk extents | [`primitives::walk_fat_chain`] through a [`primitives::FatWindow`], or [`primitives::contiguous_clusters`] |
 //! | Rebuild the tree | the same walks over the root and directory candidates |
 //! | Report damage | [`primitives::BootRegion`], [`primitives::boot_check`], [`primitives::VolumeState`], [`primitives::RawRootMetadata`], [`primitives::RawUpcaseTable`] |
@@ -82,6 +82,8 @@ const DIRECTORY_LIMIT: u64 = 256 << 20;
 /// bounds memory as `DIRECTORY_LIMIT` does a directory's: it is not damage.
 const UPCASE_READ_LIMIT: u64 = DIRECTORY_LIMIT;
 const BOOT_VOLUME_FLAGS: u64 = 106;
+/// The File entry's EntryType with InUse set and clear (sections 6.2.1 and 7.4).
+const FILE_ENTRY_TYPES: [u8; 2] = [0x85, 0x05];
 const BOOT_ROOT_CLUSTER: u64 = 96;
 
 /// Plausibility limits for scans when no boot copy gives geometry.
@@ -102,6 +104,13 @@ pub struct EntrySetDetail {
     pub created: Option<String>,
     pub modified: Option<String>,
     pub accessed: Option<String>,
+    /// The set's entries past the end of the cluster that holds its first
+    /// entry, in directory order, when the directory's FAT chain continues on
+    /// a cluster that is not physically next. The candidate's location then
+    /// covers only the entries in that first cluster. Empty for a set that
+    /// lies in one piece.
+    #[serde(default)]
+    pub continuation: Vec<Extent>,
 }
 
 /// The exFAT salvage adapter. It holds geometry only, never a device.
@@ -182,6 +191,7 @@ impl SalvageAdapter for ExfatSalvage {
             .map_or(UNKNOWN_LIMITS, Geometry::limits);
         let mut report = ScanReport::default();
         let mut window = Window::new(range.offset, end);
+        let mut mapper = None;
         let mut position = range
             .offset
             .checked_next_multiple_of(ENTRY_SIZE as u64)
@@ -192,21 +202,34 @@ impl SalvageAdapter for ExfatSalvage {
                 window.fill(source, position, size, &mut report.unreadable);
             }
             let relative = (position - window.start) as usize;
-            let step = match primitives::parse_set(&window.bytes, relative, limits) {
-                Some(set) if window.readable(position, (set.slots * ENTRY_SIZE) as u64) => {
-                    let step = if set.checksum_ok {
-                        set.slots * ENTRY_SIZE
-                    } else {
-                        ENTRY_SIZE
-                    } as u64;
+            let linear = primitives::parse_set(&window.bytes, relative, limits)
+                .filter(|set| window.readable(position, (set.slots * ENTRY_SIZE) as u64));
+            let found = match linear {
+                Some(set) if set.checksum_ok => Some((set, Vec::new())),
+                linear => self
+                    .geometry
+                    .as_ref()
+                    .and_then(|geometry| {
+                        let mapper = mapper.get_or_insert_with(|| Mapper::new(geometry, source));
+                        split_set(mapper, &window, position, limits)
+                    })
+                    .or(linear.map(|set| (set, Vec::new()))),
+            };
+            let step = match found {
+                Some((set, continuation)) => {
+                    let found = candidate(set, position, continuation);
+                    let step = match found.integrity {
+                        Integrity::Verified => found.location.length,
+                        _ => ENTRY_SIZE as u64,
+                    };
                     report.candidates += 1;
-                    if sink.accept(candidate(set, position)).is_break() {
+                    if sink.accept(found).is_break() {
                         report.stopped_at = Some(position + step);
                         return Ok(report);
                     }
                     step
                 }
-                _ => ENTRY_SIZE as u64,
+                None => ENTRY_SIZE as u64,
             };
             position += step;
         }
@@ -873,9 +896,76 @@ impl Findings<'_> {
     }
 }
 
-fn candidate(set: EntrySet, position: u64) -> Candidate<EntrySetDetail> {
+/// A set at `position` whose entries run past the end of its cluster, read
+/// across the clusters the FAT links that cluster to, when they are not the
+/// physically following ones, with the extents past its first cluster.
+///
+/// Section 6.3.2 has a set's secondary entries immediately follow its
+/// primary in the directory, and section 6 lays a directory over its cluster
+/// chain, so a directory that grew after other clusters were allocated splits
+/// a set across distant clusters, and a linear read of the bytes after the
+/// first one finds the wrong entries. Only a checksum-valid set is returned:
+/// without the checksum, nothing shows that the linked cluster continues this
+/// set rather than holding unrelated bytes.
+fn split_set(
+    mapper: &mut Mapper<'_>,
+    window: &Window,
+    position: u64,
+    limits: Limits,
+) -> Option<(EntrySet, Vec<Extent>)> {
+    let geometry = mapper.geometry;
+    let relative = (position - window.start) as usize;
+    let primary = window.bytes.get(relative..relative + 2)?;
+    if !FILE_ENTRY_TYPES.contains(&primary[0]) {
+        return None;
+    }
+    let length = (u64::from(primary[1]) + 1) * ENTRY_SIZE as u64;
+    let cluster = geometry.cluster_at(position)?;
+    let head = geometry.cluster_offset(cluster) + geometry.cluster - position;
+    if length <= head || !window.readable(position, head) {
+        return None;
+    }
+    let chain = mapper.chain(
+        cluster,
+        1 + (length - head).div_ceil(geometry.cluster),
+        false,
+    );
+    // One run is the physically following clusters, which the linear scan read.
+    if chain.end != ChainEnd::Covered || chain.runs.len() < 2 {
+        return None;
+    }
+    let mut remaining = length - head;
+    let mut continuation = Vec::new();
+    for (index, &(first, count)) in chain.runs.iter().enumerate() {
+        // The first run starts with the set's own cluster.
+        let (first, count) = if index == 0 {
+            (first + 1, count - 1)
+        } else {
+            (first, count)
+        };
+        if count > 0 {
+            let part = (count * geometry.cluster).min(remaining);
+            continuation.push(Extent::new(geometry.cluster_offset(first), part));
+            remaining -= part;
+        }
+    }
+    let mut bytes = window
+        .bytes
+        .get(relative..relative + head as usize)?
+        .to_vec();
+    for extent in &continuation {
+        let start = bytes.len();
+        bytes.resize(start + extent.length as usize, 0);
+        read_source(mapper.source, extent.offset, &mut bytes[start..]).ok()?;
+    }
+    let set = primitives::parse_set(&bytes, 0, limits).filter(|set| set.checksum_ok)?;
+    Some((set, continuation))
+}
+
+fn candidate(set: EntrySet, position: u64, continuation: Vec<Extent>) -> Candidate<EntrySetDetail> {
+    let continued: u64 = continuation.iter().map(|extent| extent.length).sum();
     Candidate {
-        location: Extent::new(position, (set.slots * ENTRY_SIZE) as u64),
+        location: Extent::new(position, (set.slots * ENTRY_SIZE) as u64 - continued),
         kind: if set.is_dir {
             CandidateKind::Directory
         } else {
@@ -901,6 +991,7 @@ fn candidate(set: EntrySet, position: u64) -> Candidate<EntrySetDetail> {
             created: set.created,
             modified: set.modified,
             accessed: set.accessed,
+            continuation,
         },
     }
 }

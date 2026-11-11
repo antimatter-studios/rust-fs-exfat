@@ -24,7 +24,7 @@ tasks:
       - cargo clippy --locked --all-targets --all-features -- -D warnings
   test:unit:
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 408 24617 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 412 25052 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:oracle:
     cmds:
