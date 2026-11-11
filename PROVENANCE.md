@@ -184,6 +184,17 @@ FAT chain macOS wrote, whose clusters hash to the driver's own read. Ends,
 breaks, joins, loops and unreadable records are synthetic-only evidence built
 from the specification.
 
+The uninterpreted directory entry listing and counts (#43) are new code derived
+from specification sections 6.2.1, 6.3.1.2.2, 6.3.2, 6.3.3, 6.4.1.2, 7, 7.8,
+7.9, 7.10 and 8.2: the EntryType ranges and InUse bit, the revision 1.00 entry
+types and their codes, the Vendor Extension (E0h) and Vendor Allocation (E1h)
+layouts, TexFAT Padding (A1h) treated as an unrecognized benign primary, and
+the rules that let a reader ignore unrecognized benign entries while an
+unrecognized critical primary in the root invalidates the volume. macOS drops
+such entries silently, so no oracle compares them; vendor entries, unknown
+types, unused entries, set validity and unreadable directory sectors are
+synthetic-only evidence built from the specification.
+
 Image setup uses only the device in its own attachment receipt. There is no
 system-wide flush; detaching that image completes its writes. The safety guard
 has positive and negative checks and gates lint and the image-safety workflow.

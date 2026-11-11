@@ -4,6 +4,7 @@ use crate::directory::DirectoryEntry;
 use crate::file::File;
 use crate::interface;
 use crate::path::Node;
+use crate::primitives::UninterpretedCounts;
 use crate::timestamp::Timestamp;
 use crate::Error;
 use fs_core::cli::clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
@@ -91,7 +92,7 @@ fn fsck_command() -> Command {
         .arg(offset())
         .arg(Arg::new("no-repair").short('n').long("no-repair").action(ArgAction::SetTrue).help("Check only (always enabled; repairs are impossible)"))
         .args(cli::format_args())
-        .after_help("Checks both boot copies, system metadata, directory entry sets, allocation ownership and file chains.\nAll exFAT cluster counts are supported: bitmap and ownership use 1/4 byte per cluster, with a 1,537 MiB audit payload ceiling.\nFAT and directories are streamed in 64 KiB chunks; directory workspace is budgeted, not entry-count limited.\nAn exhausted budget or incomplete audit fails explicitly; no partial clean result is emitted.\nExit codes: 0 clean, 4 uncorrected inconsistencies, 8 I/O or unsupported audit limits, 16 usage.\nThere is no repair mode.")
+        .after_help("Checks both boot copies, system metadata, directory entry sets, allocation ownership and file chains.\nCounts vendor and unknown directory entries it does not interpret, without failing on them.\nAll exFAT cluster counts are supported: bitmap and ownership use 1/4 byte per cluster, with a 1,537 MiB audit payload ceiling.\nFAT and directories are streamed in 64 KiB chunks; directory workspace is budgeted, not entry-count limited.\nAn exhausted budget or incomplete audit fails explicitly; no partial clean result is emitted.\nExit codes: 0 clean, 4 uncorrected inconsistencies, 8 I/O or unsupported audit limits, 16 usage.\nThere is no repair mode.")
 }
 
 fn error(error: Error) -> CliError {
@@ -252,6 +253,30 @@ fn fsck_error(problem: Error) -> CliError {
     CliError::failed(problem.to_string()).with_code(code)
 }
 
+/// Counts of entries the check does not interpret, which never fail it.
+fn uninterpreted_json(counts: UninterpretedCounts) -> Json {
+    Json::object([
+        ("vendor_extension", Json::from(counts.vendor_extension)),
+        ("vendor_allocation", Json::from(counts.vendor_allocation)),
+        (
+            "unknown_benign_primary",
+            Json::from(counts.unknown_benign_primary),
+        ),
+        (
+            "unknown_critical_primary",
+            Json::from(counts.unknown_critical_primary),
+        ),
+        (
+            "unknown_critical_secondary",
+            Json::from(counts.unknown_critical_secondary),
+        ),
+        (
+            "unknown_benign_secondary",
+            Json::from(counts.unknown_benign_secondary),
+        ),
+    ])
+}
+
 fn fsck_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
     let image = Path::new(matches.get_one::<OsString>("target").unwrap());
     let offset = *matches.get_one::<u64>("offset").unwrap();
@@ -297,6 +322,10 @@ fn fsck_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
         ("dirty", Json::from(report.dirty)),
         ("media_failure", Json::from(report.media_failure)),
         ("boot_differences", Json::Arr(differences)),
+        (
+            "uninterpreted_entries",
+            uninterpreted_json(report.uninterpreted),
+        ),
     ]))
     .with_code(if healthy { 0 } else { 4 }))
 }
