@@ -48,6 +48,11 @@ path = "tests/salvage.rs"
 required-features = ["test-support"]
 
 [[test]]
+name = "conformance"
+path = "tests/conformance.rs"
+required-features = ["test-support"]
+
+[[test]]
 name = "macos_boot"
 path = "tests/oracle/boot.rs"
 
