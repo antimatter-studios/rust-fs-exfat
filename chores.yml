@@ -13,6 +13,10 @@ chore_min_version: 0.19.0
 #   chore fixtures     build test-disks/*.img: formatted by mkfs.exfat and
 #                      populated by the kernel's exfat driver in the harness
 #                      VM, each with a manifest and the kernel's listing
+#   chore test:unit    tests that need no tool, no fixture and no VM
+#   chore test:images  tests that read the fixtures but need no VM: the
+#                      strict reader, the audit and salvage against the
+#                      kernel's listing of each image
 #   chore vm:*         the harness's tasks: boot, provision (scripts/vm-setup.sh:
 #                      exfatprogs and the kernel's exfat module), tear down
 #
@@ -168,12 +172,27 @@ tasks:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 469 28519 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
+  test:images:
+    desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'
+    # The strict reader, the allocation audit and the salvage verbs on every
+    # test-disks/ image, against the kernel's listing captured in the guest
+    # when the image was built. No exfatprogs and no VM, so it runs on
+    # arm64 runners too. A missing fixture fails the tier first, naming
+    # `chore fixtures`, rather than failing every test on it.
+    #
+    # BUDGET: 53 lines / 2,025 bytes from a cold build on a macOS host
+    # (#122), 14 lines warm. 70 / 2,800 leaves about 30% for CI's longer
+    # paths. FLOOR: seven tests, every one of them.
+    cmds:
+      - test-disks/build-fixtures.sh --check
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 70 2800 -- cargo test --locked --release --features cli,test-support --test images'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored images 7
   test:oracle:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 310 16000 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 25
   test:
-    cmds: ['chore test:unit', 'chore test:oracle', 'chore test:package', 'chore test:scripts']
+    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:package', 'chore test:scripts']
   fuzz:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'

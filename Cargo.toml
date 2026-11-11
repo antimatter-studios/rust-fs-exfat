@@ -97,3 +97,7 @@ required-features = ["cli"]
 
 [profile.release]
 lto = "thin"
+
+[[test]]
+name = "images"
+path = "tests/images.rs"

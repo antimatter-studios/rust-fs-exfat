@@ -299,9 +299,11 @@ jobs:
           retention-days: 7
 
   images:
-    # A job after the fixtures job reads what it built, from the artifact
-    # (#121; `chore test:images` takes it over in #122).
-    name: images (fixtures artifact, no VM)
+    # chore test:images (#122): the strict reader, the audit and salvage on
+    # every fixture against the kernel's listing, with only the fixtures
+    # artifact present. No VM and no exfatprogs; test-arm64 and oracle-macos
+    # run the same tier on their architectures.
+    name: images (x86_64, fixtures artifact, no VM)
     needs: fixtures
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -310,11 +312,41 @@ jobs:
         with:
           persist-credentials: false
           path: rust-fs-exfat
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-fs-exfat/target
+          key: ${{ runner.os }}-images-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-images-cargo-
+      - name: The fixtures, from the fixtures job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: fixtures
           path: rust-fs-exfat/test-disks
-      - run: test-disks/build-fixtures.sh --check
+      - name: chore test:images
+        id: tier
+        run: chore test:images
+      - name: Keep the tier logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-images
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
 
   # ---------------------------------------------------------------------
   # THE REST OF THE VM HALF GOES HERE (#122-#126): `test` (x86_64, KVM:
@@ -326,8 +358,9 @@ jobs:
 
   test-arm64:
     name: test (aarch64, no KVM on this runner)
-    # (#122) `needs: fixtures`, the fixtures artifact downloaded into
-    # test-disks/, and `chore test:images` after the unit tier.
+    # No KVM, so no VM: lint, the unit tier, and test:images over the
+    # fixtures artifact (#122).
+    needs: fixtures
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -373,6 +406,13 @@ jobs:
       - name: chore test:unit
         id: tier
         run: chore test:unit
+      - name: The fixtures, from the fixtures job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fixtures
+          path: rust-fs-exfat/test-disks
+      - name: chore test:images
+        run: chore test:images
       - name: Keep the tier logs
         # Not before the tier ran: there is no log then (rust-fs-ext4 #306).
         if: always() && steps.tier.outcome != 'skipped'
@@ -384,6 +424,8 @@ jobs:
 
   oracle-macos:
     name: oracle-macos (macOS newfs_exfat, fsck_exfat and driver)
+    # test:images runs here too (#122): the fixtures read on macOS.
+    needs: fixtures
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -421,6 +463,13 @@ jobs:
       - name: chore test:unit
         id: tier
         run: chore test:unit
+      - name: The fixtures, from the fixtures job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fixtures
+          path: rust-fs-exfat/test-disks
+      - name: chore test:images
+        run: chore test:images
       - name: chore test:oracle
         run: chore test:oracle
       - name: Keep the tier logs

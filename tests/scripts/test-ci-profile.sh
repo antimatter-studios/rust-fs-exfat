@@ -125,8 +125,9 @@ else:
 # 3. Every job runs chore tasks: the ones its header line names.
 required = {
     "unit": ["build", "test:unit", "lint"],
-    "test-arm64": ["lint", "build", "test:unit"],
-    "oracle-macos": ["build", "test:unit", "test:oracle"],
+    "images": ["test:images"],
+    "test-arm64": ["lint", "build", "test:unit", "test:images"],
+    "oracle-macos": ["build", "test:unit", "test:images", "test:oracle"],
     "package": ["test:package"],
     "semver": ["check:semver"],
     "msrv": ["check:msrv"],
