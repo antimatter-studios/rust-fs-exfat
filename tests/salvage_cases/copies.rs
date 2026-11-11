@@ -10,8 +10,8 @@ use fs_core::BlockRead;
 use fs_exfat::fixtures::{bitmap_entry, entry_set, Builder, CLUSTER, CLUSTER_COUNT, SECTOR};
 use fs_exfat::primitives::{FAT_BAD, FAT_END};
 use fs_exfat::salvage::{
-    Candidate, CopyDifference, CopyKind, CopyPair, CopyReport, EntrySetDetail, ExfatSalvage,
-    Extent, FatCopy, SalvageAdapter, StaleChain, WalkEnd,
+    Candidate, CopyDifference, CopyKind, CopyPair, CopyReport, Damage, EntrySetDetail,
+    ExfatSalvage, Extent, FatCopy, SalvageAdapter, StaleChain, WalkEnd,
 };
 use std::ops::ControlFlow;
 
@@ -331,4 +331,70 @@ fn the_inactive_pair_gives_its_own_chains_as_evidence_not_damage() {
         found
     };
     assert_eq!(damage(image), damage(agreeing));
+}
+
+/// Only the Main Boot Sector's VolumeFlags is current: the backup's copy is
+/// stale (sections 3.1, 3.1.13 and 4 of the specification), and the boot
+/// checksum skips VolumeFlags (section 3.4). A main boot region that fails
+/// its checksum still holds the current ActiveFat, VolumeDirty and
+/// MediaFailure (#79).
+#[test]
+fn a_main_boot_sector_failing_its_checksum_still_gives_the_volume_flags() {
+    let mut image = texfat();
+    let backup = 12 * SECTOR;
+    // The main region's flags are current: ActiveFat 1 (bit 0), VolumeDirty
+    // (bit 1) and MediaFailure (bit 2), section 3.1.13. The backup still
+    // records the First FAT active and a clean volume; its checksum stays
+    // valid, since the checksum skips VolumeFlags.
+    put16(&mut image, 106, 0b111);
+    put16(&mut image, backup + 106, 0);
+    // The main Boot Checksum sector (sector 11) no longer matches.
+    image[11 * SECTOR] ^= 0xFF;
+
+    let source = Bytes(image.clone());
+    let adapter = ExfatSalvage::probe(&source);
+    assert_eq!(
+        adapter.fat(),
+        Some(FatCopy::Second),
+        "ActiveFat comes from the main boot sector, not the stale backup"
+    );
+
+    // Claims map through the Second FAT, which links data.bin's three
+    // clusters; the stale First FAT links only two.
+    let mut candidates: Vec<Candidate<EntrySetDetail>> = Vec::new();
+    let root = Extent::new(position(3), CLUSTER as u64);
+    adapter
+        .find_candidates(&source, root, &mut candidates)
+        .unwrap();
+    let walk = adapter.walk_extents(&source, &candidates[0]).unwrap();
+    let chain = Spec(&image).chain(1, 10);
+    let extent = Extent::new(position(10), (chain.len() * CLUSTER) as u64);
+    assert_eq!((walk.extents, walk.end), (vec![extent], WalkEnd::Complete));
+
+    // The volume state is the main sector's, reported at its VolumeFlags.
+    let mut found: Vec<Damage> = Vec::new();
+    adapter.report_damage(&source, &mut found).unwrap();
+    let flags: Vec<_> = found
+        .iter()
+        .filter(|damage| damage.structure == "volume flags")
+        .map(|damage| (damage.location, damage.detail.as_str()))
+        .collect();
+    let at = Extent::new(106, 2);
+    assert_eq!(
+        flags,
+        [(at, "MediaFailure is set"), (at, "VolumeDirty is set")]
+    );
+
+    // With the main region unreadable, the backup's flags are all there is.
+    let failing = Failing {
+        inner: Bytes(image),
+        bad: vec![Extent::new(0, SECTOR as u64)],
+    };
+    let adapter = ExfatSalvage::probe(&failing);
+    assert_eq!(adapter.fat(), Some(FatCopy::First));
+    let mut found: Vec<Damage> = Vec::new();
+    adapter.report_damage(&failing, &mut found).unwrap();
+    assert!(found
+        .iter()
+        .all(|damage| damage.structure != "volume flags"));
 }
