@@ -394,6 +394,21 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         Ok(())
     }
 
+    /// Records a change to a directory's entries in the directory's own File
+    /// entry: LastModified and LastAccessed become `now` (Sections 7.4.6 and
+    /// 7.4.7). The root directory has no File entry, so nothing changes for
+    /// it. The set is held with the rest of the operation's phase.
+    pub(crate) fn touch(&mut self, dir: &mut Dir, now: &Timestamp) -> Result<()> {
+        let Some(owner) = &mut dir.owner else {
+            return Ok(());
+        };
+        set_time(&mut owner.raw, Stamp::Modified, now)?;
+        set_time(&mut owner.raw, Stamp::Accessed, now)?;
+        seal(&mut owner.raw);
+        let owner = owner.clone();
+        self.write_set(&owner)
+    }
+
     /// Adds a cluster of unused entries to the end of a directory and
     /// records the new length in its parent.
     fn grow(&mut self, dir: &mut Dir) -> Result<()> {

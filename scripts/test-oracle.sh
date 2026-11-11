@@ -318,11 +318,11 @@ for current, directories, files in os.walk(root):
         metadata = item.stat()
         # ReadOnly, Hidden and a clear Archive bit, as the driver shows them.
         flags = f'{metadata.st_flags & (0x2 | 0x8000 | 0x10000):x}'
+        times = f'{metadata.st_mtime_ns // 1000000}\t{metadata.st_atime_ns // 1000000}\t{round(metadata.st_birthtime * 1000)}'
         if item.is_dir():
-            records.append(f'd\t0\t-\t{flags}\t{path}\n')
+            records.append(f'd\t0\t-\t{flags}\t{times}\t{path}\n')
         else:
             digest = hashlib.sha256(item.read_bytes()).hexdigest()
-            times = f'{metadata.st_mtime_ns // 1000000}\t{metadata.st_atime_ns // 1000000}\t{round(metadata.st_birthtime * 1000)}'
             records.append(f'f\t{metadata.st_size}\t{digest}\t{flags}\t{times}\t{path}\n')
 with open(sys.argv[2], 'w') as output:
     output.writelines(sorted(records))

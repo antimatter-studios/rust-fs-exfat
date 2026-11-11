@@ -40,9 +40,20 @@ fn listing<Device: fs_core::BlockRead>(volume: &Volume<Device>) -> String {
     ) {
         for entry in entries {
             let path: String = format!("{prefix}{}", entry.name()).nfc().collect();
+            let times = entry.timestamps();
+            let milliseconds = |time: &Timestamp| {
+                time.unix_milliseconds()
+                    .expect("every entry on the written image has a UTC offset")
+            };
+            let times = format!(
+                "{}\t{}\t{}",
+                milliseconds(&times.modified),
+                milliseconds(&times.accessed),
+                milliseconds(&times.created),
+            );
             if entry.is_directory() {
                 records.push(format!(
-                    "d\t0\t-\t{:x}\t{path}\n",
+                    "d\t0\t-\t{:x}\t{times}\t{path}\n",
                     macos_flags(entry.attributes())
                 ));
                 walk(
@@ -65,19 +76,11 @@ fn listing<Device: fs_core::BlockRead>(volume: &Volume<Device>) -> String {
                 hash.update(&buffer[..count]);
                 offset += count as u64;
             }
-            let times = entry.timestamps();
-            let milliseconds = |time: &Timestamp| {
-                time.unix_milliseconds()
-                    .expect("every file on the written image has a UTC offset")
-            };
             records.push(format!(
-                "f\t{}\t{:x}\t{:x}\t{}\t{}\t{}\t{path}\n",
+                "f\t{}\t{:x}\t{:x}\t{times}\t{path}\n",
                 file.len(),
                 hash.finalize(),
                 macos_flags(entry.attributes()),
-                milliseconds(&times.modified),
-                milliseconds(&times.accessed),
-                milliseconds(&times.created),
             ));
         }
     }
@@ -180,10 +183,23 @@ fn truncations_and_removals(target: &Path) {
 
 /// Renames and moves between macOS's directories and this crate's, a case
 /// change in place, replacements, times with UTC offsets, attributes on files
-/// and a directory, and a non-ASCII label. Returns the tree as this crate's
-/// reader sees it after the unmount.
+/// and a directory, and a non-ASCII label. Every directory whose entries
+/// change records it in its own times (#151), so the listing compares them
+/// with the driver's too. Returns the tree as this crate's reader sees it
+/// after the unmount.
 fn renames_times_attributes_and_label(target: &Path, label: &str) -> String {
     let mut volume = write::open_path(target, 0).unwrap();
+    let modified = |volume: &write::WriteVolume<_>, path: &str| {
+        volume
+            .reader()
+            .lookup(path)
+            .unwrap()
+            .entry()
+            .unwrap()
+            .timestamps()
+            .modified
+    };
+    let nested = modified(&volume, "/Nested");
     volume.rename("/MixedCase.txt", "/MIXEDCASE.TXT").unwrap();
     volume
         .rename("/ascii.txt", "/Written/moved from macOS.txt")
@@ -228,6 +244,11 @@ fn renames_times_attributes_and_label(target: &Path, label: &str) -> String {
     volume.set_attributes("/item-032.txt", 0x21).unwrap();
     volume.set_attributes("/item-033.txt", 0).unwrap();
     volume.set_attributes("/Written/empty", 0x03).unwrap();
+    assert_ne!(
+        modified(&volume, "/Nested"),
+        nested,
+        "a directory macOS made records the entry moved into it"
+    );
     volume.set_attributes("/Nested", 0x02).unwrap();
     volume.set_label(label).unwrap();
     volume.unmount().unwrap();
