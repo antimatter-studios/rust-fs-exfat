@@ -50,9 +50,10 @@
 //! damaged metadata and report length, checksum, mapping and presence validity.
 //! The strict metadata API alone decides which observations require rejection.
 //!
-//! [`FatWindow`] and [`StreamCursor`] read in fixed 64 KiB chunks, and
-//! [`walk_allocation`] leaves cycle detection to a caller-owned bitmap rather
-//! than allocating per-cluster state. [`directory_record`] frames streamed entry
+//! [`FatWindow`] and [`StreamCursor`] read in fixed 64 KiB chunks; a FAT
+//! window retries a failed chunk per sector, so a bad sector fails only the
+//! words it holds. [`walk_allocation`] leaves cycle detection to a
+//! caller-owned bitmap rather than allocating per-cluster state. [`directory_record`] frames streamed entry
 //! sets; bitmap claims, population and coverage operate on borrowed slices.
 //! The allocation audit retains its budget, rejection and completeness policy.
 

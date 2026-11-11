@@ -46,14 +46,23 @@ pub fn directory_record(primary: &[u8]) -> Option<DirectoryRecord> {
     })
 }
 
+/// The unit a failed chunk read is retried in: the smallest exFAT sector.
+const RETRY_BYTES: usize = 512;
+
 /// One selected FAT's fixed-size read window; no full FAT snapshot is allocated.
+/// A failed chunk read is retried per 512-byte sector, so a bad sector fails
+/// only the words it holds, never the rest of its chunk.
 pub struct FatWindow {
     start: u64,
     length: u64,
     cluster_count: u32,
     cached: u64,
+    /// One bit per retry sector of the cached chunk that did not read.
+    failed: u128,
     bytes: [u8; CHUNK_BYTES],
 }
+
+const _: () = assert!(CHUNK_BYTES / RETRY_BYTES == u128::BITS as usize);
 
 impl FatWindow {
     pub fn new(start: u64, length: u64, cluster_count: u32) -> Self {
@@ -62,10 +71,13 @@ impl FatWindow {
             length,
             cluster_count,
             cached: u64::MAX,
+            failed: 0,
             bytes: [0; CHUNK_BYTES],
         }
     }
 
+    /// The cluster's FAT entry. A read error is returned only when the
+    /// entry's own sector does not read; that sector is read again first.
     pub fn entry(
         &mut self,
         cluster: u32,
@@ -76,15 +88,28 @@ impl FatWindow {
             return Err(Error::Bounds);
         }
         let chunk = offset / CHUNK_BYTES as u64 * CHUNK_BYTES as u64;
+        let physical = self.start.checked_add(chunk).ok_or(Error::Bounds)?;
         if chunk != self.cached {
             let length = (self.length - chunk).min(CHUNK_BYTES as u64) as usize;
-            read(
-                self.start.checked_add(chunk).ok_or(Error::Bounds)?,
-                &mut self.bytes[..length],
-            )?;
             self.cached = chunk;
+            self.failed = 0;
+            if read(physical, &mut self.bytes[..length]).is_err() {
+                for (index, sector) in self.bytes[..length].chunks_mut(RETRY_BYTES).enumerate() {
+                    if read(physical + (index * RETRY_BYTES) as u64, sector).is_err() {
+                        sector.fill(0);
+                        self.failed |= 1 << index;
+                    }
+                }
+            }
         }
         let position = (offset - chunk) as usize / 4;
+        let index = position * 4 / RETRY_BYTES;
+        if self.failed & 1 << index != 0 {
+            let length = (self.length - chunk).min(CHUNK_BYTES as u64) as usize;
+            let range = index * RETRY_BYTES..((index + 1) * RETRY_BYTES).min(length);
+            read(physical + range.start as u64, &mut self.bytes[range])?;
+            self.failed &= !(1 << index);
+        }
         Ok(decode_fat_entry(
             checked_fat_entry(&self.bytes, position).unwrap(),
             self.cluster_count,

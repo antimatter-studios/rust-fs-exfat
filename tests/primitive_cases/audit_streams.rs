@@ -74,6 +74,40 @@ fn fat_windows_cache_chunks_without_hiding_raw_damage_or_io_failures() {
 }
 
 #[test]
+fn fat_windows_retry_a_failed_chunk_per_sector() {
+    let mut bytes = vec![0; 65536];
+    bytes[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+    bytes[65532..65536].copy_from_slice(&9u32.to_le_bytes());
+    let bad = 512..1024;
+    let mut window = FatWindow::new(4096, bytes.len() as u64, 20000);
+    let calls = RefCell::new(Vec::new());
+    let mut read = |offset: u64, output: &mut [u8]| {
+        calls.borrow_mut().push((offset, output.len()));
+        let start = (offset - 4096) as usize;
+        if start < bad.end && bad.start < start + output.len() {
+            return Err(Error::Unsupported("bad sector"));
+        }
+        output.copy_from_slice(&bytes[start..start + output.len()]);
+        Ok(())
+    };
+    // Words outside the bad sector read; the chunk is retried once, per sector.
+    assert_eq!(window.entry(2, &mut read).unwrap().kind, FatValue::End);
+    assert_eq!(
+        window.entry(16383, &mut read).unwrap().kind,
+        FatValue::Next(9)
+    );
+    assert_eq!(calls.borrow().len(), 1 + 128);
+    // A word in the bad sector fails, rereading only its own sector.
+    assert!(matches!(
+        window.entry(128, &mut read),
+        Err(Error::Unsupported("bad sector"))
+    ));
+    assert_eq!(calls.borrow().last(), Some(&(4096 + 512, 512)));
+    assert_eq!(window.entry(3, &mut read).unwrap().kind, FatValue::Free);
+    assert_eq!(calls.borrow().len(), 1 + 128 + 1);
+}
+
+#[test]
 fn allocation_walks_are_lazy_and_leave_cycle_ownership_to_the_caller() {
     let reads = RefCell::new(Vec::new());
     let mut walk = walk_allocation(2, 10, None, |cluster| {
