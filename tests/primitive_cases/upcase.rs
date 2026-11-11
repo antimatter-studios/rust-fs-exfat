@@ -102,8 +102,10 @@ fn corrupt_compressed_tables_are_located_and_refused() {
     start.extend(0x41..=0x5A);
     for (tail, issue) in [
         (vec![0xFFFF], UpcaseIssue::TruncatedRun),
+        // A run of 0 is read as no mappings (#75); one character too many
+        // before the final run is still refused.
         (
-            vec![0xFFFF, 0, 0xFFFF, 0xFFFF - 0x7A],
+            vec![0xFFFF, 0xFFFF - 0x79, 0xFFFF, 0xFFFF - 0x7A],
             UpcaseIssue::RunOutsideRange,
         ),
         (vec![0xFFFF, 0xFFFF - 0x79], UpcaseIssue::RunOutsideRange),
@@ -131,4 +133,17 @@ fn corrupt_compressed_tables_are_located_and_refused() {
     // The first run ends at 007Ah, so the first 128 mappings take both runs.
     assert_eq!(raw.mandatory_bytes, 8);
     assert!(UpcaseTable::parse(&data, checksum32(&data)).is_err());
+}
+
+#[test]
+fn zero_count_identity_run_is_read_as_no_mappings() {
+    // Section 7.2.5: FFFFh is "followed with the number of identity
+    // mappings"; nothing requires that number to be at least one.
+    let mut words = vec![0xFFFF, 0];
+    words.extend(compressed());
+    let data = bytes(&words);
+    let raw = RawUpcaseTable::parse(&data, checksum32(&data));
+    assert_eq!(raw.issue, None);
+    assert!(raw.usable());
+    assert!(UpcaseTable::parse(&data, checksum32(&data)).is_ok());
 }

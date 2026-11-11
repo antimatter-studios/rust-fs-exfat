@@ -357,12 +357,22 @@ fn compressed_upcase_deviations_point_at_their_words() {
     assert_eq!(found.len(), 1);
     assert_eq!((found[0].offset, found[0].length), (UPCASE as u64 + 60, 2));
 
-    // A run of no characters is one deviation, at its FFFFh and count; the
-    // table's coverage past it is unknown, so it is not reported as well.
+    // A run of no characters stands for no mappings and breaks no rule (#75).
     let mut bytes = image();
     upcase(
         &mut bytes,
         &[upcase_start(), vec![0xFFFF, 0, 0xFFFF, 65413]].concat(),
+    );
+    assert_eq!(places(&deviations(&bytes)), places(&deviations(&image())));
+    assert!(check_device(Bytes(bytes)).is_ok());
+
+    // A run past FFFFh before the last one is one deviation, at its FFFFh and
+    // count; the table's coverage past it is unknown, so it is not reported
+    // as well.
+    let mut bytes = image();
+    upcase(
+        &mut bytes,
+        &[upcase_start(), vec![0xFFFF, 65414, 0xFFFF, 65413]].concat(),
     );
     let report = deviations(&bytes);
     let run: Vec<_> = report.of(Rule::UpcaseRun).collect();

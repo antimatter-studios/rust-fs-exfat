@@ -68,10 +68,11 @@ fn upcase_damage_reports_partial_tables_without_rejection() {
             Some(UpcaseIssue::TruncatedRun),
             vec![65],
         ),
+        // A run of 0 is read as no mappings (#75); this one runs past FFFFh.
         (
-            vec![0xff, 0xff, 0, 0],
+            vec![0x41, 0, 0x42, 0, 0xff, 0xff, 0xff, 0xff],
             Some(UpcaseIssue::RunOutsideRange),
-            vec![],
+            vec![65, 66],
         ),
         (vec![0x41, 0, 0xff], None, vec![65]),
     ] {

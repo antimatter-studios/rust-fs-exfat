@@ -1073,7 +1073,7 @@ fn audit_upcase(
         let at = table.issue_at.unwrap_or(0);
         let detail = match issue {
             UpcaseIssue::TruncatedRun => "an identity run with no count",
-            UpcaseIssue::RunOutsideRange => "an identity run of 0 or past FFFFh",
+            UpcaseIssue::RunOutsideRange => "an identity run past FFFFh",
             UpcaseIssue::ExtraMappings => "a word after the mapping of FFFFh",
         };
         out.add(

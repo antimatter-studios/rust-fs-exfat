@@ -533,7 +533,7 @@ impl<Device: BlockRead> Scan<'_, Device> {
                     (2, "ends the table with no count of identity mappings")
                 } else {
                     let room = cluster_size - position as u64 % cluster_size;
-                    (4.min(room), "has a count of 0, or one that runs past FFFFh")
+                    (4.min(room), "has a count that runs past FFFFh")
                 };
                 self.out.report(Rule::UpcaseRun, offset, span, || {
                     format!("the identity run at character {mapped:04X}h {detail}")
