@@ -6,12 +6,27 @@
 //! name (Section 7.7), with a SetChecksum over all of them (Section 6.3.3)
 //! and a NameHash over the up-cased name (Section 7.6.4). A directory is read
 //! whole and checked by the strict parser before anything in it changes.
+//!
+//! # The directory cache
+//!
+//! A directory read and checked once is kept in a [`DirCache`], keyed by its
+//! first cluster, with an index from each up-cased name to its entry set and
+//! the offset before which every entry is in use. Every write into a
+//! directory goes through [`WriteVolume::write_set`] or
+//! [`WriteVolume::insert`], which update the cached bytes and the index with
+//! the bytes they hold for the device, so a path resolves without reading or
+//! parsing a directory again and a new set finds its place without scanning
+//! the entries before it. A directory that is removed leaves the cache, and a
+//! new one replaces whatever its first cluster held. The root directory's
+//! bytes in the strict reader are patched the same way.
 
 use super::{Allocation, WriteVolume};
-use crate::directory::{self, DirectoryEntry, Located};
+use crate::directory::{self, DirectoryEntry};
+use crate::metadata::UpcaseTable;
 use crate::timestamp::{Timestamp, Timestamps};
 use crate::{metadata, Error, Result};
 use fs_core::BlockDevice;
+use std::collections::HashMap;
 
 const ENTRY: usize = 32;
 const FILE: u8 = 0x85;
@@ -20,6 +35,9 @@ const NAME: u8 = 0xc1;
 const NAME_UNITS_PER_ENTRY: usize = 15;
 /// Section 7.6.5: a directory's DataLength may not exceed 256 MiB.
 const MAX_DIRECTORY_BYTES: u64 = 256 * 1024 * 1024;
+/// The most directory bytes the cache holds before it is emptied, all but
+/// the root, between operations.
+const DIR_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
 pub(crate) const ATTRIBUTE_DIRECTORY: u16 = 0x10;
 /// The attributes a caller may set (Section 7.4.4): ReadOnly, Hidden, System
@@ -27,28 +45,116 @@ pub(crate) const ATTRIBUTE_DIRECTORY: u16 = 0x10;
 pub const SETTABLE_ATTRIBUTES: u16 = 0x01 | 0x02 | 0x04 | 0x20;
 pub const ATTRIBUTE_ARCHIVE: u16 = 0x20;
 
-/// A directory's stream, read whole.
+/// A directory's stream, read whole and checked, with an index of its names.
+pub(crate) struct CachedDir {
+    allocation: Allocation,
+    bytes: Vec<u8>,
+    root: bool,
+    /// Each name in use, up-cased through the volume's table, and the offset
+    /// of its entry set.
+    names: HashMap<Vec<u16>, usize>,
+    /// No entry before this offset is free.
+    free_from: usize,
+}
+
+impl CachedDir {
+    fn new(
+        allocation: Allocation,
+        bytes: Vec<u8>,
+        root: bool,
+        upcase: &UpcaseTable,
+        boot: &crate::boot::BootSector,
+    ) -> Result<Self> {
+        let names = directory::parse_located(&bytes, boot, upcase, root)?
+            .into_iter()
+            .map(|located| (fold(upcase, located.entry.name_utf16()), located.offset))
+            .collect();
+        let free_from = bytes
+            .chunks_exact(ENTRY)
+            .position(|entry| entry[0] & 0x80 == 0)
+            .map_or(bytes.len(), |index| index * ENTRY);
+        Ok(Self {
+            allocation,
+            bytes,
+            root,
+            names,
+            free_from,
+        })
+    }
+
+    /// The set starting at `offset`: the File entry and its secondaries.
+    fn set_at(&self, offset: usize) -> &[u8] {
+        let length = (1 + usize::from(self.bytes[offset + 1])) * ENTRY;
+        &self.bytes[offset..offset + length]
+    }
+}
+
+/// The directories this mount has read and checked.
+#[derive(Default)]
+pub(crate) struct DirCache {
+    dirs: HashMap<u32, CachedDir>,
+    bytes: usize,
+}
+
+impl DirCache {
+    fn insert(&mut self, first: u32, dir: CachedDir) {
+        self.bytes += dir.bytes.len();
+        if let Some(old) = self.dirs.insert(first, dir) {
+            self.bytes -= old.bytes.len();
+        }
+    }
+
+    pub(crate) fn remove(&mut self, first: u32) {
+        if let Some(old) = self.dirs.remove(&first) {
+            self.bytes -= old.bytes.len();
+        }
+    }
+
+    /// Empties the cache, all but the root, when it holds more than its
+    /// limit. Only called between operations.
+    pub(crate) fn trim(&mut self) {
+        if self.bytes > DIR_CACHE_BYTES {
+            self.dirs.retain(|_, dir| dir.root);
+            self.bytes = self.dirs.values().map(|dir| dir.bytes.len()).sum();
+        }
+    }
+}
+
+/// A name up-cased through the volume's table, as names are compared.
+fn fold(upcase: &UpcaseTable, name: &[u16]) -> Vec<u16> {
+    name.iter().map(|unit| upcase.map(*unit)).collect()
+}
+
+/// The name a File entry set in use holds (Section 7.7.3).
+fn set_name(raw: &[u8]) -> Vec<u16> {
+    let length = usize::from(raw[ENTRY + 3]);
+    raw[2 * ENTRY..]
+        .chunks_exact(ENTRY)
+        .take(length.div_ceil(NAME_UNITS_PER_ENTRY))
+        .flat_map(|entry| {
+            entry[2..]
+                .chunks_exact(2)
+                .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
+        })
+        .take(length)
+        .collect()
+}
+
+/// A directory: the key of its cached stream, and the entry set that records
+/// it in its parent.
 pub(crate) struct Dir {
-    pub(crate) allocation: Allocation,
-    pub(crate) clusters: Vec<u32>,
-    pub(crate) bytes: Vec<u8>,
+    /// The directory's first cluster.
+    pub(crate) first: u32,
     /// The entry set recording this directory in its parent; None for the
     /// root directory, which has none.
     pub(crate) owner: Option<Set>,
 }
 
-impl Dir {
-    pub(crate) fn is_root(&self) -> bool {
-        self.owner.is_none()
-    }
-}
-
-/// One file entry set: the directory stream that holds it, where, and its
-/// bytes.
+/// One file entry set: the directory that holds it, where, and its bytes.
 #[derive(Clone)]
 pub(crate) struct Set {
-    pub(crate) clusters: Vec<u32>,
-    pub(crate) in_root: bool,
+    /// The first cluster of the directory that holds the set.
+    pub(crate) dir: u32,
     pub(crate) offset: usize,
     pub(crate) raw: Vec<u8>,
 }
@@ -215,12 +321,13 @@ pub(crate) fn renamed(raw: &[u8], name: &[u16], hash: u16) -> Vec<u8> {
     set
 }
 
-/// The first run of `count` entries not in use (Section 6.2: InUse clear, or
-/// the end-of-directory marker and everything after it).
-fn free_run(bytes: &[u8], count: usize) -> Option<usize> {
-    let mut start = 0;
+/// The first run of `count` entries not in use at or after `from` (Section
+/// 6.2: InUse clear, or the end-of-directory marker and everything after it).
+fn free_run(bytes: &[u8], from: usize, count: usize) -> Option<usize> {
+    let mut start = from;
     let mut length = 0;
-    for (index, entry) in bytes.chunks_exact(ENTRY).enumerate() {
+    for (index, entry) in bytes[from..].chunks_exact(ENTRY).enumerate() {
+        let index = index + from / ENTRY;
         if entry[0] & 0x80 == 0 {
             if length == 0 {
                 start = index * ENTRY;
@@ -237,10 +344,6 @@ fn free_run(bytes: &[u8], count: usize) -> Option<usize> {
 }
 
 impl<Device: BlockDevice> WriteVolume<Device> {
-    pub(crate) fn read_clusters(&self, clusters: &[u32], length: u64) -> Result<Vec<u8>> {
-        self.read_stream(clusters, length)
-    }
-
     fn read_stream(&self, clusters: &[u32], length: u64) -> Result<Vec<u8>> {
         let length = usize::try_from(length).map_err(|_| Error::Bounds)?;
         let cluster_size = self.volume.boot().cluster_size() as usize;
@@ -255,38 +358,52 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         Ok(bytes)
     }
 
-    pub(crate) fn root_dir(&self) -> Result<Dir> {
+    /// The root directory, cached from the strict reader's copy, which the
+    /// mount checked.
+    pub(crate) fn root_dir(&mut self) -> Result<Dir> {
         let root = self.volume.boot().root_cluster;
-        let clusters = self.fat_chain(root)?;
-        let allocation = Allocation::from_parts(
-            root,
-            *clusters.last().expect("a chain holds its first cluster"),
-            clusters.len() as u32,
-            false,
-        );
-        let length = clusters.len() as u64 * self.volume.boot().cluster_size();
-        let bytes = self.read_stream(&clusters, length)?;
+        if !self.dirs.dirs.contains_key(&root) {
+            let clusters = self.fat_chain(root)?;
+            let allocation = Allocation::from_parts(
+                root,
+                *clusters.last().expect("a chain holds its first cluster"),
+                clusters.len() as u32,
+                false,
+            );
+            self.load_chain(&allocation)?;
+            let bytes = self.volume.root.clone();
+            if bytes.len() as u64
+                != u64::from(allocation.count()) * self.volume.boot().cluster_size()
+            {
+                return Err(Error::Invalid(
+                    "root directory length differs from its chain",
+                ));
+            }
+            let dir = CachedDir::new(
+                allocation,
+                bytes,
+                true,
+                self.volume.upcase(),
+                self.volume.boot(),
+            )?;
+            self.dirs.insert(root, dir);
+        }
         Ok(Dir {
-            allocation,
-            clusters,
-            bytes,
+            first: root,
             owner: None,
         })
     }
 
-    /// The stream's allocation and clusters, checked against the FAT and
-    /// the Allocation Bitmap.
-    pub(crate) fn stream_allocation(
-        &self,
-        entry: &DirectoryEntry,
-    ) -> Result<(Allocation, Vec<u32>)> {
+    /// The stream's allocation, with its clusters checked against the FAT
+    /// and the Allocation Bitmap and loaded into the chain cache.
+    pub(crate) fn stream_allocation(&mut self, entry: &DirectoryEntry) -> Result<Allocation> {
         let stream = entry.stream();
         let count = stream
             .data_length()
             .div_ceil(self.volume.boot().cluster_size());
         let count = u32::try_from(count).map_err(|_| Error::Bounds)?;
         if count == 0 {
-            return Ok((Allocation::EMPTY, Vec::new()));
+            return Ok(Allocation::EMPTY);
         }
         let first = stream.first_cluster();
         let allocation = if stream.no_fat_chain() {
@@ -294,6 +411,8 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 .checked_add(count - 1)
                 .ok_or(Error::Invalid("contiguous stream exceeds heap"))?;
             Allocation::from_parts(first, last, count, true)
+        } else if let Some(cached) = self.cached_chain(first, count) {
+            cached
         } else {
             let clusters = self.fat_chain(first)?;
             let last = *clusters.last().expect("a chain holds its first cluster");
@@ -304,48 +423,89 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 "stream chain length differs from allocation",
             ));
         }
-        let clusters = self.clusters(&allocation)?;
-        Ok((allocation, clusters))
+        self.load_chain(&allocation)?;
+        Ok(allocation)
     }
 
-    fn open_dir(&self, set: Set, entry: &DirectoryEntry) -> Result<Dir> {
-        let (allocation, clusters) = self.stream_allocation(entry)?;
-        let bytes = self.read_stream(&clusters, entry.stream().data_length())?;
+    /// A directory, from the cache or read and checked by the strict parser.
+    fn open_dir(&mut self, set: Set, entry: &DirectoryEntry) -> Result<Dir> {
+        let first = entry.stream().first_cluster();
+        let length = entry.stream().data_length();
+        let cached = self
+            .dirs
+            .dirs
+            .get(&first)
+            .is_some_and(|dir| !dir.root && dir.bytes.len() as u64 == length);
+        if !cached {
+            let allocation = self.stream_allocation(entry)?;
+            let bytes = self.read_stream(self.chain(&allocation)?, length)?;
+            let dir = CachedDir::new(
+                allocation,
+                bytes,
+                false,
+                self.volume.upcase(),
+                self.volume.boot(),
+            )?;
+            self.dirs.insert(first, dir);
+        }
         Ok(Dir {
-            allocation,
-            clusters,
-            bytes,
+            first,
             owner: Some(set),
         })
     }
 
-    pub(crate) fn entries(&self, dir: &Dir) -> Result<Vec<Located>> {
-        directory::parse_located(
-            &dir.bytes,
-            self.volume.boot(),
-            self.volume.upcase(),
-            dir.is_root(),
-        )
+    fn cached(&self, first: u32) -> Result<&CachedDir> {
+        self.dirs
+            .dirs
+            .get(&first)
+            .ok_or(Error::Invalid("directory is not loaded"))
+    }
+
+    /// Whether a directory holds no entry in use before its end marker.
+    pub(crate) fn dir_is_empty(&mut self, set: Set, entry: &DirectoryEntry) -> Result<bool> {
+        let dir = self.open_dir(set, entry)?;
+        Ok(!self
+            .cached(dir.first)?
+            .bytes
+            .chunks_exact(ENTRY)
+            .take_while(|entry| entry[0] != 0)
+            .any(|entry| entry[0] & 0x80 != 0))
+    }
+
+    /// Whether a root directory entry of `kind` is in use, and where.
+    pub(crate) fn root_entry(&mut self, kind: u8) -> Result<(Dir, Option<usize>)> {
+        let root = self.root_dir()?;
+        let offset = self
+            .cached(root.first)?
+            .bytes
+            .chunks_exact(ENTRY)
+            .take_while(|candidate| candidate[0] != 0)
+            .position(|candidate| candidate[0] == kind)
+            .map(|index| index * ENTRY);
+        Ok((root, offset))
     }
 
     fn find(&self, dir: &Dir, name: &[u16]) -> Result<Option<(Set, DirectoryEntry)>> {
-        let upcase = self.volume.upcase();
-        for located in self.entries(dir)? {
-            if upcase.equal(located.entry.name_utf16(), name) {
-                let set = Set {
-                    clusters: dir.clusters.clone(),
-                    in_root: dir.is_root(),
-                    offset: located.offset,
-                    raw: dir.bytes[located.offset..located.offset + located.length].to_vec(),
-                };
-                return Ok(Some((set, located.entry)));
-            }
-        }
-        Ok(None)
+        let cached = self.cached(dir.first)?;
+        let Some(&offset) = cached.names.get(&fold(self.volume.upcase(), name)) else {
+            return Ok(None);
+        };
+        let raw = cached.set_at(offset);
+        let entry = directory::parse_located(raw, self.volume.boot(), self.volume.upcase(), false)?
+            .into_iter()
+            .next()
+            .ok_or(Error::Invalid("indexed entry set is not in use"))?
+            .entry;
+        let set = Set {
+            dir: dir.first,
+            offset,
+            raw: raw.to_vec(),
+        };
+        Ok(Some((set, entry)))
     }
 
     /// Resolves every component of `path` but the last, which may be absent.
-    pub(crate) fn resolve(&self, path: &str) -> Result<Target> {
+    pub(crate) fn resolve(&mut self, path: &str) -> Result<Target> {
         let parts = components(path)?;
         let (last, parents) = parts
             .split_last()
@@ -371,16 +531,20 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         })
     }
 
-    /// Holds the set's bytes for writing at its place in its directory.
+    /// Holds the set's bytes for writing at its place in its directory, and
+    /// records them in the cached directory and its name index.
     pub(crate) fn write_set(&mut self, set: &Set) -> Result<()> {
+        let allocation = self.cached(set.dir)?.allocation;
+        self.load_chain(&allocation)?;
+        let clusters = self.chain(&allocation)?;
         let cluster_size = self.volume.boot().cluster_size() as usize;
         let mut position = set.offset;
         let end = set.offset + set.raw.len();
+        if end > clusters.len() * cluster_size {
+            return Err(Error::Invalid("entry set outside its directory"));
+        }
         while position < end {
-            let cluster = *set
-                .clusters
-                .get(position / cluster_size)
-                .ok_or(Error::Invalid("entry set outside its directory"))?;
+            let cluster = clusters[position / cluster_size];
             let to = end.min((position / cluster_size + 1) * cluster_size);
             let offset =
                 self.volume.boot().cluster_offset(cluster)? + (position % cluster_size) as u64;
@@ -388,8 +552,29 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 .write(offset, &set.raw[position - set.offset..to - set.offset])?;
             position = to;
         }
-        if set.in_root {
-            self.root_changed = true;
+        let upcase = &self.volume.upcase;
+        let cached = self.dirs.dirs.get_mut(&set.dir).expect("looked up above");
+        if cached.bytes[set.offset] == FILE {
+            let old = fold(upcase, &set_name(cached.set_at(set.offset)));
+            if cached.names.get(&old) == Some(&set.offset) {
+                cached.names.remove(&old);
+            }
+        }
+        cached.bytes[set.offset..end].copy_from_slice(&set.raw);
+        if set.raw[0] == FILE {
+            cached
+                .names
+                .insert(fold(upcase, &set_name(&set.raw)), set.offset);
+        }
+        if set
+            .raw
+            .chunks_exact(ENTRY)
+            .any(|entry| entry[0] & 0x80 == 0)
+        {
+            cached.free_from = cached.free_from.min(set.offset);
+        }
+        if cached.root {
+            self.volume.root[set.offset..end].copy_from_slice(&set.raw);
         }
         Ok(())
     }
@@ -413,11 +598,13 @@ impl<Device: BlockDevice> WriteVolume<Device> {
     /// records the new length in its parent.
     fn grow(&mut self, dir: &mut Dir) -> Result<()> {
         let cluster_size = self.volume.boot().cluster_size();
-        if dir.bytes.len() as u64 + cluster_size > MAX_DIRECTORY_BYTES {
+        let cached = self.cached(dir.first)?;
+        if cached.bytes.len() as u64 + cluster_size > MAX_DIRECTORY_BYTES {
             return Err(Error::NoSpace);
         }
-        self.extend_clusters(&mut dir.allocation, 1)?;
-        let added = dir.allocation.last_cluster();
+        let mut allocation = cached.allocation;
+        self.extend_clusters(&mut allocation, 1)?;
+        let added = allocation.last_cluster();
         // A new directory cluster is all end-of-directory entries before
         // anything refers to it.
         self.cache.write_through(
@@ -425,11 +612,19 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             &vec![0; cluster_size as usize],
         )?;
         self.barrier()?;
-        dir.clusters = self.clusters(&dir.allocation)?;
-        dir.bytes.resize(dir.bytes.len() + cluster_size as usize, 0);
+        let cached = self.dirs.dirs.get_mut(&dir.first).expect("looked up above");
+        cached.allocation = allocation;
+        cached
+            .bytes
+            .resize(cached.bytes.len() + cluster_size as usize, 0);
+        let length = cached.bytes.len();
+        self.dirs.bytes += cluster_size as usize;
+        if cached.root {
+            self.volume.root.resize(length, 0);
+        }
         if let Some(owner) = &mut dir.owner {
-            let length = dir.bytes.len() as u64;
-            set_stream(&mut owner.raw, &dir.allocation, length, length);
+            let length = length as u64;
+            set_stream(&mut owner.raw, &allocation, length, length);
             seal(&mut owner.raw);
             let owner = owner.clone();
             self.write_set(&owner)?;
@@ -442,19 +637,37 @@ impl<Device: BlockDevice> WriteVolume<Device> {
     pub(crate) fn insert(&mut self, dir: &mut Dir, raw: Vec<u8>) -> Result<Set> {
         let count = raw.len() / ENTRY;
         let offset = loop {
-            if let Some(offset) = free_run(&dir.bytes, count) {
+            let cached = self.cached(dir.first)?;
+            if let Some(offset) = free_run(&cached.bytes, cached.free_from, count) {
                 break offset;
             }
             self.grow(dir)?;
         };
-        dir.bytes[offset..offset + raw.len()].copy_from_slice(&raw);
         let set = Set {
-            clusters: dir.clusters.clone(),
-            in_root: dir.is_root(),
+            dir: dir.first,
             offset,
             raw,
         };
         self.write_set(&set)?;
+        let cached = self.dirs.dirs.get_mut(&dir.first).expect("written above");
+        if cached.free_from == offset {
+            cached.free_from = offset + set.raw.len();
+        }
         Ok(set)
+    }
+
+    /// Caches a new, empty directory's single cluster of end-of-directory
+    /// entries, replacing anything its first cluster held.
+    pub(crate) fn cache_new_dir(&mut self, allocation: Allocation) -> Result<()> {
+        let bytes = vec![0; self.volume.boot().cluster_size() as usize];
+        let dir = CachedDir::new(
+            allocation,
+            bytes,
+            false,
+            self.volume.upcase(),
+            self.volume.boot(),
+        )?;
+        self.dirs.insert(allocation.first_cluster(), dir);
+        Ok(())
     }
 }

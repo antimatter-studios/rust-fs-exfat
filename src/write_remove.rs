@@ -36,21 +36,16 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             (true, false) => return Err(Error::NotDirectory),
             _ => {}
         }
-        let (allocation, clusters) = self.stream_allocation(&entry)?;
-        if directory {
-            let length = entry.stream().data_length();
-            let bytes = self.read_clusters(&clusters, length)?;
-            let in_use = bytes
-                .chunks_exact(ENTRY)
-                .take_while(|entry| entry[0] != 0)
-                .any(|entry| entry[0] & IN_USE != 0);
-            if in_use {
-                return Err(Error::NotEmpty);
-            }
+        let allocation = self.stream_allocation(&entry)?;
+        if directory && !self.dir_is_empty(set.clone(), &entry)? {
+            return Err(Error::NotEmpty);
         }
         self.unset(&mut set)?;
         self.touch(&mut target.parent, &now)?;
         self.barrier()?;
+        if directory {
+            self.dirs.remove(allocation.first_cluster());
+        }
         let mut freed = allocation;
         self.shrink_clusters(&mut freed, 0)
     }

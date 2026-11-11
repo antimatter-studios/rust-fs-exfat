@@ -54,6 +54,7 @@ mod remove;
 mod rename;
 
 pub use alloc::Allocation;
+use alloc::ChainCache;
 pub use cache::CacheView;
 pub use dir::{ATTRIBUTE_ARCHIVE, SETTABLE_ATTRIBUTES};
 pub use file::NewEntry;
@@ -62,6 +63,7 @@ pub use meta::SetTimes;
 use crate::volume::{ReadLimits, Volume};
 use crate::{primitives, Error, Result};
 use cache::Cache;
+use dir::DirCache;
 use fs_core::{BlockDevice, FileDevice, OwnedRwSlice};
 use std::path::Path;
 use std::sync::Arc;
@@ -87,9 +89,15 @@ pub struct WriteVolume<Device: BlockDevice> {
     allocated: u64,
     next_free: u32,
     state: State,
-    /// Set when the root directory's stream changed, so the strict reader
-    /// reads it again at the end of the operation.
+    /// Set when the volume label changed, so the strict reader reads the
+    /// root directory's metadata again at the end of the operation. Entry
+    /// sets written into the root are patched into the reader's copy as they
+    /// are written.
     root_changed: bool,
+    /// The cluster lists of the streams this mount has checked.
+    chains: ChainCache,
+    /// The directories this mount has read and checked.
+    dirs: DirCache,
 }
 
 impl<Device: BlockDevice> WriteVolume<Device> {
@@ -145,6 +153,8 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             next_free: 2,
             state: State::Unmounted,
             root_changed: false,
+            chains: ChainCache::default(),
+            dirs: DirCache::default(),
         };
         mounted.write_boot_state(true)?;
         mounted.cache.sync()?;
@@ -225,6 +235,10 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         match body(self).and_then(|value| self.commit().map(|()| value)) {
             Ok(value) => Ok(value),
             Err(error) => {
+                // What the caches hold may no longer match what reached the
+                // device, so they are read again if the mount goes on.
+                self.chains = ChainCache::default();
+                self.dirs = DirCache::default();
                 if self.cache.writes() != before {
                     self.state = State::Failed;
                     let _ = self.cache.flush_dirty();
@@ -245,6 +259,8 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             self.volume.reload_root()?;
             self.root_changed = false;
         }
+        self.chains.trim();
+        self.dirs.trim();
         if self.percent_in_use() != self.volume.boot().percent_in_use {
             self.write_boot_state(true)?;
         }

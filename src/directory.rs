@@ -184,7 +184,6 @@ pub fn parse(
 /// A file entry set and where it lies in its directory's stream.
 pub(crate) struct Located {
     pub(crate) offset: usize,
-    pub(crate) length: usize,
     pub(crate) entry: DirectoryEntry,
 }
 
@@ -225,7 +224,6 @@ pub(crate) fn parse_located(
             }
             entries.push(Located {
                 offset: position,
-                length: set.bytes.len(),
                 entry,
             });
             position += set.bytes.len();
