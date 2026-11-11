@@ -14,8 +14,8 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | 2026-11-11 spec-allowed revision 1.01 and longer bitmap (#73), Ubuntu CI: 398 lines, 23807 bytes, 293 tests, including the 60-second slow-test notice for the 512 MiB bitmap audit (local macOS: 397 lines, 23690 bytes; before it: 393 lines, 23493 bytes, 289 tests) | 398 lines, 23812 bytes, allowing timing digits | 150 |
-| oracle | 2026-11-10: 223 lines, 11070 bytes, 25 tests including large-volume and million-entry comparisons | 270 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
+| unit | 2026-11-11 write mount and allocation (#129), local macOS: 466 lines, 28395 bytes, 347 tests, including the 60-second slow-test notice for the 512 MiB bitmap audit (before it the budget stood at 434 lines, 26559 bytes) | 468 lines, 28450 bytes, allowing timing digits | 150 |
+| oracle | 2026-11-11 write oracle (#129): 302 lines, 12646 bytes, 44 tests including large-volume and million-entry comparisons; the written images add 41 lines, two checker reports and two producer runs (2026-11-10: 223 lines, 11070 bytes, 25 tests) | 310 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
 
@@ -70,6 +70,14 @@ maximum, dirty state, resource refusal and injected I/O failure. The scale image
 are sparse or streamed files under this worktree's ignored `tmp/`; see the
 [audit memory contract](fsck-memory.md). CLI tests cover verified extraction,
 source protection and repair refusal.
+
+The writer is checked against the same platform. After each reference image
+has been populated and checked, the oracle copies it, and `tests/oracle/write.rs`
+changes the copy through `fs_exfat::write` and records the tree and every
+file's SHA-256 as this crate's reader then sees it. The copy is attached
+read-only for `fsck_exfat -n`, then mounted read-only, and the macOS driver's
+listing must equal the record. The guard admits the written image only after
+its producer has run, and only read-only attachments of it.
 
 Before any image operation, the safety guard checks the reviewed receipt parser,
 cleanup, fresh image binding and attach/query/detach ordering. Only the exact

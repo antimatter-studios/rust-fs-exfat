@@ -62,6 +62,27 @@ impl AllocationBitmap {
             .allocated(cluster)
             .ok_or(Error::Invalid("bitmap cluster outside heap"))
     }
+
+    /// The number of clusters the bitmap records as allocated.
+    pub fn allocated_count(&self) -> u64 {
+        primitives::bitmap_count(&self.bytes, self.cluster_count)
+    }
+
+    /// Records a cluster as allocated or free and returns the bitmap byte
+    /// that holds it, with its index, for the caller to write.
+    pub(crate) fn set(&mut self, cluster: u32, allocated: bool) -> Result<(usize, u8)> {
+        if !(2..u64::from(self.cluster_count) + 2).contains(&u64::from(cluster)) {
+            return Err(Error::Invalid("bitmap cluster outside heap"));
+        }
+        let index = (cluster - 2) as usize;
+        let byte = &mut self.bytes[index / 8];
+        if allocated {
+            *byte |= 1 << (index % 8);
+        } else {
+            *byte &= !(1 << (index % 8));
+        }
+        Ok((index / 8, *byte))
+    }
 }
 
 #[derive(Debug)]

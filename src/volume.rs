@@ -224,6 +224,18 @@ impl<Device: BlockRead> Volume<Device> {
         FatEntry::from_report(fat_entry(&self.reader, &self.boot, cluster)?)
     }
 
+    pub(crate) fn bitmap_mut(&mut self) -> &mut AllocationBitmap {
+        &mut self.bitmap
+    }
+
+    pub(crate) fn boot_mut(&mut self) -> &mut BootSector {
+        &mut self.boot
+    }
+
+    pub(crate) fn is_system_cluster(&self, cluster: u32) -> bool {
+        self.system_clusters.contains(&cluster)
+    }
+
     pub fn cluster_chain(&self, first: u32) -> Result<Vec<u32>> {
         let clusters = chain(&self.reader, &self.boot, first, self.limits)?;
         for cluster in &clusters {

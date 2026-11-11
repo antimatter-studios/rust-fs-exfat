@@ -29,6 +29,24 @@ implement TexFAT, so the tests build two-FAT images from those sections and
 check the results against a reader written in the test from the same sections,
 which shares no code with the crate's decoders.
 
+## Writing: write mount, volume state and allocation
+
+For #129, `fs_exfat::write` (the write mount, its sector cache, VolumeDirty
+and PercentInUse, and cluster allocation) is new code written from Microsoft's
+public exFAT specification, sections 3.1.13 "VolumeFlags Field" (3.1.13.1
+ActiveFat, 3.1.13.2 VolumeDirty, 3.1.13.3 MediaFailure), 3.1.15 "PercentInUse
+Field", 3.2 "Main and Backup Boot Regions", 3.4 "Main and Backup Boot Checksum
+Sub-regions", 4.1 "File Allocation Table" (4.1.3 FatEntry values, 4.1.4 bad
+clusters), 7.1 "Allocation Bitmap Directory Entry", 7.1.5 "Allocation Bitmap"
+and 7.6.2.2 "NoFatChain Field", and from this crate's own strict reader. The
+API shape follows rust-fs-ext4, a sibling read/write driver over the same
+rust-fs-core traits. No other exFAT implementation was an input. The macOS
+oracle copies volumes `newfs_exfat` formatted and the macOS driver populated,
+changes them through the writer, and checks them with `fsck_exfat -n` and the
+read-only mounted macOS driver. Observing that the macOS driver marks only the
+Main Boot Sector dirty was black-box use of the host's own driver on an image
+created for the purpose.
+
 ## Cross-linked clusters
 
 For #89, the salvage `cross_links` extension is new code written from

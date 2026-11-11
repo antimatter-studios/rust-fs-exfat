@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
-description = "Strict read-only exFAT reader"
+description = "exFAT filesystem driver: strict reader, writer and read-only salvage"
 repository = "https://github.com/antimatter-studios/rust-fs-exfat"
 exclude = ["fuzz", "tmp", "dist"]
 
@@ -75,6 +75,10 @@ path = "tests/oracle/path.rs"
 [[test]]
 name = "macos_fuzz_seeds"
 path = "tests/oracle/fuzz_seeds.rs"
+
+[[test]]
+name = "macos_write"
+path = "tests/oracle/write.rs"
 
 [[test]]
 name = "cli"

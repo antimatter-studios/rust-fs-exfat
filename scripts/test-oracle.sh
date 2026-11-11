@@ -245,6 +245,7 @@ PY
     /usr/bin/hdiutil detach "$device"
     device=''
     attached=0
+    cp "$image" "$directory/populated-$sector.dmg"
 done
 for sector in 512 4096; do
     image="$directory/windows-$sector.dmg"
@@ -283,5 +284,47 @@ for sector in 512 4096; do
     /usr/bin/hdiutil detach "$device"
     device=''
     attached=0
+done
+# The writer's volumes: each starts as a copy of a volume macOS formatted and
+# populated, is changed by fs_exfat::write, and must then pass the macOS checker
+# and read back through the read-only macOS driver as this crate recorded it.
+for sector in 512 4096; do
+    image="$directory/written-$sector.dmg"
+    EXFAT_ORACLE_DIR="$directory" EXFAT_ORACLE_SECTOR="$sector" cargo test --locked --features cli,test-support --test macos_write -- --nocapture
+    [ -f "$image" ] && [ ! -L "$image" ]
+    /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"
+    accept_receipt
+    /sbin/fsck_exfat -n "$device"
+    /usr/bin/hdiutil detach "$device"
+    device=''
+    attached=0
+    mkdir "$directory/written-mount-$sector"
+    /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/written-mount-$sector" -plist "$image" > "$directory/attach.plist"
+    accept_receipt
+    /usr/bin/python3 - "$directory/written-mount-$sector" "$directory/written-listing-$sector.txt" <<'PY'
+from pathlib import Path
+import hashlib, os, sys, unicodedata
+root = Path(sys.argv[1])
+if not os.statvfs(root).f_flag & os.ST_RDONLY:
+    raise SystemExit('oracle: written image must be mounted read-only')
+records = []
+for current, directories, files in os.walk(root):
+    for name in directories + files:
+        item = Path(current) / name
+        if item.is_symlink():
+            raise SystemExit('oracle: unexpected symlink on written image')
+        path = unicodedata.normalize('NFC', str(item.relative_to(root)))
+        if item.is_dir():
+            records.append(f'd\t0\t-\t{path}\n')
+        else:
+            digest = hashlib.sha256(item.read_bytes()).hexdigest()
+            records.append(f'f\t{item.stat().st_size}\t{digest}\t{path}\n')
+with open(sys.argv[2], 'w') as output:
+    output.writelines(sorted(records))
+PY
+    /usr/bin/hdiutil detach "$device"
+    device=''
+    attached=0
+    diff -u "$directory/written-expected-$sector.txt" "$directory/written-listing-$sector.txt"
 done
 bash scripts/test-capi.sh "$directory/reference-512.dmg" "$directory/reference-4096.dmg"
