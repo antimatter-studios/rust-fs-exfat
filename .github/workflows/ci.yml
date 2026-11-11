@@ -350,8 +350,9 @@ jobs:
 
   test:
     # x86_64, where GitHub gives us KVM: the Linux oracles, every call inside
-    # the harness guest. exfatprogs (`chore test:oracle`, #123) judges every
-    # fixture; the kernel (#124) and relan/exfat (#125) join this job. The
+    # the harness guest. exfatprogs (`chore test:oracle`, #123) and the
+    # kernel's loop mounts (`chore test:kernel`, #124) judge every fixture;
+    # relan/exfat (#125) joins this job. The
     # runner's own exfatprogs is made unusable first, so a test that ran a
     # tool on the host would fail here as well as in tests/test_contract.rs.
     name: test (x86_64, oracles in the VM)
@@ -420,6 +421,8 @@ jobs:
       - name: chore test:oracle
         id: tier
         run: chore test:oracle
+      - name: chore test:kernel
+        run: chore test:kernel
       - name: Keep the tier logs
         if: always() && steps.tier.outcome != 'skipped'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

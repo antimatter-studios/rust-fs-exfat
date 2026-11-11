@@ -19,6 +19,9 @@ chore_min_version: 0.19.0
 #                      kernel's listing of each image
 #   chore test:oracle  exfatprogs reads every fixture IN THE GUEST: fsck.exfat
 #                      -n for consistency, dump.exfat field for field
+#   chore test:kernel  THE REAL KERNEL reads every fixture: loop-mounted
+#                      read-only in the guest, walked, and compared with the
+#                      strict reader and salvage
 #   chore test:oracle-macos
 #                      macOS's newfs_exfat, fsck_exfat -n and read-only
 #                      driver, on a Mac host
@@ -211,6 +214,22 @@ tasks:
       - test-disks/build-fixtures.sh --check
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 140 7500 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 2
+  test:kernel:
+    desc: 'THE KERNEL is the judge: every fixture loop-mounted read-only and walked in the guest, against the strict reader and salvage'
+    # tests/kernel.rs: one `[kernel vm]` guest call per image mounts it with
+    # the kernel's exfat driver and lists every path, size, mode, time and
+    # SHA-256. The strict reader must agree on every field, salvage must
+    # rebuild every file, and a reading with a file's last cluster dropped
+    # must be caught. The write direction (#133) uses the same kernel walk.
+    #
+    # BUDGET: 104 lines / 5,590 bytes from a cold build on a macOS host, 65 /
+    # 4,358 warm (#124); 135 / 7,300 is about 30% over the cold run. FLOOR:
+    # all three tests.
+    cmds:
+      - scripts/tools.sh --check
+      - test-disks/build-fixtures.sh --check
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 135 7300 -- scripts/test.sh --locked --release --features cli,test-support --test kernel -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 3
   test:oracle-macos:
     desc: 'macOS newfs_exfat, fsck_exfat -n and the read-only macOS driver, on a Mac host'
     # The host oracle that was test:oracle before exfatprogs took the name
@@ -219,7 +238,7 @@ tasks:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 310 16000 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle-macos 25
   test:
-    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:oracle-macos', 'chore test:package', 'chore test:scripts']
+    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:kernel', 'chore test:oracle-macos', 'chore test:package', 'chore test:scripts']
   fuzz:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'

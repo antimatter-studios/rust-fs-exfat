@@ -140,15 +140,22 @@ pub type Listing = BTreeMap<String, Row>;
 
 /// A listing file written by fixture-tool.py.
 pub fn read_listing(path: &Path) -> Listing {
-    let text = std::fs::read_to_string(path).unwrap();
+    parse_listing(
+        &std::fs::read_to_string(path).unwrap(),
+        &path.display().to_string(),
+    )
+}
+
+/// A listing in fixture-tool.py's format, from wherever it came: a file
+/// captured at build time, or a kernel walk made just now in the guest.
+pub fn parse_listing(text: &str, origin: &str) -> Listing {
     let mut rows = Listing::new();
     for line in text.lines().filter(|line| !line.starts_with('#')) {
         let fields: Vec<&str> = line.splitn(7, '\t').collect();
         assert_eq!(
             fields.len(),
             7,
-            "malformed listing line in {}",
-            path.display()
+            "malformed listing line in {origin}: {line:?}"
         );
         let nanoseconds = |field: &str| -> i64 {
             let value: i64 = field.parse().unwrap();

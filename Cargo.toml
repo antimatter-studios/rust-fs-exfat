@@ -110,3 +110,7 @@ path = "tests/images.rs"
 [[test]]
 name = "exfatprogs"
 path = "tests/exfatprogs.rs"
+
+[[test]]
+name = "kernel"
+path = "tests/kernel.rs"
