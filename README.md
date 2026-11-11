@@ -53,8 +53,9 @@ written, is read across the clusters the FAT links. Plans materialize into a
 caller's `io::Write`, never into the source. A plan names source extents, zeros,
 literal bytes and cluster runs, which map through the adapter's `cluster_layout`,
 and may declare a final length, a valid length past which output is zeros, and
-the file's name and times. As an exFAT extension outside the common
-trait, `ExfatSalvage::stale_chains` lists free clusters whose FAT entries are
+the file's name and times. `plan_reader` executes a plan as a positioned reader,
+so any offset of the output can be read on demand. As an exFAT extension outside
+the common trait, `ExfatSalvage::stale_chains` lists free clusters whose FAT entries are
 non-zero, which the specification allows, with the chains they still link.
 `ExfatSalvage::uninterpreted_entries`, another such extension, lists the
 directory entries the driver does not interpret, Vendor Extension and Vendor

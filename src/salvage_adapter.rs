@@ -10,7 +10,7 @@
 //! | Rebuild the tree | [`SalvageAdapter::rebuild_tree`] |
 //! | Report damage | [`SalvageAdapter::report_damage`] |
 //! | Read by extent | [`SalvageAdapter::read_extent`] |
-//! | Materialize from a plan | [`SalvageAdapter::materialize`] |
+//! | Materialize from a plan | [`SalvageAdapter::materialize`], or [`SalvageAdapter::plan_reader`] for positioned reads |
 //!
 //! [`SalvageAdapter::capabilities`] says which of them, and which
 //! deletion-specific parts, a driver lacks.
@@ -69,14 +69,11 @@ use std::ops::ControlFlow;
 #[path = "salvage_plan.rs"]
 mod plan;
 
-pub use plan::{ClusterLayout, Plan, PlanFault, PlanMetadata, PlanStep};
-use plan::{Origin, Resolved};
+use plan::Resolved;
+pub use plan::{ClusterLayout, Plan, PlanFault, PlanMetadata, PlanRead, PlanReader, PlanStep};
 
 /// Bytes [`SalvageAdapter::materialize`] copies per source read.
 const MATERIALIZE_CHUNK: u64 = 64 * 1024;
-
-/// The span a failed materialize read is retried in, to narrow what is lost.
-const RETRY_SPAN: u64 = 512;
 
 /// A byte range on the source device.
 #[derive(
@@ -464,31 +461,42 @@ impl MaterializeReport {
     }
 
     fn push(&mut self, length: u64, source: Option<Extent>, readable: bool) {
-        if length == 0 {
+        append(&mut self.ranges, self.length, length, source, readable);
+        self.length += length;
+    }
+}
+
+/// Appends `length` output bytes at `at` to `ranges`, joining the last range
+/// when the source continues it and readability agrees.
+fn append(
+    ranges: &mut Vec<MaterializedRange>,
+    at: u64,
+    length: u64,
+    source: Option<Extent>,
+    readable: bool,
+) {
+    if length == 0 {
+        return;
+    }
+    if let Some(last) = ranges.last_mut() {
+        let joins_source = match (last.source, source) {
+            (Some(previous), Some(next)) => previous.end() == Some(next.offset),
+            (None, None) => true,
+            _ => false,
+        };
+        if joins_source && last.readable == readable && last.output.end() == Some(at) {
+            last.output.length += length;
+            if let (Some(previous), Some(next)) = (last.source.as_mut(), source) {
+                previous.length += next.length;
+            }
             return;
         }
-        let output = Extent::new(self.length, length);
-        self.length += length;
-        if let Some(last) = self.ranges.last_mut() {
-            let joins_source = match (last.source, source) {
-                (Some(previous), Some(next)) => previous.end() == Some(next.offset),
-                (None, None) => true,
-                _ => false,
-            };
-            if joins_source && last.readable == readable {
-                last.output.length += length;
-                if let (Some(previous), Some(next)) = (last.source.as_mut(), source) {
-                    previous.length += next.length;
-                }
-                return;
-            }
-        }
-        self.ranges.push(MaterializedRange {
-            output,
-            source,
-            readable,
-        });
     }
+    ranges.push(MaterializedRange {
+        output: Extent::new(at, length),
+        source,
+        readable,
+    });
 }
 
 /// The common salvage surface each driver implements over its primitives.
@@ -575,60 +583,38 @@ pub trait SalvageAdapter {
         plan: &Plan,
         sink: &mut dyn io::Write,
     ) -> Result<MaterializeReport, SalvageError> {
-        self.capabilities().require(Feature::Materialize)?;
-        let resolved = resolve(self, source, plan)?;
+        let reader = self.plan_reader(source, plan)?;
         let mut report = MaterializeReport::default();
         let mut buffer = vec![0u8; MATERIALIZE_CHUNK as usize];
-        for piece in &resolved.pieces {
-            match piece.from {
-                Origin::Literal { step } => {
-                    let PlanStep::Bytes(bytes) = &plan.steps[step] else {
-                        unreachable!("a literal piece comes from a bytes step")
-                    };
-                    sink.write_all(&bytes[..piece.length as usize])
-                        .map_err(SalvageError::Sink)?;
-                    report.push(piece.length, None, true);
-                }
-                Origin::Zeros => {
-                    buffer.fill(0);
-                    let mut remaining = piece.length;
-                    while remaining > 0 {
-                        let count = remaining.min(MATERIALIZE_CHUNK);
-                        sink.write_all(&buffer[..count as usize])
-                            .map_err(SalvageError::Sink)?;
-                        remaining -= count;
-                    }
-                    report.push(piece.length, None, true);
-                }
-                Origin::Source(offset) => {
-                    let mut done = 0;
-                    while done < piece.length {
-                        let count = (piece.length - done).min(MATERIALIZE_CHUNK);
-                        let piece = Extent::new(offset + done, count);
-                        let output = &mut buffer[..count as usize];
-                        if self.read_extent(source, piece, 0, output).is_ok() {
-                            report.push(count, Some(piece), true);
-                        } else {
-                            let mut within = 0;
-                            while within < count {
-                                let span = (count - within).min(RETRY_SPAN);
-                                let part = Extent::new(piece.offset + within, span);
-                                let bytes = &mut output[within as usize..(within + span) as usize];
-                                let readable = self.read_extent(source, part, 0, bytes).is_ok();
-                                if !readable {
-                                    bytes.fill(0);
-                                }
-                                report.push(span, Some(part), readable);
-                                within += span;
-                            }
-                        }
-                        sink.write_all(output).map_err(SalvageError::Sink)?;
-                        done += count;
-                    }
-                }
+        let mut offset = 0;
+        while offset < reader.len() {
+            let count = (reader.len() - offset).min(MATERIALIZE_CHUNK) as usize;
+            let read = reader.read_at(offset, &mut buffer[..count])?;
+            sink.write_all(&buffer[..count])
+                .map_err(SalvageError::Sink)?;
+            for range in read.ranges {
+                report.push(range.output.length, range.source, range.readable);
             }
+            offset += count as u64;
         }
         Ok(report)
+    }
+
+    /// Executes a plan as a positioned reader over its output, so any offset
+    /// can be read on demand without materializing what comes before it.
+    ///
+    /// The plan is validated as [`Self::materialize`] validates it, before
+    /// anything is read. Each [`PlanReader::read_at`] reads only the source
+    /// bytes its request covers, with the same 512-byte retries, zero fill
+    /// and provenance.
+    fn plan_reader<'a>(
+        &'a self,
+        source: &'a dyn BlockRead,
+        plan: &'a Plan,
+    ) -> Result<PlanReader<'a, Self>, SalvageError> {
+        self.capabilities().require(Feature::Materialize)?;
+        let resolved = resolve(self, source, plan)?;
+        Ok(PlanReader::new(self, source, plan, resolved))
     }
 }
 

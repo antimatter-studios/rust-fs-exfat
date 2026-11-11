@@ -1,0 +1,3 @@
+## Reading
+
+| Salvage plan positioned reader | Experimental; executing a plan yields a reader over its output that reads any offset on demand, reading only the source bytes the request covers, with the same 512-byte retries, zero fill and per-range provenance as materializing it, and names the source byte behind any output byte without reading; `materialize` streams through it, and the conformance set checks that reading every driver's plan output in odd-sized pieces gives the bytes and provenance materializing it gave; synthetic-only evidence | Unreleased (#93) | #93 | `src/salvage_plan.rs`, `src/salvage_adapter.rs`, `src/conformance.rs`, `tests/salvage_cases/plans.rs` |
