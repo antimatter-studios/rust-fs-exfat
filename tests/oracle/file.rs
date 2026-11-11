@@ -185,3 +185,89 @@ fn an_unaligned_valid_length_is_exact_here_and_the_macos_driver_rounds_it_or_agr
         println!("{sector}-byte driver kept {kept} original bytes of a 513-byte valid length");
     }
 }
+
+/// Every file, rebuilt by the salvage adapter from a plan of its cluster
+/// runs with its DataLength and ValidDataLength, hashes the same as the copy
+/// the read-only macOS driver returned.
+#[test]
+fn cluster_plans_rebuild_every_file_as_the_read_only_macos_driver_reads_it() {
+    use fs_exfat::salvage::{ExfatSalvage, Plan, PlanStep, SalvageAdapter};
+
+    fn plans<Device: BlockRead>(
+        volume: &Volume<Device>,
+        entries: Vec<DirectoryEntry>,
+        prefix: &str,
+        out: &mut BTreeMap<String, Plan>,
+    ) {
+        assert!(prefix.split('/').count() < 64, "directory cycle");
+        for entry in entries {
+            let path: String = format!("{prefix}{}", entry.name()).nfc().collect();
+            if entry.is_directory() {
+                let children = volume.read_directory(&entry).unwrap();
+                plans(volume, children, &format!("{path}/"), out);
+                continue;
+            }
+            let stream = entry.stream();
+            let needed = stream.data_length().div_ceil(volume.boot().cluster_size());
+            let first = u64::from(stream.first_cluster());
+            let mut steps: Vec<PlanStep> = Vec::new();
+            if stream.no_fat_chain() {
+                if needed > 0 {
+                    steps.push(PlanStep::Clusters {
+                        first,
+                        count: needed,
+                    });
+                }
+            } else if needed > 0 {
+                for cluster in volume.cluster_chain(stream.first_cluster()).unwrap() {
+                    match steps.last_mut() {
+                        Some(PlanStep::Clusters { first, count })
+                            if *first + *count == u64::from(cluster) =>
+                        {
+                            *count += 1
+                        }
+                        _ => steps.push(PlanStep::Clusters {
+                            first: cluster.into(),
+                            count: 1,
+                        }),
+                    }
+                }
+            }
+            let mut plan = Plan::new(steps);
+            plan.length = Some(stream.data_length());
+            plan.valid_length = Some(stream.valid_data_length());
+            assert!(out.insert(path, plan).is_none());
+        }
+    }
+
+    let directory =
+        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    for sector in [512, 4096] {
+        let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
+        let volume = Volume::open(Bytes(image.clone())).unwrap();
+        let mut planned = BTreeMap::new();
+        plans(&volume, volume.root_directory().unwrap(), "", &mut planned);
+
+        let source = Bytes(image);
+        let adapter = ExfatSalvage::probe(&source);
+        let mut observed = BTreeMap::new();
+        for (path, plan) in planned {
+            let mut output = Vec::new();
+            let report = adapter.materialize(&source, &plan, &mut output).unwrap();
+            assert_eq!(report.unreadable().count(), 0);
+            let value = format!("{}\t{:x}", output.len(), Sha256::digest(&output));
+            observed.insert(path, value);
+        }
+        let expected: BTreeMap<String, String> =
+            std::fs::read_to_string(directory.join(format!("files-{sector}.txt")))
+                .unwrap()
+                .lines()
+                .map(|line| {
+                    let fields: Vec<_> = line.splitn(6, '\t').collect();
+                    (fields[5].nfc().collect(), fields[..2].join("\t"))
+                })
+                .collect();
+        assert!(observed.len() > 185);
+        assert_eq!(observed, expected, "{sector}-byte image");
+    }
+}

@@ -7,7 +7,7 @@
 //! | Rebuild the tree | the same walks over the root and directory candidates |
 //! | Report damage | [`primitives::BootRegion`], [`primitives::boot_check`], [`primitives::VolumeState`], [`primitives::RawRootMetadata`], [`primitives::RawUpcaseTable`] |
 //! | Read by extent | positioned source reads |
-//! | Materialize | the trait's provided method over read by extent |
+//! | Materialize | the trait's provided method over read by extent, with cluster steps mapped onto the Cluster Heap |
 //! | Stale FAT chains (extension) | [`primitives::stale_chains`] over [`primitives::RawAllocationBitmap`] and the adapter's FAT words |
 //! | Uninterpreted entries (extension) | [`primitives::uninterpreted_entries`] over the root and directory-candidate claims |
 //! | Up-case Table for name lookups (extension) | [`primitives::RawRootMetadata`] and [`primitives::RawUpcaseTable`], compressed or not |
@@ -28,9 +28,9 @@
 //! two-FAT volume instead.
 
 use super::adapter::{
-    Candidate, CandidateKind, CandidateState, Capabilities, Damage, DamageKind, DamageReport,
-    Extent, ExtentWalk, Integrity, Parent, SalvageAdapter, SalvageError, ScanReport, Severity,
-    Sink, Tree, TreeNode, WalkEnd,
+    Candidate, CandidateKind, CandidateState, Capabilities, ClusterLayout, Damage, DamageKind,
+    DamageReport, Extent, ExtentWalk, Integrity, Parent, SalvageAdapter, SalvageError, ScanReport,
+    Severity, Sink, Tree, TreeNode, WalkEnd,
 };
 use crate::device::AlignedDevice;
 use crate::primitives::{
@@ -313,6 +313,18 @@ impl SalvageAdapter for ExfatSalvage {
             .read_at(extent.offset + offset, &mut output[..count])
             .map_err(SalvageError::Device)?;
         Ok(count)
+    }
+
+    /// Clusters 2 onward of the Cluster Heap, as the boot copy in use
+    /// describes it.
+    fn cluster_layout(&self) -> Result<ClusterLayout, SalvageError> {
+        let geometry = self.geometry()?;
+        Ok(ClusterLayout {
+            first: FIRST_CLUSTER.into(),
+            count: geometry.boot.cluster_count.into(),
+            size: geometry.cluster,
+            offset: geometry.heap,
+        })
     }
 }
 
