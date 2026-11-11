@@ -684,6 +684,9 @@ pub fn checksum32(data: &[u8]) -> u32 {
 pub struct RawAllocationBitmap<'a> {
     pub bytes: &'a [u8],
     pub cluster_count: u32,
+    /// The bytes hold at least ClusterCount bits. Section 7.1.5, Table 22:
+    /// the bits past BitmapEntry[ClusterCount + 1] are Reserved, so a
+    /// bitmap longer than ClusterCount / 8 bytes, rounded up, is valid.
     pub length_ok: bool,
 }
 
@@ -692,7 +695,7 @@ impl<'a> RawAllocationBitmap<'a> {
         Self {
             bytes,
             cluster_count,
-            length_ok: bytes.len() as u64 == u64::from(cluster_count).div_ceil(8),
+            length_ok: bytes.len() as u64 >= u64::from(cluster_count).div_ceil(8),
         }
     }
 

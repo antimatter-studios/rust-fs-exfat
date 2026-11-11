@@ -64,8 +64,16 @@ impl BootSector {
         {
             return Err(Error::Invalid("sector or cluster shift"));
         }
-        if self.revision != 0x0100 {
+        // Section 3.1.12: the high byte of FileSystemRevision is the major
+        // revision and the low byte the minor revision, 0 to 99. Major
+        // revision 1 is the only one the specification describes, and
+        // implementations should mount any minor revision of it, so 1.01 to
+        // 1.99 mount like 1.00. Any other major revision is refused.
+        if self.revision >> 8 != 1 {
             return Err(Error::Unsupported("filesystem revision"));
+        }
+        if self.revision & 0xFF > 99 {
+            return Err(Error::Invalid("filesystem revision"));
         }
         if !matches!(self.number_of_fats, 1 | 2)
             || self.number_of_fats == 1 && self.volume_flags & 1 != 0

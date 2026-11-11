@@ -26,18 +26,21 @@ fn system_entry(kind: u8, first_cluster: u32, length: u64) -> [u8; 32] {
 
 #[test]
 fn wrong_bitmap_lengths_preserve_available_bits() {
+    // Section 7.1.5, Table 22: bits past ClusterCount are Reserved, so the
+    // three-byte bitmap is valid for 10 clusters; the one-byte one is short.
     for bytes in [&[0x81][..], &[0x81, 0x02, 0xff][..]] {
+        let short = bytes.len() < 2;
         let raw = RawAllocationBitmap::parse(bytes, 10);
         assert_eq!(raw.bytes, bytes);
         assert_eq!(raw.cluster_count, 10);
-        assert!(!raw.length_ok);
+        assert_eq!(raw.length_ok, !short);
         assert_eq!(raw.allocated(2), Some(true));
         assert_eq!(raw.allocated(3), Some(false));
         assert_eq!(raw.allocated(9), Some(true));
         assert_eq!(raw.allocated(11), bytes.get(1).map(|byte| byte & 2 != 0));
         assert_eq!(raw.allocated(1), None);
         assert_eq!(raw.allocated(12), None);
-        assert!(AllocationBitmap::parse(bytes.to_vec(), 10).is_err());
+        assert_eq!(AllocationBitmap::parse(bytes.to_vec(), 10).is_err(), short);
     }
     assert!(RawAllocationBitmap::parse(&[], 0).length_ok);
     assert_eq!(RawAllocationBitmap::parse(&[], 1).allocated(2), None);

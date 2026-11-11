@@ -1,0 +1,3 @@
+## Reading
+
+| Spec-allowed revisions and bitmap lengths | Experimental; the strict reader, `check` and salvage accept FileSystemRevision 1.01 to 1.99, which section 3.1.12 says implementations should mount, and an Allocation Bitmap longer than ClusterCount needs, whose extra bits section 7.1.5 (Table 22) makes Reserved, matching macOS fsck_exfat; another major revision, a minor revision past 99 and a short bitmap are still refused | Unreleased (#73) | #73 | `src/boot.rs`, `src/volume.rs`, `src/check_audit.rs`, `tests/check.rs`, `tests/check/deviations.rs`, `tests/primitive_cases/metadata.rs`, `tests/conformance.rs` |

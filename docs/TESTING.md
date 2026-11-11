@@ -14,7 +14,7 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | 2026-11-11 entry sets past eighteen secondaries (#70), cached target: 393 lines, 23493 bytes, 289 tests (before it: 390 lines, 23214 bytes, 286 tests) | 393 lines, 23498 bytes, allowing timing digits | 150 |
+| unit | 2026-11-11 spec-allowed revision 1.01 and longer bitmap (#73), Ubuntu CI: 398 lines, 23807 bytes, 293 tests, including the 60-second slow-test notice for the 512 MiB bitmap audit (local macOS: 397 lines, 23690 bytes; before it: 393 lines, 23493 bytes, 289 tests) | 398 lines, 23812 bytes, allowing timing digits | 150 |
 | oracle | 2026-11-10: 223 lines, 11070 bytes, 25 tests including large-volume and million-entry comparisons | 270 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |

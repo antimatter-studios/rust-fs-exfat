@@ -93,15 +93,27 @@ impl<Device: BlockRead> Volume<Device> {
         let active = usize::from((boot.volume_flags & 1) as u8);
         let bitmap_stream =
             metadata.bitmaps[active].ok_or(Error::Invalid("active bitmap missing"))?;
-        if bitmap_stream.length != u64::from(boot.cluster_count).div_ceil(8) {
+        // Section 7.1.5, Table 22: the bitmap holds one bit per cluster of the
+        // heap, and the bits past ClusterCount are Reserved. A DataLength
+        // longer than ClusterCount needs is valid; only the bits the heap uses
+        // are read, but the chain must still cover the whole DataLength.
+        let bitmap_length = u64::from(boot.cluster_count).div_ceil(8);
+        if bitmap_stream.length < bitmap_length {
             return Err(Error::Invalid("bitmap stream length"));
         }
-        let (bitmap_bytes, bitmap_chain) = system_stream(&reader, &boot, bitmap_stream, limits)?;
+        let (bitmap_bytes, bitmap_chain) =
+            system_stream(&reader, &boot, bitmap_stream, bitmap_length, limits)?;
         let bitmap = AllocationBitmap::parse(bitmap_bytes, boot.cluster_count)?;
         if metadata.upcase.length == 0 || metadata.upcase.length > 131072 {
             return Err(Error::Invalid("upcase stream length"));
         }
-        let (upcase_bytes, upcase_chain) = system_stream(&reader, &boot, metadata.upcase, limits)?;
+        let (upcase_bytes, upcase_chain) = system_stream(
+            &reader,
+            &boot,
+            metadata.upcase,
+            metadata.upcase.length,
+            limits,
+        )?;
         let upcase = UpcaseTable::parse(&upcase_bytes, metadata.upcase_checksum)?;
         let mut occupied = HashSet::new();
         for cluster in root_chain.iter().chain(&bitmap_chain).chain(&upcase_chain) {
@@ -299,6 +311,7 @@ fn system_stream<Device: BlockRead>(
     reader: &Reader<Device>,
     boot: &BootSector,
     stream: SystemStream,
+    read_length: u64,
     limits: ReadLimits,
 ) -> Result<(Vec<u8>, Vec<u32>)> {
     let clusters = chain(reader, boot, stream.first_cluster, limits)?;
@@ -309,7 +322,7 @@ fn system_stream<Device: BlockRead>(
         reader,
         boot,
         clusters.iter().copied(),
-        stream.length,
+        read_length.min(stream.length),
         limits,
     )?;
     Ok((bytes, clusters))

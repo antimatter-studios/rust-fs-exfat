@@ -53,7 +53,7 @@ PercentInUse as stale.
 | `cluster-heap-offset` | 3.1.8 | error | ClusterHeapOffset is at least FatOffset + FatLength × NumberOfFats and at most VolumeLength − ClusterCount × 2^SectorsPerClusterShift. | Rejects | Not run |
 | `cluster-count` | 3.1.9 | warning | ClusterCount is the lesser of (VolumeLength − ClusterHeapOffset) / 2^SectorsPerClusterShift, rounded down, and 2^32 − 11. | Accepts a smaller count silently; a larger one also breaks 3.1.8 and is rejected | Accepts |
 | `root-cluster` | 3.1.10 | error | FirstClusterOfRootDirectory is between 2 and ClusterCount + 1. | Rejects | Reports |
-| `revision` | 3.1.12 | error | FileSystemRevision's major revision is 1, the only one this specification describes, and its minor revision is at most 99. | Rejects; also rejects 1.01 to 1.99, which section 3.1.12 says implementations should mount (#73) | Reports |
+| `revision` | 3.1.12 | error | FileSystemRevision's major revision is 1, the only one this specification describes, and its minor revision is at most 99. | Rejects; mounts 1.01 to 1.99 like 1.00, as section 3.1.12 says implementations should | Reports |
 | `active-fat` | 3.1.13.1 | error | ActiveFat is 1 only when NumberOfFats is 2. Main only. | Rejects | Reports |
 | `volume-flags-reserved` | 3.1.13 (Table 5) | notice | VolumeFlags bits 4–15, Reserved, are zero. Main only. | Accepts silently | Accepts |
 | `bytes-per-sector-shift` | 3.1.14 | error | BytesPerSectorShift is between 9 and 12. | Rejects | Reports |
@@ -95,7 +95,7 @@ covers them.
 | `bitmap-entry-count` | 7.1 | error | The root holds exactly NumberOfFats Allocation Bitmap entries: one describing the First Allocation Bitmap and, with two FATs, one describing the Second. | Rejects | Reports |
 | `bitmap-identifier` | 7.1.2.1 | error | BitmapIdentifier is 1 only when NumberOfFats is 2. | Rejects | Reports |
 | `bitmap-flags-reserved` | 7.1.2 (Table 21) | notice | BitmapFlags bits 1–7, Reserved, are zero. | Rejects | Accepts |
-| `bitmap-length` | 7.1.5 (Table 22) | error | The Allocation Bitmap's DataLength holds ClusterCount bits: at least ClusterCount / 8 bytes, rounded up. | Rejects; also rejects a longer bitmap, which Table 22's Reserved bits allow (#73) | Reports |
+| `bitmap-length` | 7.1.5 (Table 22) | error | The Allocation Bitmap's DataLength holds ClusterCount bits: at least ClusterCount / 8 bytes, rounded up. | Rejects; mounts a longer bitmap, which Table 22's Reserved bits allow | Reports |
 | `bitmap-reserved` | 7.1.5 (Table 22) | notice | The bitmap bits after BitmapEntry[ClusterCount + 1], Reserved, are zero. | Accepts silently | Accepts |
 | `bitmap-free-cluster` | 7.1.5.1 | error | Every cluster an allocation consumes has its bitmap bit set. Checked for the walked chains above. | Rejects | Reports |
 | `upcase-entry-count` | 7.2 | error | The root holds exactly one Up-case Table entry. | Rejects | Reports |
@@ -247,8 +247,9 @@ bytes. Only images made for the run were attached.
   its cluster), `no-fat-chain` (NoFatChain on an empty file),
   `name-entry-flags` and `name-reserved` (a file named `..`). It also accepts
   every *warning* and *notice* rule it was given except `end-of-directory`.
-- macOS also accepts what the specification allows and the strict layer
-  refuses: FileSystemRevision 1.01 and a longer Allocation Bitmap (#73).
+- macOS also accepts what the specification allows: FileSystemRevision 1.01
+  and a longer Allocation Bitmap. The strict layer refused both until #73 and
+  now accepts them.
 - For #42, on 2026-11-11, the same procedure ran on four copies of a fresh
   512-byte-sector volume whose compressed Up-case Table was changed, with
   DataLength and TableChecksum resealed. A count past FFFFh and a missing
