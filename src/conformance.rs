@@ -10,7 +10,7 @@
 //!
 //! | Rule | What is checked |
 //! |---|---|
-//! | [`Rule::Consistency`] | Scans count what they stream, resume where they stop, find each candidate again over its own record and keep its identity unique; walks stay on the source, merge adjacent extents and map no more than they claim; trees hold one node per candidate in input order, with the same parents in any order; damage reports count and stop cleanly; every verb answers the same twice; reads by extent and materialized plans return the source's own bytes with exact provenance. |
+//! | [`Rule::Consistency`] | Scans count what they stream, resume where they stop, find each candidate again over its own record and keep its identity unique; walks stay on the source, merge adjacent extents and map no more than they claim; trees hold one node per candidate in input order, with the same parents in any order; damage reports count and stop cleanly; every verb answers the same twice; reads by extent and materialized plans return the source's own bytes with exact provenance; cluster steps give what their mapped extents give, cut by a final length and zeroed past a valid length, and a cluster outside the layout is refused. |
 //! | [`Rule::ReadOnly`] | Every verb is called with a source type that has no write path, so a trait or adapter needing one does not compile; an adapter is built from a read view only; an adapter built from one source decodes nothing from another; materialization writes only to the caller's sink. |
 //! | [`Rule::Reported`] | Each damaged image shows its declared [`Evidence`], and no verb refuses it except as the trait documents; unreadable bytes are listed, flagged or reported; the healthy image shows none of that evidence. |
 //! | [`Rule::StrictRejects`] | The strict API accepts the healthy image and rejects every damaged one, and a source it cannot read at all. |
@@ -44,9 +44,9 @@
 //! ```
 
 use crate::salvage::{
-    Candidate, CandidateState, Capabilities, Damage, DamageKind, DamageReport, Extent, ExtentWalk,
-    Feature, Integrity, MaterializeReport, Parent, Plan, PlanStep, SalvageAdapter, SalvageError,
-    ScanReport, Severity, Sink, Tree, WalkEnd,
+    Candidate, CandidateState, Capabilities, ClusterLayout, Damage, DamageKind, DamageReport,
+    Extent, ExtentWalk, Feature, Integrity, MaterializeReport, Parent, Plan, PlanFault, PlanStep,
+    SalvageAdapter, SalvageError, ScanReport, Severity, Sink, Tree, WalkEnd,
 };
 use fs_core::BlockRead;
 use serde::de::DeserializeOwned;
@@ -75,7 +75,7 @@ const SECTOR: u64 = 512;
 /// Violations a displayed report lists before counting the rest.
 const SHOWN: usize = 40;
 
-const FEATURES: [Feature; 8] = [
+const FEATURES: [Feature; 9] = [
     Feature::FindCandidates,
     Feature::WalkExtents,
     Feature::RebuildTree,
@@ -84,6 +84,7 @@ const FEATURES: [Feature; 8] = [
     Feature::Materialize,
     Feature::DeletedCandidates,
     Feature::DeletedExtents,
+    Feature::ClusterSteps,
 ];
 
 /// What a driver hands the conformance set: its salvage adapter, its strict
@@ -404,6 +405,8 @@ impl<D: Driver> Run<'_, D> {
             &Plan,
             &mut dyn io::Write,
         ) -> Result<MaterializeReport, SalvageError> = Adapter::<D>::materialize;
+        let _: fn(&Adapter<D>) -> Result<ClusterLayout, SalvageError> =
+            Adapter::<D>::cluster_layout;
         let _: fn(&D, &dyn BlockRead) -> Adapter<D> = D::salvage;
         self.check(Rule::ReadOnly, "types", true, String::new);
 
@@ -443,6 +446,7 @@ impl<D: Driver> Run<'_, D> {
         self.tree(&subject, &candidates, explained);
         self.reads(&subject);
         self.materialize(&subject, &walks);
+        self.clusters(&subject, explained);
         Observed {
             capabilities: subject.capabilities,
             candidates,
@@ -1141,7 +1145,7 @@ impl<D: Driver> Run<'_, D> {
             size.saturating_sub(1).min(PROBE_BYTES),
         )));
         steps.push(PlanStep::Bytes(Vec::new()));
-        let plan = Plan { steps };
+        let plan = Plan::new(steps);
         let mut output = Vec::new();
         let result = adapter.materialize(*image, &plan, &mut output);
         if !capabilities.supports(Feature::Materialize) {
@@ -1153,12 +1157,10 @@ impl<D: Driver> Run<'_, D> {
             Err(error) => self.failed(subject, "materialize", &error),
         }
 
-        let past = Plan {
-            steps: vec![
-                PlanStep::Bytes(b"x".to_vec()),
-                PlanStep::Extent(Extent::new(size, 1)),
-            ],
-        };
+        let past = Plan::new(vec![
+            PlanStep::Bytes(b"x".to_vec()),
+            PlanStep::Extent(Extent::new(size, 1)),
+        ]);
         let mut output = Vec::new();
         let result = adapter.materialize(*image, &past, &mut output);
         self.check(
@@ -1167,9 +1169,7 @@ impl<D: Driver> Run<'_, D> {
             matches!(result, Err(SalvageError::Bounds)) && output.is_empty(),
             || format!("a plan reaching past the source was not refused before anything was written: {result:?}"),
         );
-        let small = Plan {
-            steps: vec![PlanStep::Bytes(b"x".to_vec())],
-        };
+        let small = Plan::new(vec![PlanStep::Bytes(b"x".to_vec())]);
         let result = adapter.materialize(*image, &small, &mut Refusing);
         self.check(
             Rule::Consistency,
@@ -1179,8 +1179,100 @@ impl<D: Driver> Run<'_, D> {
         );
     }
 
+    /// Cluster steps must materialize exactly the bytes and provenance of
+    /// the extents they map to, cut by a final length and zeroed past a valid
+    /// length, and a cluster outside the layout must be refused before
+    /// anything is written.
+    fn clusters(&mut self, subject: &Subject<'_, D::Adapter>, explained: bool) {
+        let Subject {
+            case,
+            image,
+            adapter,
+            capabilities,
+            ..
+        } = subject;
+        let layout = adapter.cluster_layout();
+        if !capabilities.supports(Feature::ClusterSteps) {
+            self.refused(case, Feature::ClusterSteps, &layout);
+            if capabilities.supports(Feature::Materialize) {
+                let plan = Plan::new(vec![PlanStep::Clusters { first: 0, count: 1 }]);
+                let result = adapter.materialize(*image, &plan, &mut Vec::new());
+                self.refused(case, Feature::ClusterSteps, &result);
+            }
+            return;
+        }
+        let layout = match layout {
+            Ok(layout) => layout,
+            Err(error) => {
+                self.failed_mapping(subject, "cluster_layout", &error, explained);
+                return;
+            }
+        };
+        if !capabilities.supports(Feature::Materialize) {
+            return;
+        }
+        let outside = Plan::new(vec![
+            PlanStep::Bytes(b"x".to_vec()),
+            PlanStep::Clusters {
+                first: layout.first.saturating_add(layout.count),
+                count: 1,
+            },
+        ]);
+        let mut output = Vec::new();
+        let result = adapter.materialize(*image, &outside, &mut output);
+        self.check(
+            Rule::Consistency,
+            case,
+            matches!(
+                result,
+                Err(SalvageError::Plan(PlanFault::ClustersOutOfRange { step: 1 }))
+            ) && output.is_empty(),
+            || format!("a plan naming a cluster past the layout was not refused before anything was written: {result:?}"),
+        );
+
+        let count = layout.count.min(2);
+        let Some(extent) = layout.extent(layout.first, count).filter(|extent| {
+            extent.length > 0 && extent.end().is_some_and(|end| end <= image.size())
+        }) else {
+            return;
+        };
+        let length = extent.length - u64::from(extent.length > 1);
+        let valid = length / 2;
+        let mut plan = Plan::new(vec![PlanStep::Clusters {
+            first: layout.first,
+            count,
+        }]);
+        plan.length = Some(length);
+        plan.valid_length = Some(valid);
+        let plain = Plan::new(vec![
+            PlanStep::Extent(Extent::new(extent.offset, valid)),
+            PlanStep::Zeros(length - valid),
+        ]);
+        let mut output = Vec::new();
+        let result = adapter.materialize(*image, &plan, &mut output);
+        let mut expected = Vec::new();
+        let reference = adapter.materialize(*image, &plain, &mut expected);
+        match (result, reference) {
+            (Ok(report), Ok(reference)) => {
+                self.provenance(subject, &plain, &reference, &expected);
+                let same = report == reference && output == expected;
+                self.check(Rule::Consistency, case, same, || {
+                    format!("clusters {}..{} with length {length} and valid length {valid} materialized differently from {extent:?}: {report:?}", layout.first, layout.first + count)
+                });
+                if report
+                    .ranges
+                    .iter()
+                    .any(|range| range.readable && range.source.is_some())
+                {
+                    self.exercised.insert(Feature::ClusterSteps);
+                }
+            }
+            (Err(error), _) | (_, Err(error)) => self.failed(subject, "materialize", &error),
+        }
+    }
+
     /// Checks a materialized output against its plan and its provenance
-    /// against the source.
+    /// against the source. The plan has no cluster steps or declared lengths.
     fn provenance(
         &mut self,
         subject: &Subject<'_, D::Adapter>,
@@ -1234,6 +1326,7 @@ impl<D: Driver> Run<'_, D> {
                 PlanStep::Extent(extent) => {
                     expected.extend_from_slice(image.slice(*extent).unwrap_or_default())
                 }
+                PlanStep::Clusters { .. } => {}
             }
         }
         let mut sources = Vec::new();
@@ -1788,9 +1881,13 @@ mod tests {
 
         fn capabilities(&self) -> Capabilities {
             let missing = match self.quirk {
-                Quirk::ReadOnlyFormat => vec![Feature::DeletedCandidates, Feature::DeletedExtents],
-                Quirk::HidesTree => vec![Feature::RebuildTree],
-                _ => Vec::new(),
+                Quirk::ReadOnlyFormat => vec![
+                    Feature::DeletedCandidates,
+                    Feature::DeletedExtents,
+                    Feature::ClusterSteps,
+                ],
+                Quirk::HidesTree => vec![Feature::RebuildTree, Feature::ClusterSteps],
+                _ => vec![Feature::ClusterSteps],
             };
             Capabilities { missing }
         }

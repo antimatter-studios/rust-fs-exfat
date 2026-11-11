@@ -66,6 +66,12 @@ use std::fmt;
 use std::io;
 use std::ops::ControlFlow;
 
+#[path = "salvage_plan.rs"]
+mod plan;
+
+pub use plan::{ClusterLayout, Plan, PlanFault, PlanMetadata, PlanStep};
+use plan::{Origin, Resolved};
+
 /// Bytes [`SalvageAdapter::materialize`] copies per source read.
 const MATERIALIZE_CHUNK: u64 = 64 * 1024;
 
@@ -107,6 +113,9 @@ pub enum Feature {
     DeletedCandidates,
     /// Following the storage claims of deleted candidates.
     DeletedExtents,
+    /// Materializing plan steps that name clusters, through
+    /// [`SalvageAdapter::cluster_layout`].
+    ClusterSteps,
 }
 
 impl Feature {
@@ -121,6 +130,7 @@ impl Feature {
             Self::Materialize => "materialize",
             Self::DeletedCandidates => "deleted-candidates",
             Self::DeletedExtents => "deleted-extents",
+            Self::ClusterSteps => "cluster-steps",
         }
     }
 }
@@ -169,6 +179,8 @@ pub enum SalvageError {
     Device(fs_core::Error),
     /// The caller's output sink failed.
     Sink(io::Error),
+    /// The plan cannot be executed as written. Nothing was read or written.
+    Plan(PlanFault),
 }
 
 impl fmt::Display for SalvageError {
@@ -181,6 +193,7 @@ impl fmt::Display for SalvageError {
             Self::Bounds => formatter.write_str("range outside the source or not representable"),
             Self::Device(error) => write!(formatter, "source read failed: {error}"),
             Self::Sink(error) => write!(formatter, "output sink failed: {error}"),
+            Self::Plan(fault) => fault.fmt(formatter),
         }
     }
 }
@@ -410,53 +423,6 @@ pub struct DamageReport {
     pub stopped: bool,
 }
 
-/// One operation of a materialization plan.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PlanStep {
-    /// Copy these source bytes.
-    Extent(Extent),
-    /// Emit this many zero bytes.
-    Zeros(u64),
-    /// Emit these bytes verbatim.
-    Bytes(Vec<u8>),
-}
-
-/// An explicit, ordered recipe for output bytes. The analysis that chose it
-/// lives outside the driver; the driver executes it faithfully.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Plan {
-    pub steps: Vec<PlanStep>,
-}
-
-impl Plan {
-    /// The output length, or `None` when it is not representable.
-    pub fn length(&self) -> Option<u64> {
-        self.steps.iter().try_fold(0u64, |total, step| {
-            total.checked_add(match step {
-                PlanStep::Extent(extent) => extent.length,
-                PlanStep::Zeros(length) => *length,
-                PlanStep::Bytes(bytes) => bytes.len() as u64,
-            })
-        })
-    }
-
-    /// Checks the plan against a source size without reading: every extent
-    /// must lie inside the source and the output length must be representable.
-    /// Returns the output length.
-    pub fn validate(&self, source_size: u64) -> Result<u64, SalvageError> {
-        for step in &self.steps {
-            if let PlanStep::Extent(extent) = step {
-                if extent.end().is_none_or(|end| end > source_size) {
-                    return Err(SalvageError::Bounds);
-                }
-            }
-        }
-        self.length().ok_or(SalvageError::Bounds)
-    }
-}
-
 /// Where a run of output bytes came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -585,13 +551,24 @@ pub trait SalvageAdapter {
         output: &mut [u8],
     ) -> Result<usize, SalvageError>;
 
+    /// How this adapter numbers clusters on the source, for plan steps that
+    /// name them. Fails with `Unsupported` when the format has no such
+    /// numbering, and with [`SalvageError::NoGeometry`] when no layout copy is
+    /// usable.
+    fn cluster_layout(&self) -> Result<ClusterLayout, SalvageError> {
+        Err(SalvageError::Unsupported(Feature::ClusterSteps))
+    }
+
     /// Writes the plan's output to `sink`, never to the source, and reports
     /// which source bytes produced each output byte.
     ///
     /// The plan is validated against the source size before anything is read
-    /// or written. A failed source read is retried in 512-byte spans; spans that
-    /// still fail are written as zeros and flagged unreadable, and the rest of
-    /// the plan still runs. Only a sink failure stops it part way.
+    /// or written: cluster steps map through [`Self::cluster_layout`], and the
+    /// declared lengths must agree with the steps. Bytes past the valid length
+    /// are written as zeros without reading their source. A failed source read
+    /// is retried in 512-byte spans; spans that still fail are written as
+    /// zeros and flagged unreadable, and the rest of the plan still runs. Only
+    /// a sink failure stops it part way.
     fn materialize(
         &self,
         source: &dyn BlockRead,
@@ -599,31 +576,35 @@ pub trait SalvageAdapter {
         sink: &mut dyn io::Write,
     ) -> Result<MaterializeReport, SalvageError> {
         self.capabilities().require(Feature::Materialize)?;
-        plan.validate(source.size_bytes())?;
+        let resolved = resolve(self, source, plan)?;
         let mut report = MaterializeReport::default();
         let mut buffer = vec![0u8; MATERIALIZE_CHUNK as usize];
-        for step in &plan.steps {
-            match step {
-                PlanStep::Bytes(bytes) => {
-                    sink.write_all(bytes).map_err(SalvageError::Sink)?;
-                    report.push(bytes.len() as u64, None, true);
+        for piece in &resolved.pieces {
+            match piece.from {
+                Origin::Literal { step } => {
+                    let PlanStep::Bytes(bytes) = &plan.steps[step] else {
+                        unreachable!("a literal piece comes from a bytes step")
+                    };
+                    sink.write_all(&bytes[..piece.length as usize])
+                        .map_err(SalvageError::Sink)?;
+                    report.push(piece.length, None, true);
                 }
-                PlanStep::Zeros(length) => {
+                Origin::Zeros => {
                     buffer.fill(0);
-                    let mut remaining = *length;
+                    let mut remaining = piece.length;
                     while remaining > 0 {
                         let count = remaining.min(MATERIALIZE_CHUNK);
                         sink.write_all(&buffer[..count as usize])
                             .map_err(SalvageError::Sink)?;
                         remaining -= count;
                     }
-                    report.push(*length, None, true);
+                    report.push(piece.length, None, true);
                 }
-                PlanStep::Extent(extent) => {
+                Origin::Source(offset) => {
                     let mut done = 0;
-                    while done < extent.length {
-                        let count = (extent.length - done).min(MATERIALIZE_CHUNK);
-                        let piece = Extent::new(extent.offset + done, count);
+                    while done < piece.length {
+                        let count = (piece.length - done).min(MATERIALIZE_CHUNK);
+                        let piece = Extent::new(offset + done, count);
                         let output = &mut buffer[..count as usize];
                         if self.read_extent(source, piece, 0, output).is_ok() {
                             report.push(count, Some(piece), true);
@@ -649,4 +630,20 @@ pub trait SalvageAdapter {
         }
         Ok(report)
     }
+}
+
+/// Maps a plan onto the source through the adapter's cluster layout, which
+/// is asked for only when the plan names clusters.
+fn resolve<A: SalvageAdapter + ?Sized>(
+    adapter: &A,
+    source: &dyn BlockRead,
+    plan: &Plan,
+) -> Result<Resolved, SalvageError> {
+    let layout = if plan.has_clusters() {
+        adapter.capabilities().require(Feature::ClusterSteps)?;
+        Some(adapter.cluster_layout()?)
+    } else {
+        None
+    };
+    plan.resolve(source.size_bytes(), layout.as_ref())
 }

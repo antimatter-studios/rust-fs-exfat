@@ -219,9 +219,14 @@ the deletion-specific parts a read-only format leaves out.
   implements it, and the borrow rules refuse one value as both source and
   sink. A second handle on the source's own path is not detectable by type;
   the caller must not choose it.
+- A plan's steps are source extents, zeros, literal bytes and cluster runs,
+  plus an optional final length, valid length and metadata. Cluster runs map
+  through `cluster_layout()`, a linear numbering of the format's allocation
+  units; a driver without one lists `ClusterSteps` as missing.
 - `SalvageError` covers refusals and operational failures only: `Unsupported`
   naming a `Feature`, missing geometry, out-of-range requests, source reads
-  that cannot be reported as evidence, and sink failures.
+  that cannot be reported as evidence, sink failures, and plans whose clusters
+  or declared lengths cannot be executed as written.
 
 For rust-img drivers (qcow2, vhd, vhdx and vmdk), the same trait uses container
 vocabulary:

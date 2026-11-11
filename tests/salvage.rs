@@ -34,9 +34,12 @@ mod copies;
 #[path = "salvage_cases/secondary_count.rs"]
 mod secondary_count;
 
+#[path = "salvage_cases/plans.rs"]
+mod plans;
+
 use support::Bytes;
 
-const FEATURES: [Feature; 8] = [
+const FEATURES: [Feature; 9] = [
     Feature::FindCandidates,
     Feature::WalkExtents,
     Feature::RebuildTree,
@@ -45,6 +48,7 @@ const FEATURES: [Feature; 8] = [
     Feature::Materialize,
     Feature::DeletedCandidates,
     Feature::DeletedExtents,
+    Feature::ClusterSteps,
 ];
 
 /// A source whose reads fail wherever they touch a bad range.
@@ -896,17 +900,15 @@ fn plans_materialize_with_provenance() {
     let source = Bytes(image.clone());
     let adapter = ExfatSalvage::probe(&source);
     let start = position(30);
-    let plan = Plan {
-        steps: vec![
-            PlanStep::Bytes(b"head".to_vec()),
-            PlanStep::Extent(Extent::new(start, 70_000)),
-            PlanStep::Extent(Extent::new(start + 70_000, 30)),
-            PlanStep::Zeros(0),
-            PlanStep::Zeros(70_000),
-            PlanStep::Bytes(Vec::new()),
-            PlanStep::Bytes(b"tail".to_vec()),
-        ],
-    };
+    let plan = Plan::new(vec![
+        PlanStep::Bytes(b"head".to_vec()),
+        PlanStep::Extent(Extent::new(start, 70_000)),
+        PlanStep::Extent(Extent::new(start + 70_000, 30)),
+        PlanStep::Zeros(0),
+        PlanStep::Zeros(70_000),
+        PlanStep::Bytes(Vec::new()),
+        PlanStep::Bytes(b"tail".to_vec()),
+    ]);
     let mut output = Vec::new();
     let report = adapter.materialize(&source, &plan, &mut output).unwrap();
 
@@ -952,9 +954,7 @@ fn unreadable_plan_bytes_are_flagged_and_the_rest_still_runs() {
         bad: vec![Extent::new(start + 1024, 512)],
     };
     let adapter = ExfatSalvage::probe(&source);
-    let plan = Plan {
-        steps: vec![PlanStep::Extent(Extent::new(start, 2048))],
-    };
+    let plan = Plan::new(vec![PlanStep::Extent(Extent::new(start, 2048))]);
     let mut output = Vec::new();
     let report = adapter.materialize(&source, &plan, &mut output).unwrap();
     assert_eq!(
@@ -986,7 +986,7 @@ fn plans_are_checked_before_anything_is_written() {
     ] {
         let mut output = Vec::new();
         let error = adapter
-            .materialize(&source, &Plan { steps }, &mut output)
+            .materialize(&source, &Plan::new(steps), &mut output)
             .unwrap_err();
         assert!(matches!(error, SalvageError::Bounds));
         assert!(output.is_empty());
@@ -1006,7 +1006,7 @@ fn plans_are_checked_before_anything_is_written() {
         PlanStep::Zeros(1),
         PlanStep::Extent(Extent::new(0, 1)),
     ] {
-        let plan = Plan { steps: vec![step] };
+        let plan = Plan::new(vec![step]);
         let error = adapter.materialize(&source, &plan, &mut Full).unwrap_err();
         assert!(matches!(error, SalvageError::Sink(_)));
         assert_eq!(error.to_string(), "output sink failed: disk full");
