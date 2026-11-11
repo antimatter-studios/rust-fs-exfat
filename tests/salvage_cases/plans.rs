@@ -463,3 +463,129 @@ fn a_plan_reader_reads_only_the_source_bytes_a_request_covers() {
     reader.read_at(2 * C + 10, &mut [0xFF; 100]).unwrap();
     assert!(source.reads.lock().unwrap().is_empty());
 }
+
+/// A fixed plan whose canonical bytes were written out by hand from the
+/// documented layout, outside the crate, and whose digest is macOS
+/// `shasum -a 256` over those bytes.
+fn pinned() -> Plan {
+    let mut plan = Plan::new(vec![
+        PlanStep::Extent(Extent::new(28672, 4)),
+        PlanStep::Zeros(2),
+        PlanStep::Bytes(vec![1, 2]),
+        clusters(70, 1),
+    ]);
+    plan.length = Some(4100);
+    plan.valid_length = Some(4000);
+    plan.metadata = PlanMetadata {
+        name: Some("short.bin".into()),
+        created: Some("2024-01-02 03:04:05 +00:00".into()),
+        modified: None,
+        accessed: Some(String::new()),
+    };
+    plan
+}
+
+const PINNED_BYTES: &str = "66732d73616c766167652d706c616e01040000000000000001007000000000000004000000000000000202000000000000000302000000000000000102044600000000000000010000000000000001041000000000000001a00f00000000000001090000000000000073686f72742e62696e011a00000000000000323032342d30312d30322030333a30343a3035202b30303a303000010000000000000000";
+const PINNED_DIGEST: &str = "68fd79115f94e496050ab614994f863e4e7ce56ae2aa38f4dea80193799ff020";
+
+#[test]
+fn a_plan_digest_is_pinned_over_its_documented_encoding() {
+    let plan = pinned();
+    let hex: String = plan
+        .canonical_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(hex, PINNED_BYTES);
+    assert_eq!(plan.digest(), PINNED_DIGEST);
+    let back: Plan = serde_json::from_str(&serde_json::to_string(&plan).unwrap()).unwrap();
+    assert_eq!(back.digest(), PINNED_DIGEST);
+    assert_eq!(
+        Plan::new(Vec::new()).digest(),
+        Plan::default().digest(),
+        "an empty plan has one identity"
+    );
+}
+
+#[test]
+fn any_change_to_a_step_length_or_metadata_changes_the_digest() {
+    let changes: [fn(&mut Plan); 24] = [
+        |plan| plan.steps[0] = PlanStep::Extent(Extent::new(28673, 4)),
+        |plan| plan.steps[0] = PlanStep::Extent(Extent::new(28672, 5)),
+        |plan| plan.steps[1] = PlanStep::Zeros(3),
+        |plan| plan.steps[2] = PlanStep::Bytes(vec![1, 3]),
+        |plan| plan.steps[3] = clusters(71, 1),
+        |plan| plan.steps[3] = clusters(70, 2),
+        // The same output bytes, from a different plan.
+        |plan| plan.steps[1] = PlanStep::Bytes(vec![0, 0]),
+        |plan| {
+            plan.steps
+                .splice(2..3, [PlanStep::Bytes(vec![1]), PlanStep::Bytes(vec![2])]);
+        },
+        |plan| plan.steps.swap(0, 1),
+        |plan| {
+            plan.steps.pop();
+        },
+        |plan| plan.steps.push(PlanStep::Zeros(0)),
+        |plan| plan.length = None,
+        |plan| plan.length = Some(4101),
+        |plan| plan.valid_length = None,
+        |plan| plan.valid_length = Some(4001),
+        |plan| plan.metadata.name = None,
+        |plan| plan.metadata.name = Some("short.bim".into()),
+        |plan| plan.metadata.created = None,
+        |plan| plan.metadata.modified = Some(String::new()),
+        |plan| plan.metadata.accessed = None,
+        |plan| plan.metadata.accessed = Some(" ".into()),
+        // The same text under a different field.
+        |plan| {
+            plan.metadata.modified = plan.metadata.created.take();
+        },
+        |plan| {
+            plan.metadata.created = plan.metadata.name.clone();
+            plan.metadata.name = None;
+        },
+        |plan| plan.length = plan.valid_length,
+    ];
+    let mut seen = std::collections::HashSet::from([PINNED_DIGEST.to_owned()]);
+    for (index, change) in changes.iter().enumerate() {
+        let mut plan = pinned();
+        change(&mut plan);
+        assert_ne!(plan, pinned(), "change {index}");
+        assert!(seen.insert(plan.digest()), "change {index} kept a digest");
+    }
+}
+
+#[test]
+fn one_plan_materialized_twice_gives_identical_bytes_and_reports() {
+    let image = fixtures::build_volume();
+    let source = Failing {
+        inner: Bytes(image),
+        bad: vec![Extent::new(position(31) + 700, 3)],
+    };
+    let mut plan = Plan::new(vec![
+        PlanStep::Bytes(b"head".to_vec()),
+        clusters(30, 2),
+        PlanStep::Zeros(5),
+        PlanStep::Extent(Extent::new(position(40) + 7, 3000)),
+        clusters(33, 1),
+    ]);
+    plan.length = Some(4 + 2 * C + 5 + 3000 + C - 9);
+    plan.valid_length = Some(4 + 2 * C + 5 + 2000);
+    let digest = plan.digest();
+
+    let run = |plan: &Plan| {
+        let adapter = ExfatSalvage::probe(&source);
+        let mut output = Vec::new();
+        let report = adapter.materialize(&source, plan, &mut output).unwrap();
+        (output, report)
+    };
+    let first = run(&plan);
+    assert_eq!(first.1.unreadable().count(), 1);
+    let second = run(&plan);
+    assert_eq!(first, second);
+    let json = serde_json::to_string(&plan).unwrap();
+    let again: Plan = serde_json::from_str(&json).unwrap();
+    assert_eq!(again.digest(), digest);
+    assert_eq!(run(&again), first);
+}
