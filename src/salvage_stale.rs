@@ -241,7 +241,7 @@ fn paired_bitmap_stream(geometry: &Geometry, root: &[u8]) -> Option<SystemStream
 
 /// Words of the active FAT through a two-chunk cache, so a chain walk and the
 /// scan it interrupts do not evict each other.
-struct FatReader<'a> {
+pub(super) struct FatReader<'a> {
     source: &'a dyn BlockRead,
     start: u64,
     /// FAT bytes that exist on the source.
@@ -249,7 +249,7 @@ struct FatReader<'a> {
     chunks: [Chunk; 2],
     /// Which chunk to replace next.
     oldest: usize,
-    unreadable: Vec<Extent>,
+    pub(super) unreadable: Vec<Extent>,
 }
 
 struct Chunk {
@@ -260,7 +260,7 @@ struct Chunk {
 }
 
 impl<'a> FatReader<'a> {
-    fn new(geometry: &Geometry, source: &'a dyn BlockRead) -> Self {
+    pub(super) fn new(geometry: &Geometry, source: &'a dyn BlockRead) -> Self {
         // Both terms are 32-bit sector counts times a sector of at most 4 KiB.
         let end = geometry.fat + geometry.fat_bytes;
         let chunk = || Chunk {
@@ -279,7 +279,7 @@ impl<'a> FatReader<'a> {
     }
 
     /// The raw word, or `None` when its bytes are missing or unreadable.
-    fn word(&mut self, cluster: u32) -> Option<u32> {
+    pub(super) fn word(&mut self, cluster: u32) -> Option<u32> {
         let offset = u64::from(cluster) * 4;
         if offset + 4 > self.length {
             return None;

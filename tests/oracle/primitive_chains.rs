@@ -1,11 +1,14 @@
 use super::{chain, find_bitmap_entry, formatter_value, oracle_directory, reference, walk};
+use fs_core::BlockRead;
 use fs_exfat::primitives::{
     allocation_class, boot_check, chain_head, chain_islands, cluster_offset, clusters_for,
     compute_predecessors, compute_stats, decode_fat, is_allocated, predecessor, root_chain,
     valid_cluster, BootSector, ChainGroup, ALLOC_ALLOCATED, ALLOC_FREE_FAT, ALLOC_FREE_ZERO,
     BOOT_REGION_SECTORS, FAT_END, FIRST_CLUSTER, ISLAND_END_EOF,
 };
-use fs_exfat::salvage::{ExfatSalvage, StaleChain, StaleEnd};
+use fs_exfat::salvage::{
+    CrossLinkReport, ExfatSalvage, Extent, SalvageAdapter, StaleChain, StaleEnd,
+};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use unicode_normalization::UnicodeNormalization;
@@ -362,5 +365,41 @@ fn stale_chains_match_the_formatter_fat_and_a_freed_driver_chain() {
             .and_then(|line| line.split('\t').nth(1))
             .unwrap();
         assert_eq!(format!("{:x}", Sha256::digest(&bytes)), expected);
+    }
+}
+
+/// The macOS reference images hold no cross-link: no two FAT entries name
+/// one cluster, and no two records' claims share one. The listing agrees
+/// with the formatter's FAT, read straight from the bytes, and with the
+/// driver's records, read by the salvage scan.
+#[test]
+fn cross_links_are_absent_from_the_macos_reference_images() {
+    for sector in [512, 4096] {
+        let (image, boot) = reference(sector);
+        let fat = raw_fat(&image, &boot);
+        let mut named = BTreeSet::new();
+        for cluster in FIRST_CLUSTER..boot.last_cluster_exclusive() {
+            let next = fat[cluster as usize];
+            if (FIRST_CLUSTER..boot.last_cluster_exclusive()).contains(&next) {
+                assert!(named.insert(next), "macOS linked {next} twice");
+            }
+        }
+        let source = crate::support::Bytes(image.clone());
+        let adapter = ExfatSalvage::probe(&source);
+        let mut candidates = Vec::new();
+        adapter
+            .find_candidates(
+                &source,
+                Extent::new(0, source.size_bytes()),
+                &mut candidates,
+            )
+            .unwrap();
+        assert!(candidates.len() > 180);
+        let mut found = Vec::new();
+        let report = adapter
+            .cross_links(&source, &candidates, &mut found)
+            .unwrap();
+        assert!(found.is_empty(), "{found:?}");
+        assert_eq!(report, CrossLinkReport::default());
     }
 }
