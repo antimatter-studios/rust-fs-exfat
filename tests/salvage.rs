@@ -30,6 +30,9 @@ mod upcase;
 #[path = "salvage_cases/copies.rs"]
 mod copies;
 
+#[path = "salvage_cases/secondary_count.rs"]
+mod secondary_count;
+
 use support::Bytes;
 
 const FEATURES: [Feature; 8] = [

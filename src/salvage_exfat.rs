@@ -58,10 +58,13 @@ mod copies;
 pub use copies::{CopyDifference, CopyKind, CopyPair, CopyReport};
 
 const SECTOR: u64 = 512;
-/// A file entry set holds at most one primary and eighteen secondaries.
-const MAX_SET_BYTES: u64 = 19 * ENTRY_SIZE as u64;
+/// A file entry set holds at most one primary and 255 secondaries (section
+/// 6.3.2 of the specification): 8 KiB, read into the scan window and never
+/// allocated per set, whatever a damaged SecondaryCount claims.
+const MAX_SET_BYTES: u64 = (primitives::MAX_SECONDARY_COUNT as u64 + 1) * ENTRY_SIZE as u64;
 /// Bytes read per candidate-scan window.
 const SCAN_WINDOW: u64 = 1 << 20;
+const _: () = assert!(MAX_SET_BYTES <= SCAN_WINDOW);
 const MAX_CLUSTER_COUNT: u32 = 0xFFFF_FFF5;
 const MAX_CLUSTER_SHIFT: u8 = 25;
 /// The specification's largest directory.

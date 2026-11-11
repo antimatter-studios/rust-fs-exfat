@@ -228,7 +228,7 @@ fn primitive_backed_validation_keeps_error_messages_and_precedence() {
 }
 
 #[test]
-fn strict_sets_keep_benign_secondaries_beyond_the_recovery_candidate_limit() {
+fn strict_and_recovery_sets_keep_benign_secondaries_past_eighteen() {
     let volume = Volume::open(Bytes(metadata_volume())).unwrap();
     let mut set = file_set("hello", 0x20, 0, 0, false);
     for _ in 0..17 {
@@ -240,15 +240,16 @@ fn strict_sets_keep_benign_secondaries_beyond_the_recovery_candidate_limit() {
     seal_set(&mut set);
     let entries = parse(&set, volume.boot(), volume.upcase(), false).unwrap();
     assert_eq!(entries[0].name(), "hello");
-    assert!(fs_exfat::primitives::parse_set(
+    let recovered = fs_exfat::primitives::parse_set(
         &set,
         0,
         fs_exfat::primitives::Limits {
             cluster_count: volume.boot().cluster_count,
             cluster_size: volume.boot().cluster_size(),
-        }
+        },
     )
-    .is_none());
+    .unwrap();
+    assert_eq!((recovered.name.as_str(), recovered.slots), ("hello", 20));
     set[96] = 0xc0;
     seal_set(&mut set);
     assert!(matches!(

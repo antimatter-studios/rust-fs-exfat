@@ -134,7 +134,11 @@ const TYPE_NAME_DELETED: u8 = 0x41;
 const TYPE_BITMAP: u8 = 0x81;
 const NAME_CHARS_PER_ENTRY: usize = 15;
 const MIN_SECONDARY_COUNT: usize = 2;
-const MAX_SECONDARY_COUNT: usize = 18;
+/// SecondaryCount's largest value. Section 6.3.2 of Microsoft's exFAT
+/// specification ranges the field from 0 to 255, section 7.4.2 applies that
+/// range to File entries, and section 7.8 lets Vendor Extension entries fill a
+/// File set up to it. A set therefore spans at most 256 entries, 8 KiB.
+pub(crate) const MAX_SECONDARY_COUNT: usize = u8::MAX as usize;
 const STREAM_FLAG_NO_FAT_CHAIN: u8 = 0x02;
 const UTC_OFFSET_VALID: u8 = 0x80;
 const MINUTES_PER_OFFSET_STEP: i32 = 15;
