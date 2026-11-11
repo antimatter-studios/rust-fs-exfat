@@ -48,7 +48,11 @@ directory traversal needs more workspace refuses with
 `allocation audit directory workspace exceeds memory budget`, not a partial
 clean bill. The fixed allowance includes the bounded FAT/directory buffers,
 entry-set decoding, boot metadata, and up to 128 KiB each for the on-disk and
-decoded upcase tables.
+decoded upcase tables. The on-disk upcase stream has no maximum length
+(sections 7.2.4, 7.2.5 and 7.2.5.1; a compressed table can be longer than an
+uncompressed one), so the bytes of a longer stream are drawn from the workspace
+while it is parsed and returned afterwards; one that does not fit refuses with
+`up-case table exceeds allocation audit memory budget`.
 
 The bitmap read is sized from the actual system-stream length, which must equal
 `ceil(C / 8)`. Neither bitmap nor upcase loading uses the extraction reader's

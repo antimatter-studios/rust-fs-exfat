@@ -104,7 +104,10 @@ impl<Device: BlockRead> Volume<Device> {
         let (bitmap_bytes, bitmap_chain) =
             system_stream(&reader, &boot, bitmap_stream, bitmap_length, limits)?;
         let bitmap = AllocationBitmap::parse(bitmap_bytes, boot.cluster_count)?;
-        if metadata.upcase.length == 0 || metadata.upcase.length > 131072 {
+        // Sections 7.2.4, 7.2.5 and 7.2.5.1 set no maximum DataLength for the
+        // Up-case Table (#76): the read is bounded by the chain, which must
+        // hold exactly DataLength, and by max_metadata_bytes.
+        if metadata.upcase.length == 0 || metadata.upcase.length % 2 != 0 {
             return Err(Error::Invalid("upcase stream length"));
         }
         let (upcase_bytes, upcase_chain) = system_stream(

@@ -833,7 +833,13 @@ impl<'a> RawUpcaseTable<'a> {
             data,
             mappings,
             checksum,
-            length_ok: !data.is_empty() && data.len().is_multiple_of(2) && data.len() <= 131072,
+            // Sections 7.2.4, 7.2.5 and 7.2.5.1 set no maximum DataLength:
+            // the table only has to map exactly 0000h to FFFFh, and a
+            // compressed one with short identity runs can be longer than the
+            // 128 KiB of an uncompressed one (#76). Words past FFFFh's
+            // mapping are ExtraMappings, so only an empty stream or a
+            // partial word is a length fault.
+            length_ok: !data.is_empty() && data.len().is_multiple_of(2),
             checksum_ok: checksum == expected_checksum,
             issue,
             complete,

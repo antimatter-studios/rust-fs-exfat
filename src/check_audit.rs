@@ -10,6 +10,9 @@ use std::mem::size_of;
 
 const FIXED_BYTES: usize = 1024 * 1024;
 const WORKSPACE_BYTES: usize = 512 * 1024 * 1024;
+/// The raw Up-case Table stream that FIXED_BYTES holds without drawing on the
+/// workspace: an uncompressed table's 128 KiB.
+const UPCASE_FIXED_BYTES: usize = 128 * 1024;
 pub const MAX_AUDIT_MEMORY_BYTES: usize = 1537 * 1024 * 1024;
 
 struct Budget {
@@ -434,15 +437,32 @@ pub(super) fn check_reader<Device: BlockRead>(
             }
         }
     }
-    if metadata.upcase.length == 0 || metadata.upcase.length > 131072 {
+    // Sections 7.2.4, 7.2.5 and 7.2.5.1 set no maximum DataLength for the
+    // Up-case Table (#76): the walk bounds it by the chain. FIXED_BYTES holds
+    // a raw stream of up to 128 KiB; a longer, compressed one draws the rest
+    // from the memory budget only until it is parsed.
+    if metadata.upcase.length == 0 || metadata.upcase.length % 2 != 0 {
         return Err(Error::Invalid("upcase stream length"));
     }
     let mut upcase_allocation = Allocation::system(metadata.upcase);
     ownership.walk(&mut fat, Some(&bitmap), &mut upcase_allocation)?;
     let upcase = {
-        let mut bytes = vec![0; metadata.upcase.length as usize];
+        let length = usize::try_from(metadata.upcase.length).map_err(|_| Error::Bounds)?;
+        let beyond_fixed = length.saturating_sub(UPCASE_FIXED_BYTES);
+        budget.take(
+            beyond_fixed,
+            "up-case table exceeds allocation audit memory budget",
+        )?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(length)
+            .map_err(|_| Error::Unsupported("allocation audit up-case table allocation failed"))?;
+        bytes.resize(length, 0);
         load(&mut fat, upcase_allocation, &mut bytes)?;
-        UpcaseTable::parse(&bytes, metadata.upcase_checksum)?
+        let upcase = UpcaseTable::parse(&bytes, metadata.upcase_checksum)?;
+        drop(bytes);
+        budget.remaining += beyond_fixed;
+        upcase
     };
     let mut pending = Vec::new();
     budget.grow(&mut pending, 1)?;
