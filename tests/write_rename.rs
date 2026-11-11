@@ -382,3 +382,108 @@ fn a_scripted_mix_of_every_operation_matches_a_model() {
     volume.unmount().unwrap();
     assert_eq!(tree(device.snapshot()), model);
 }
+
+/// Section 7.4.6 and 7.4.7 do not name the events that change a directory's
+/// LastModified and LastAccessed, but a directory whose entries change is a
+/// directory that was modified, and other implementations record it (#151).
+#[test]
+fn a_directory_s_times_change_when_its_entries_do() {
+    let (mut volume, device) = mounted();
+    let old = Timestamp::from_unix_milliseconds(1_000_000_000_000, 60).unwrap();
+    let reset = |volume: &mut WriteVolume<Memory>, path: &str| {
+        volume
+            .set_times(
+                path,
+                SetTimes {
+                    created: Some(old),
+                    modified: Some(old),
+                    accessed: Some(old),
+                },
+            )
+            .unwrap();
+    };
+    let start = Timestamp::now().unwrap().unix_milliseconds().unwrap();
+    let touched = |volume: &WriteVolume<Memory>, path: &str| {
+        let times = *entry(volume.reader(), path).timestamps();
+        assert_eq!(times.created, old, "{path}: Create stays as it was");
+        times.modified != old
+            && times.accessed != old
+            && times.modified.unix_milliseconds().unwrap() >= start - 10
+            && times.accessed.unix_milliseconds().unwrap() >= start - 2000
+    };
+    volume.mkdir("/d").unwrap();
+    volume.mkdir("/e").unwrap();
+    volume.mkdir("/d/sub").unwrap();
+    type Step = fn(&mut WriteVolume<Memory>);
+    let steps: [(&str, Step, &[&str], &[&str]); 9] = [
+        (
+            "create",
+            |v| v.create("/d/a").unwrap(),
+            &["/d"],
+            &["/e", "/d/sub"],
+        ),
+        (
+            "mkdir",
+            |v| v.mkdir("/d/sub/in").unwrap(),
+            &["/d/sub"],
+            &["/d", "/e"],
+        ),
+        (
+            "write_file creating",
+            |v| v.write_file("/e/b", b"b").unwrap(),
+            &["/e"],
+            &["/d"],
+        ),
+        (
+            "write_file replacing",
+            |v| v.write_file("/e/b", b"bb").unwrap(),
+            &[],
+            &["/e"],
+        ),
+        (
+            "pwrite",
+            |v| v.pwrite("/d/a", 0, b"a").unwrap(),
+            &[],
+            &["/d"],
+        ),
+        (
+            "rename within",
+            |v| v.rename("/d/a", "/d/A2").unwrap(),
+            &["/d"],
+            &["/e"],
+        ),
+        (
+            "rename across",
+            |v| v.rename("/d/A2", "/e/a3").unwrap(),
+            &["/d", "/e"],
+            &["/d/sub"],
+        ),
+        ("unlink", |v| v.unlink("/e/a3").unwrap(), &["/e"], &["/d"]),
+        (
+            "rmdir",
+            |v| v.rmdir("/d/sub/in").unwrap(),
+            &["/d/sub"],
+            &["/d", "/e"],
+        ),
+    ];
+    for (name, step, changed, unchanged) in steps {
+        for path in ["/d", "/e", "/d/sub"] {
+            reset(&mut volume, path);
+        }
+        step(&mut volume);
+        for path in changed {
+            assert!(touched(&volume, path), "{name}: {path} records the change");
+        }
+        for path in unchanged {
+            let times = *entry(volume.reader(), path).timestamps();
+            assert_eq!(
+                (times.modified, times.accessed),
+                (old, old),
+                "{name}: {path} keeps its times"
+            );
+        }
+    }
+    volume.unmount().unwrap();
+    let image = Volume::open(Memory::new(device.snapshot())).unwrap();
+    assert_ne!(entry(&image, "/d/sub").timestamps().modified, old);
+}

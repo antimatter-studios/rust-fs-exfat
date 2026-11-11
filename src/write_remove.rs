@@ -4,9 +4,11 @@
 //! EntryType. Removal clears it on every entry of the set, writes the set,
 //! and only then frees the stream's clusters, so a removal that stops
 //! partway leaves allocated, unreferenced clusters and never a set that
-//! names free ones. The rest of each entry is left as it was.
+//! names free ones. The rest of each entry is left as it was. The parent
+//! directory's LastModified and LastAccessed are set with the same write.
 
 use super::WriteVolume;
+use crate::timestamp::Timestamp;
 use crate::{Error, Result};
 use fs_core::BlockDevice;
 
@@ -26,8 +28,9 @@ impl<Device: BlockDevice> WriteVolume<Device> {
     }
 
     fn remove(&mut self, path: &str, directory: bool) -> Result<()> {
-        let target = self.resolve(path)?;
-        let (mut set, entry) = target.found.ok_or(Error::NotFound)?;
+        let now = Timestamp::now()?;
+        let mut target = self.resolve(path)?;
+        let (mut set, entry) = target.found.take().ok_or(Error::NotFound)?;
         match (directory, entry.is_directory()) {
             (false, true) => return Err(Error::IsDirectory),
             (true, false) => return Err(Error::NotDirectory),
@@ -46,6 +49,7 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             }
         }
         self.unset(&mut set)?;
+        self.touch(&mut target.parent, &now)?;
         self.barrier()?;
         let mut freed = allocation;
         self.shrink_clusters(&mut freed, 0)

@@ -39,13 +39,12 @@ impl NewEntry {
     };
 }
 
-fn now_times() -> Result<Timestamps> {
-    let now = Timestamp::now()?;
-    Ok(Timestamps {
+fn now_times(now: Timestamp) -> Timestamps {
+    Timestamps {
         created: now,
         modified: now,
         accessed: now,
-    })
+    }
 }
 
 /// A regular file's entry set and stream, opened for change.
@@ -138,9 +137,10 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         if target.found.is_some() {
             return Err(Error::Exists);
         }
+        let now = Timestamp::now()?;
         let times = match new.times {
             Some(times) => times,
-            None => now_times()?,
+            None => now_times(now),
         };
         let hash = self.volume.upcase().name_hash(&target.name);
         let mut attributes = new.attributes;
@@ -165,7 +165,7 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         }
         let mut parent: Dir = target.parent;
         self.insert(&mut parent, raw)?;
-        Ok(())
+        self.touch(&mut parent, &now)
     }
 
     fn open_for_write(&self, target: Target) -> Result<OpenFile> {
