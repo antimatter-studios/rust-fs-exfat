@@ -16,11 +16,13 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::Path;
 
+mod mkfs;
+
 pub static FAMILY: Family = Family {
     repo: "rust-fs-exfat",
     crate_name: "rust-fs-exfat",
     version: env!("CARGO_PKG_VERSION"),
-    about: "exFAT inspection, extraction and writing",
+    about: "exFAT inspection, extraction, writing and formatting",
     install_hints: &["cargo install rust-fs-exfat --features cli"],
     tools: &[
         Tool {
@@ -40,6 +42,15 @@ pub static FAMILY: Family = Family {
             usage_exit: 16,
             command: fsck_command,
             run: fsck_run,
+        },
+        Tool {
+            name: "mkfs.exfat",
+            verb: "mkfs",
+            section: 8,
+            about: "Create an empty exFAT volume on a device or an image file",
+            usage_exit: fs_core::cli::output::EXIT_USAGE,
+            command: mkfs::command,
+            run: mkfs::run,
         },
     ],
 };
@@ -125,7 +136,7 @@ fn fs_command() -> Command {
                 .about("Set the volume label (up to 11 characters; empty for none)")
                 .arg(Arg::new("label").value_name("LABEL").required(true).allow_hyphen_values(true)),
         )
-        .after_help("Examples:\n  fs.exfat image.dmg ls /\n  fs.exfat image.dmg stat /file.txt\n  fs.exfat image.dmg cat /file.txt\n  fs.exfat image.dmg export /file.txt output.txt --verify\n  fs.exfat image.dmg mkdir -p /backup/2026\n  fs.exfat image.dmg write /backup/2026/notes.txt < notes.txt\n  printf 'v2' | fs.exfat image.dmg write --at 4096 /data.bin\n  fs.exfat image.dmg truncate --size 0 /data.bin\n  fs.exfat image.dmg rm /data.bin\n  fs.exfat image.dmg rmdir /backup/2026\n  fs.exfat image.dmg mv /notes.txt /backup/notes.txt\n  fs.exfat image.dmg touch --modified 1700000000120 /backup/notes.txt\n  fs.exfat image.dmg attributes --set hidden,read-only /backup/notes.txt\n  fs.exfat image.dmg label BACKUP\n\nls, stat, cat and export open the image read-only. mkdir, write, truncate, rm, rmdir, mv, touch, attributes and label open it for writing: the volume is marked dirty while they run and clean when they finish, and a volume already marked dirty is refused. write without --at creates the file or replaces its contents; with --at the file must exist, and a gap past its end reads back as zeros. There is no formatter.")
+        .after_help("Examples:\n  fs.exfat image.dmg ls /\n  fs.exfat image.dmg stat /file.txt\n  fs.exfat image.dmg cat /file.txt\n  fs.exfat image.dmg export /file.txt output.txt --verify\n  fs.exfat image.dmg mkdir -p /backup/2026\n  fs.exfat image.dmg write /backup/2026/notes.txt < notes.txt\n  printf 'v2' | fs.exfat image.dmg write --at 4096 /data.bin\n  fs.exfat image.dmg truncate --size 0 /data.bin\n  fs.exfat image.dmg rm /data.bin\n  fs.exfat image.dmg rmdir /backup/2026\n  fs.exfat image.dmg mv /notes.txt /backup/notes.txt\n  fs.exfat image.dmg touch --modified 1700000000120 /backup/notes.txt\n  fs.exfat image.dmg attributes --set hidden,read-only /backup/notes.txt\n  fs.exfat image.dmg label BACKUP\n\nls, stat, cat and export open the image read-only. mkdir, write, truncate, rm, rmdir, mv, touch, attributes and label open it for writing: the volume is marked dirty while they run and clean when they finish, and a volume already marked dirty is refused. write without --at creates the file or replaces its contents; with --at the file must exist, and a gap past its end reads back as zeros. mkfs.exfat formats new volumes.")
 }
 
 fn fsck_command() -> Command {

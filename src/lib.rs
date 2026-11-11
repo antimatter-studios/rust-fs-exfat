@@ -53,6 +53,7 @@ pub mod file;
 pub mod fixtures;
 pub mod interface;
 pub mod metadata;
+pub mod mkfs;
 pub mod path;
 pub mod primitives;
 pub mod salvage;

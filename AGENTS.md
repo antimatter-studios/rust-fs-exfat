@@ -269,9 +269,10 @@ Use the pinned Rust toolchain and a fresh CARGO_TARGET_DIR for concurrent work.
 The strict reader and the salvage API accept only BlockRead and wrap devices in
 ReadOnlyDevice, so they stay read-only by type. Writing goes through
 `fs_exfat::write`, which takes rust-fs-core's BlockDevice, and nowhere else:
-scripts/check-read-only.sh keeps the writable surface in the write modules and
-the C ABI. Writing is not an optional feature. The formatter is #132; until a
-repair mode is designed, fsck.exfat stays check-only.
+scripts/check-read-only.sh keeps the writable surface in the write modules, the
+formatter (src/mkfs.rs, src/capi/mkfs.rs, src/cli/mkfs.rs) and the C ABI.
+Writing is not an optional feature. Until a repair mode is designed, fsck.exfat
+stays check-only.
 
 Use macOS newfs_exfat, fsck_exfat -n and the read-only mounted macOS driver as
 independent oracles on generated images. Every volume the writer changes must

@@ -9,10 +9,9 @@ C ABI and command-line tools are implemented, which completes
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
 Writing is being built ([#135](https://github.com/antimatter-studios/rust-fs-exfat/issues/135)):
 a volume can be mounted for writing, files and directories created, written,
-truncated, removed and renamed, and times, attributes and the label set. There
-is no formatter ([#132](https://github.com/antimatter-studios/rust-fs-exfat/issues/132))
-or repair operation, and the Linux kernel and exfatprogs do not check the
-writer yet ([#133](https://github.com/antimatter-studios/rust-fs-exfat/issues/133)).
+truncated, removed and renamed, and times, attributes and the label set. A
+formatter creates new, empty volumes. There is no repair operation, and the
+Linux kernel and exfatprogs do not check the writer or the formatter yet ([#133](https://github.com/antimatter-studios/rust-fs-exfat/issues/133)).
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
@@ -92,6 +91,11 @@ replacements, times, attributes on files and a directory, and a non-ASCII label
 pass `fsck_exfat -n`; the read-only macOS driver shows the same names, sizes,
 SHA-256s, times and flags (ReadOnly as UF_IMMUTABLE, Hidden as UF_HIDDEN, a
 file's clear Archive bit as SF_ARCHIVED), and `fsck_exfat` names the label.
+
+The formatter, `fs_exfat::mkfs`, also takes a `BlockDevice`. It lays down a
+new volume from nothing, so it writes the device directly rather than through
+the writer, and `scripts/check-read-only.sh` admits its three files alongside
+the writer's.
 See [features](docs/features.md) and [provenance](PROVENANCE.md).
 Directory entry types, primary/stream/name fields, UTF-16 names, entry-set
 checksums and name hashes are decoded by `fs_exfat::primitives`. Its
@@ -181,9 +185,10 @@ target/release/rust-fs-exfat fs image.dmg touch --modified 1700000000120 /backup
 target/release/rust-fs-exfat fs image.dmg attributes --set hidden /backup/notes.txt
 target/release/rust-fs-exfat fs image.dmg label BACKUP
 target/release/rust-fs-exfat fsck image.dmg -n
+target/release/rust-fs-exfat mkfs --size 64M --label BACKUP new.img
 ```
 
-The corresponding dotted names are `fs.exfat` and `fsck.exfat`; packaging may
+The corresponding dotted names are `fs.exfat`, `fsck.exfat` and `mkfs.exfat`; packaging may
 link those names to the same binary. Metadata is JSON by default, with `--text`
 for people; `cat` writes raw bytes. `--offset BYTES` selects a filesystem within
 an image and must be 512-byte aligned. Export uses `fs_core::cli::transfer`:
@@ -208,6 +213,19 @@ incomplete read fails explicitly, never with a partial clean bill. See the
 [audit memory contract](docs/fsck-memory.md) for exact bounds and library APIs.
 Exit statuses are 0 clean, 4 uncorrected
 inconsistencies, 8 I/O or unsupported audit limits, and 16 usage errors.
+
+`mkfs.exfat` writes only to its target, replacing any volume there. It
+formats an existing image file or device, or creates an image file of `--size`
+bytes first, and reports the layout as the strict reader reads it back;
+`--dry-run` reports the layout and writes nothing. Sectors are 512 bytes unless
+`--sector-size` says otherwise. The cluster size follows the volume size: 4 KiB
+below 256 MiB, 32 KiB below 32 GiB and 128 KiB from there, the defaults
+Microsoft documents for Windows, then doubled while the volume would hold more
+than the 2^24 - 2 clusters the specification recommends. The FAT and the cluster
+heap start on a multiple of the cluster size unless `--alignment` gives another.
+`--fats 2` makes a TexFAT volume, `--label`, `--serial`, `--guid` and
+`--partition-offset` fill those fields, and OEM parameters of an exFAT volume
+already on the target are kept, as the specification requires.
 
 ## Building and testing
 
@@ -246,6 +264,9 @@ comparisons are implemented. Windows formatting is
 additional evidence if a suitable harness is available. The oracle also checks
 [spec-built Windows-layout fixtures](docs/windows-oracle.md), not images produced
 by Windows, at both sector sizes against the read-only macOS driver and checker.
+Volumes the formatter creates, from 1 MiB to 40 GiB at both platform sector sizes,
+must pass `fsck_exfat -n`, mount under the macOS driver, take its writes and pass
+again; at `newfs_exfat`'s 64 KiB alignment a 64 MiB volume must equal its bytes.
 No Linux VM is needed
 for the macOS oracle contract.
 

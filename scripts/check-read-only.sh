@@ -21,11 +21,13 @@ refuse() {
 # The driver writes (fs_exfat::write), but only there: the strict reader, the
 # salvage adapter, the checker and every other module take BlockRead and must
 # not reach a writable device. The C ABI holds the writable mounts, because
-# callback devices need its unsafe boundary.
-refuse 'writable surface outside the write module and the C ABI' \
-    'BlockDevice|write_at|is_writable|OpenOptions|std::fs::write|open_rw|open_best_effort|OwnedRwSlice|CallbackDevice' src --glob '*.rs' --glob '!write.rs' --glob '!write_*.rs' --glob '!capi.rs'
+# callback devices need its unsafe boundary. The formatter writes too: the
+# library's mkfs module and its C ABI and command-line entry points.
+refuse 'writable surface outside the write module, the formatter and the C ABI' \
+    'BlockDevice|write_at|is_writable|OpenOptions|std::fs::write|open_rw|open_best_effort|OwnedRwSlice|CallbackDevice' src --glob '*.rs' --glob '!write.rs' --glob '!write_*.rs' --glob '!capi.rs' \
+    --glob '!src/mkfs.rs' --glob '!src/capi/mkfs.rs' --glob '!src/cli/mkfs.rs'
 refuse 'unsafe code is confined to the C ABI boundary' \
-    '\bunsafe\b|#\[(allow|expect)\([^]]*unsafe_code' src --glob '*.rs' --glob '!capi.rs' --glob '!lib.rs'
+    '\bunsafe\b|#\[(allow|expect)\([^]]*unsafe_code' src --glob '*.rs' --glob '!capi.rs' --glob '!src/capi/mkfs.rs' --glob '!lib.rs'
 refuse 'unsafe code is forbidden in the library entry point' \
     '\bunsafe\b' src/lib.rs
 grep -Fxq '#![deny(unsafe_code)]' src/lib.rs
