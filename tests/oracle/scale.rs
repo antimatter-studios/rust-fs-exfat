@@ -83,7 +83,7 @@ impl Drop for Attachment {
 #[test]
 fn macos_formats_and_checks_a_volume_above_the_old_audit_cap() {
     std::env::var_os("EXFAT_ORACLE_DIR")
-        .expect("run chore test:oracle on macOS for the scale formatter/checker oracle");
+        .expect("run chore test:oracle-macos on macOS for the scale formatter/checker oracle");
     let image = Image::sparse(OLD_CAP + 65536, 0);
     let attachment = Attachment::new(&image, false);
     let formatted = Command::new("/sbin/newfs_exfat")
@@ -111,7 +111,7 @@ fn macos_formats_and_checks_a_volume_above_the_old_audit_cap() {
 
 #[test]
 fn macos_agrees_on_high_cluster_cross_links_and_unreferenced_allocations() {
-    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS");
     let image = Image::sparse(OLD_CAP + 65536, 0);
     image.high_file(0, OLD_CAP + 17);
     native_check(&image, true);
@@ -134,7 +134,7 @@ fn macos_agrees_on_high_cluster_cross_links_and_unreferenced_allocations() {
 
 #[test]
 fn macos_agrees_that_an_allocated_cluster_the_fat_marks_bad_is_not_lost() {
-    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS");
     let image = Image::sparse(65536, 0);
     let cluster = image.allocated as u32 + 7;
     image
@@ -153,7 +153,7 @@ fn macos_agrees_that_an_allocated_cluster_the_fat_marks_bad_is_not_lost() {
 
 #[test]
 fn macos_agrees_that_a_vendor_allocations_cluster_is_not_lost() {
-    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS");
     let image = Image::sparse(65536, 0);
     let first = image.allocated as u32 + 7;
     let owned = first + 1;
@@ -181,7 +181,7 @@ fn macos_agrees_that_a_vendor_allocations_cluster_is_not_lost() {
 
 #[test]
 fn macos_agrees_on_a_directory_with_more_than_a_million_entries() {
-    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS");
     let image = Image::sparse(OLD_CAP + 65536, OLD_CAP + 1);
     native_check(&image, true);
     let report = clean(image.check());
@@ -194,7 +194,7 @@ fn large_files_match_fsck_and_streamed_read_only_macos_driver_hashes() {
     use sha2::{Digest, Sha256};
     use std::io::Read;
 
-    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS");
     for contiguous in [false, true] {
         let image = Image::sparse(OLD_CAP + 4096, 0);
         image.long_file(OLD_CAP + 1, contiguous);
@@ -250,7 +250,7 @@ fn large_files_match_fsck_and_streamed_read_only_macos_driver_hashes() {
 #[test]
 fn macos_refuses_the_cross_links_salvage_lists() {
     use fs_exfat::salvage::{CrossLink, ExfatSalvage, Extent, SalvageAdapter};
-    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS");
     let listing = |image: &Image| {
         let adapter = ExfatSalvage::probe(image);
         let mut candidates = Vec::new();

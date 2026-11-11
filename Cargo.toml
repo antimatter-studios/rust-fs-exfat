@@ -8,6 +8,14 @@ description = "Strict read-only exFAT reader"
 repository = "https://github.com/antimatter-studios/rust-fs-exfat"
 exclude = ["fuzz", "tmp", "dist"]
 
+
+# WHAT THE RELEASE TARBALL SHIPS, read by rust-fs-core's package-cli
+# (release.yml's called release-cli workflow), as in rust-fs-ext4: every
+# dotted name the multi-call binary answers to, and its man section. The
+# binary's own `generate names` lists exactly these.
+[package.metadata.package-cli]
+names = { "fs.exfat" = 1, "fsck.exfat" = 8 }
+licenses = ["LICENSE"]
 [lib]
 name = "fs_exfat"
 crate-type = ["rlib", "staticlib"]
@@ -93,3 +101,25 @@ required-features = ["cli"]
 
 [profile.release]
 lto = "thin"
+
+[[test]]
+name = "images"
+path = "tests/images.rs"
+
+[[test]]
+name = "exfatprogs"
+path = "tests/exfatprogs.rs"
+
+[[test]]
+name = "kernel"
+path = "tests/kernel.rs"
+
+[[test]]
+name = "third"
+path = "tests/third.rs"
+
+# The browser build's test (tests/wasm.rs, `chore test:wasm`) runs under
+# wasm-bindgen-test in Node. MIT/Apache-2.0, test-only, and only for the
+# target that needs it: no other build resolves it.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3"

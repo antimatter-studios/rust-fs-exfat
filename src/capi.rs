@@ -16,6 +16,7 @@ use crate::{Error, Result};
 use fs_core::ffi::{ffi_guard_cleanup, ffi_guard_or, fs_core_last_error_message, set_last_error};
 use fs_core::{BlockRead, OwnedSlice};
 use std::ffi::{c_char, c_int, c_void, CStr};
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::path::Path;
 use std::ptr;
 
@@ -174,6 +175,7 @@ unsafe fn string<'value>(pointer: *const c_char) -> Result<&'value str> {
 
 /// # Safety
 /// `path` must be a valid NUL-terminated UTF-8 string.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[no_mangle]
 pub unsafe extern "C" fn fs_exfat_mount(path: *const c_char, offset: u64) -> *mut FsExfat {
     guard(ptr::null_mut(), || {

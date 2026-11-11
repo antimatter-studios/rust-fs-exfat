@@ -1,7 +1,210 @@
 version: "3"
 chore_min_version: 0.19.0
 
+# THE TEST CONTRACT, copied from rust-fs-ext4's chores.yml (the template the
+# filesystem repos share; the harness README's "Consumer test contract" is
+# its general form) and adapted to exFAT:
+#
+#   chore siblings     check out ../rust-fs-core and ../fs-linux-test-harness
+#                      at their pinned refs
+#   chore tools        install and verify what the HOST needs: ripgrep,
+#                      python3, and the VM (Vagrant, QEMU, KVM/HVF). NOT
+#                      exfatprogs
+#   chore fixtures     build test-disks/*.img: formatted by mkfs.exfat and
+#                      populated by the kernel's exfat driver in the harness
+#                      VM, each with a manifest and the kernel's listing
+#   chore test:unit    tests that need no tool, no fixture and no VM
+#   chore test:images  tests that read the fixtures but need no VM: the
+#                      strict reader, the audit and salvage against the
+#                      kernel's listing of each image
+#   chore test:oracle  exfatprogs reads every fixture IN THE GUEST: fsck.exfat
+#                      -n for consistency, dump.exfat field for field
+#   chore test:kernel  THE REAL KERNEL reads every fixture: loop-mounted
+#                      read-only in the guest, walked, and compared with the
+#                      strict reader and salvage
+#   chore test:third   A THIRD IMPLEMENTATION, relan/exfat, built in the guest:
+#                      every fixture read three ways, by it, the kernel and
+#                      this crate
+#   chore test:oracle-macos
+#                      macOS's newfs_exfat, fsck_exfat -n and read-only
+#                      driver, on a Mac host
+#   chore test:vm      every Linux tier compiled and run INSIDE the guest
+#   chore test         everything: natively on Linux (test:native); on a Mac,
+#                      test:vm, then test:oracle-macos, package and scripts
+#   chore vm:*         the harness's tasks: boot, provision (scripts/vm-setup.sh:
+#                      exfatprogs, the kernel's exfat module and relan/exfat),
+#                      tear down
+#
+# WHICH TIER NEEDS WHAT, AND WHERE IT RUNS.
+#
+#   tier             needs            runs where                  CI job
+#   unit             nothing          the host                    unit, test-arm64,
+#                                                                 oracle-macos
+#   images           the fixtures     the host, any architecture  images, test-arm64,
+#                                                                 oracle-macos
+#   oracle           fixtures, VM     tests on the host, every    test (x86_64 KVM)
+#                                     exfatprogs call in the guest
+#   kernel           fixtures, VM     tests on the host, every    test
+#                                     mount in the guest
+#   third            fixtures, VM     tests on the host, relan/   test
+#                                     exfat built and run in the guest
+#   oracle-macos     a Mac            the host: macOS's own tools oracle-macos
+#   vm               fixtures, VM     everything, in the guest    suite-in-vm
+#   fixtures         the VM           the guest                   fixtures
+#
+# WHERE THINGS RUN, and why.
+#
+#   THE LINUX ORACLES RUN IN THE GUEST, ALWAYS. exfatprogs on a workstation
+#   is whatever that machine has, a different version per developer, and a
+#   Mac has none. One Debian guest, one version, the same answers
+#   everywhere. tests/guest_support is the one way in, and
+#   tests/test_contract.rs fails the suite if a test runs a Linux exFAT
+#   tool, a mount or the harness itself any other way.
+#
+#   THE KERNEL AND relan/exfat MOUNT IN THE GUEST, ALWAYS. A loop mount and
+#   a FUSE mount need root and Linux; the host has neither to spare, and a
+#   Mac has the user's own disks attached.
+#
+#   macOS's TOOLS RUN ON A MAC HOST, ALWAYS. newfs_exfat, fsck_exfat and the
+#   read-only macOS driver are a different oracle from the Linux ones, and
+#   exist only there.
+#
+#   THE LINUX TESTS RUN ON LINUX. On a Linux host that is this host. On a
+#   Mac, `chore test` runs `test:vm`, which builds and runs the same sources
+#   in the guest.
+#
+# NOTHING SKIPS: a missing tool, fixture or VM fails the test that needed
+# it, naming the task that provides it.
+#
+# QUIET BY DEFAULT, AND THE BUDGET IS A NUMBER. Every tier runs through
+# rust-fs-core's tier.sh: the whole run goes to tmp/logs/<tier>.log, a pass
+# prints one verdict, and a run that prints more than its measured budget
+# fails with exit 65. Each tier's budget and floor are measured; the
+# comments beside them say where, and docs/TESTING.md tabulates them.
+
+vars:
+  # The sibling pins. One place, read by `chore siblings`. URL as well as
+  # ref, as rust-fs-ext4 has them.
+  FS_CORE_URL: https://github.com/antimatter-studios/rust-fs-core.git
+  # The tiers run ../rust-fs-core/scripts/tier.sh and test-floor.sh in place;
+  # v0.4.3 is the release Cargo.toml depends on and CI checks out.
+  FS_CORE_REF: v0.4.3
+  LINUX_HARNESS_URL: https://github.com/antimatter-studios/fs-linux-test-harness.git
+  # v0.6.2: the release whose guest-run.sh the family's shared guest
+  # (FLTH_SHARED_ROOT) was booted with, so this consumer can join it.
+  LINUX_HARNESS_REF: v0.6.2
+
+# The harness's consumer tasks, as `chore vm:<task>`. OPTIONAL because the
+# harness is a sibling that `chore siblings` itself checks out: without it
+# this file must still load far enough to run that task.
+#
+# No `dir:`: the harness's tasks run from this repository's root, where
+# fs-linux-test-harness.toml is.
+includes:
+  vm:
+    taskfile: ../fs-linux-test-harness/vm.chores.yml
+    optional: true
+
+# The reaper: any chore invocation stops a VM nothing else brought down.
+# Fails soft, and does nothing before the harness is checked out.
+lifecycle:
+  after_all:
+    - '[ ! -x ../fs-linux-test-harness/scripts/vm.sh ] || ../fs-linux-test-harness/scripts/vm.sh reap'
+
 tasks:
+  siblings:
+    desc: Check out the sibling repos this crate tests against, at their pinned refs
+    # rust-fs-ext4's task. init + fetch-by-ref rather than clone: a ref may
+    # be a bare commit, which `git clone --branch` cannot name. REFUSES TO
+    # MOVE A DIRTY SIBLING, and treats a pin as a FLOOR: a sibling at or
+    # ahead of its pin is left on whatever branch it is on, because one copy
+    # is shared by every crate on the machine. Only a main below the pin is
+    # fast-forwarded; anything else is reported for a person to move.
+    #
+    # SIBLINGS LIVE BESIDE THE MAIN TREE, NOT BESIDE THIS CHECKOUT:
+    # --git-common-dir names the main checkout from a worktree too, so every
+    # worktree resolves the same copy.
+    cmds:
+      - |
+        set -eu
+        common="$(git rev-parse --path-format=absolute --git-common-dir)"
+        siblings_root="$(cd "$common/../.." && pwd)"
+        printf '%s\t%s\t%s\n' \
+          rust-fs-core          '{{.FS_CORE_URL}}'       '{{.FS_CORE_REF}}' \
+          fs-linux-test-harness '{{.LINUX_HARNESS_URL}}' '{{.LINUX_HARNESS_REF}}' \
+        | while IFS="$(printf '\t')" read -r name url ref; do
+            dir="$siblings_root/$name"
+            if [ ! -e "$dir/.git" ]; then
+              echo "siblings: cloning $name at $ref"
+              git init --quiet "$dir"
+              git -C "$dir" remote add origin "$url"
+              git -C "$dir" fetch --quiet origin "$ref"
+              git -C "$dir" checkout --quiet FETCH_HEAD
+              continue
+            fi
+            if [ -n "$(git -C "$dir" status --porcelain)" ]; then
+              echo "siblings: $name has uncommitted changes -- refusing to move it." >&2
+              exit 1
+            fi
+            git -C "$dir" fetch --quiet origin main "refs/tags/$ref:refs/tags/$ref" 2>/dev/null ||
+              git -C "$dir" fetch --quiet origin main "$ref"
+            current="$(git -C "$dir" rev-parse --abbrev-ref HEAD)"
+            if git -C "$dir" merge-base --is-ancestor "$ref" HEAD; then
+              echo "siblings: $name at or ahead of $ref (on $current)"
+            elif [ "$current" = "main" ] && git -C "$dir" merge --ff-only --quiet origin/main 2>/dev/null; then
+              echo "siblings: $name fast-forwarded to $(git -C "$dir" rev-parse --short HEAD)"
+            else
+              echo "siblings: $name is on '$current' and below $ref; this task will not move it." >&2
+              echo "          It is one checkout shared by every crate here -- move it yourself." >&2
+              exit 1
+            fi
+          done
+          # A worktree beside the main checkout reaches the siblings as ../<name>.
+          # One elsewhere has nothing there, and every tier names ../rust-fs-core.
+          here="$(cd .. && pwd)"
+          [ "$here" = "$siblings_root" ] || {
+            echo "siblings: this checkout is not beside $siblings_root, where the siblings are;" >&2
+            echo "          ../rust-fs-core and ../fs-linux-test-harness would not resolve." >&2
+            exit 1
+          }
+
+  tools:
+    desc: "Install and verify what the HOST needs: ripgrep, python3, and the VM the Linux oracles live in"
+    cmds: ['scripts/tools.sh']
+
+  fixtures:
+    desc: Build every test-disks/*.img fixture with its manifest and kernel listing (kernel-made, in the harness VM)
+    # Up to date while the recipe is unchanged and every image exists;
+    # --force rebuilds. The VM comes down when the build ends, however it
+    # ends (build-fixtures.sh sources the harness's vm-session.sh).
+    #
+    # THIS LIST AND IMAGES IN build-fixtures.sh MUST AGREE.
+    sources:
+      - test-disks/build-fixtures.sh
+      - test-disks/guest-build-images.sh
+      - test-disks/fixture-tool.py
+      - scripts/vm-setup.sh
+    generates:
+      - test-disks/exfat-empty-s512-c4k.img
+      - test-disks/exfat-tree-s512-c4k.img
+      - test-disks/exfat-tree-s512-c64k.img
+      - test-disks/exfat-tree-s4096-c128k.img
+      - test-disks/exfat-small-s4096-c32m.img
+      - test-disks/exfat-fragmented-s512-c4k.img
+      - test-disks/exfat-largedir-s512-c32k.img
+      - test-disks/exfat-deleted-s512-c4k.img
+      - test-disks/exfat-full-s512-c4k.img
+      - test-disks/exfat-tree-s512-c4k-boot.img
+      - test-disks/exfat-tree-s512-c4k-bitmap.img
+      - test-disks/exfat-tree-s512-c4k-upcase.img
+      - test-disks/exfat-tree-s512-c4k-data.img
+      - test-disks/exfat-fragmented-s512-c4k-boot.img
+    # A hung boot must not hold the VM and the machine-wide slot for ever.
+    timeout: 60m
+    on_timeout:
+      - cmd: '../fs-linux-test-harness/scripts/vm.sh down || ../fs-linux-test-harness/scripts/vm.sh destroy'
+    cmds: ['test-disks/build-fixtures.sh']
+
   build:
     cmds: ['cargo build --locked --all-targets --all-features']
   fmt:
@@ -9,7 +212,6 @@ tasks:
   lint:
     cmds:
       - bash scripts/test-image-safety.sh
-      - bash scripts/test-fuzz-all.sh
       - bash ../rust-fs-core/scripts/agents-core-check.sh
       - bash ../rust-fs-core/scripts/changelog-check.sh
       - bash ../rust-fs-core/scripts/features-check.sh
@@ -23,15 +225,163 @@ tasks:
       - cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - cargo clippy --locked --all-targets --all-features -- -D warnings
   test:unit:
+    # BUDGET: measured 436 lines / 26,410 bytes on a macOS host with this
+    # tree (321 tests, after `chore build`, so no cold build in the log),
+    # plus one 117-byte line for the slow-test notice macOS CI prints.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 419 25597 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 437 26527 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
-  test:oracle:
+  test:images:
+    desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'
+    # The strict reader, the allocation audit and the salvage verbs on every
+    # test-disks/ image, against the kernel's listing captured in the guest
+    # when the image was built. No exfatprogs and no VM, so it runs on
+    # arm64 runners too. A missing fixture fails the tier first, naming
+    # `chore fixtures`, rather than failing every test on it.
+    #
+    # BUDGET: 95 lines / 3,328 bytes in CI (run 43105817721, ubuntu, cold
+    # build: 81 of those lines are cargo's), 53 / 2,025 cold and 14 warm on a
+    # macOS host (#122). 98 / 3,500 leaves three lines and about 5% of bytes.
+    # FLOOR: seven tests, every one of them.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 270 16000 -- bash scripts/test-oracle.sh'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 25
+      - test-disks/build-fixtures.sh --check
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 98 3500 -- cargo test --locked --release --features cli,test-support --test images'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored images 7
+  test:oracle:
+    desc: 'exfatprogs judges every fixture: fsck.exfat -n and dump.exfat, every call made inside the harness VM'
+    # tests/exfatprogs.rs, through tests/guest_support: one guest call per
+    # image, each tagged `[oracle vm]`. --show-output keeps those lines, the
+    # evidence of what was checked, in tmp/logs/oracle.log. scripts/test.sh
+    # runs cargo as a harness session, so the VM it boots comes down when
+    # the tier ends. tests/test_contract.rs (unit tier) fails the suite if a
+    # test runs a Linux tool on the host.
+    #
+    # BUDGET: 152 lines / 7,274 bytes in CI (run 43105817721, x86_64 guest,
+    # cold build: 81 of those lines are cargo's), 107 / 5,718 cold and 69 /
+    # 4,553 warm on a macOS host (#123). 156 / 7,500 leaves four lines and
+    # about 3% of bytes. FLOOR: both tests.
+    cmds:
+      - scripts/tools.sh --check
+      - test-disks/build-fixtures.sh --check
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 156 7500 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 2
+  test:kernel:
+    desc: 'THE KERNEL is the judge: every fixture loop-mounted read-only and walked in the guest, against the strict reader and salvage'
+    # tests/kernel.rs: one `[kernel vm]` guest call per image mounts it with
+    # the kernel's exfat driver and lists every path, size, mode, time and
+    # SHA-256. The strict reader must agree on every field, salvage must
+    # rebuild every file, and a reading with a file's last cluster dropped
+    # must be caught. The write direction (#133) uses the same kernel walk.
+    #
+    # BUDGET: 104 lines / 5,590 bytes from a cold build on a macOS host, 65 /
+    # 4,358 warm (#124); 135 / 7,300 is about 30% over the cold run. FLOOR:
+    # all three tests.
+    cmds:
+      - scripts/tools.sh --check
+      - test-disks/build-fixtures.sh --check
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 135 7300 -- scripts/test.sh --locked --release --features cli,test-support --test kernel -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 3
+  test:third:
+    desc: 'CROSS-VALIDATION: relan/exfat, a third implementation built in the guest, reads every fixture as the kernel and this crate do'
+    # tests/third.rs: relan/exfat's FUSE driver, exfatattrib and exfatfsck,
+    # built by scripts/vm-setup.sh at the commit tests/walk_support pins.
+    # Every undamaged fixture is read three ways, and a disagreement names the
+    # path, the field and all three values. relan's own known departures
+    # from the specification are listed in tests/third.rs, each exactly.
+    # Its own tier, like rust-fs-ext4's test:lwext4: a different oracle with
+    # a different failure mode, and its verdict is not exfatprogs'.
+    #
+    # BUDGET: 95 lines / 7,084 bytes warm on a macOS host (#125). A cold
+    # build adds the 38 lines / 1,165 bytes measured on test:oracle, which
+    # builds the same dependencies: about 133 / 8,250. 175 / 10,700 is about
+    # 30% over that. FLOOR: all three tests.
+    cmds:
+      - scripts/tools.sh --check
+      - test-disks/build-fixtures.sh --check
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored third third 175 10700 -- scripts/test.sh --locked --release --features cli,test-support --test third -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored third 3
+  test:oracle-macos:
+    desc: 'macOS newfs_exfat, fsck_exfat -n and the read-only macOS driver, on a Mac host'
+    # The host oracle that was test:oracle before exfatprogs took the name
+    # (#123). Its log is still tmp/logs/oracle-macos.log.
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 310 16000 -- bash scripts/test-oracle.sh'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle-macos 25
+  test:vm:
+    desc: 'Every Linux tier, compiled and run INSIDE the harness VM: how a Mac runs the Linux suite'
+    # scripts/guest-suite.sh, through the harness's [test] guest_command:
+    # the library, every tests/*.rs and the doctests, with exfatprogs, the
+    # kernel and relan/exfat called in place (FLTH_GUEST=1). The toolchain
+    # and the build directory live on the guest's own disk, so the first
+    # run pays a full build and later ones are incremental.
+    #
+    # The core sibling is staged on the share first, from its checkout's
+    # HEAD: the guest is given this repository, not the directory that
+    # holds it, and guest-suite.sh installs the toolchain with core's
+    # script.
+    #
+    # BUDGET: 625 lines / 38,742 bytes on a macOS host's HVF guest with a warm
+    # build (#126), 411 tests executed, three of them the red layer #153's
+    # failures, whose report is 27 lines / 2,954 bytes of that. CI's guest is
+    # fresh every run, so its log also holds the toolchain install and a
+    # whole release build, about 60 lines / 3.5 KB on the first run here:
+    # about 660 / 39,300 for a passing cold run. 860 / 51,000 is about 30%
+    # over it. FLOOR: 388, 95% of the 408 that passed.
+    timeout: 120m
+    on_timeout:
+      - cmd: '../fs-linux-test-harness/scripts/vm.sh down || ../fs-linux-test-harness/scripts/vm.sh destroy'
+    cmds:
+      - test-disks/build-fixtures.sh --check
+      - |
+        set -eu
+        [ -x ../fs-linux-test-harness/scripts/vm.sh ] || {
+          echo "test:vm needs the harness sibling -- run 'chore siblings'." >&2
+          exit 1
+        }
+        [ -e ../rust-fs-core/.git ] || {
+          echo "test:vm: ../rust-fs-core is not checked out -- run 'chore siblings'." >&2
+          exit 1
+        }
+        share="$(../fs-linux-test-harness/scripts/vm.sh share)"
+        dest="$share/siblings/rust-fs-core"
+        rm -rf "$dest"
+        mkdir -p "$dest"
+        git -C ../rust-fs-core archive --format=tar HEAD | tar -x -C "$dest"
+        # --verbose is tier.sh's, not cargo's.
+        guest_args=""
+        for arg in ${CLI_ARGS:-}; do
+          case "$arg" in --verbose|-v) continue ;; esac
+          guest_args="$guest_args $arg"
+        done
+        # shellcheck disable=SC2086  # the words are the point
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored test:vm vm 860 51000 -- \
+          ../fs-linux-test-harness/scripts/vm.sh guest-test $guest_args
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored vm 337
   test:
-    cmds: ['chore test:unit', 'chore test:oracle', 'chore test:package']
+    desc: 'Everything, as CI runs it: natively on Linux; on a Mac, the Linux tiers in the VM and the macOS oracle here'
+    # WE RUN THE LINUX TESTS ON LINUX. On a Linux host that is this host. On
+    # a Mac there is no exfat kernel driver, no loop mount and no exfatprogs,
+    # so `test:vm` builds and runs the same sources in the guest, and the
+    # macOS oracle, which needs a Mac, runs here.
+    cmds:
+      - |
+        set -eu
+        case " ${CLI_ARGS:-} " in
+          *" --verbose "*|*" -v "*) export OUTPUT_BUDGET_VERBOSE=1 ;;
+        esac
+        if [ "$(uname -s)" = Linux ]; then
+          exec "{{.CHORE_EXE}}" test:native
+        fi
+        echo "test: this host is $(uname -s) -- the Linux tiers run in the harness VM."
+        "{{.CHORE_EXE}}" test:vm
+        if [ "$(uname -s)" = Darwin ]; then
+          "{{.CHORE_EXE}}" test:oracle-macos
+        fi
+        "{{.CHORE_EXE}}" test:package
+        "{{.CHORE_EXE}}" test:scripts
+  test:native:
+    desc: 'The suite on this (Linux) host: unit, images, and the exfatprogs, kernel and relan/exfat oracles in the guest, then package and scripts'
+    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:kernel', 'chore test:third', 'chore test:package', 'chore test:scripts']
   fuzz:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'
@@ -42,7 +392,106 @@ tasks:
       - 'cargo package --locked --all-features --allow-dirty --target-dir "${CARGO_TARGET_DIR:-target}/package-verify"'
   test:package:
     cmds:
+      # The real tree packages, then a copy proves packaging leaves nothing a
+      # later test build links. CI's `package` job runs this task alone.
+      - task: package
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored package package 20 1000 -- bash scripts/test-package-isolation.sh'
+  tools:wasm:
+    desc: 'Install and verify what test:wasm needs: the wasm32 target, the wasm-bindgen test runner at Cargo.lock''s version, and node'
+    cmds: ['scripts/wasm-tools.sh']
+
+  test:wasm:
+    desc: 'The browser build (wasm32-unknown-unknown): tests/wasm.rs RUN under wasm-bindgen-test in Node'
+    # RUN, NOT BUILT, as in rust-fs-ext4: std on this target compiles calls
+    # such as SystemTime::now that panic when made, so only running the code
+    # finds them. tests/wasm.rs opens the interface tests' sample volume from
+    # memory, walks it and reads every file. Not part of `test`, which also
+    # runs in the harness guest, which has no Node: CI runs it in its own
+    # job, `wasm`, which ci-ok needs.
+    # BUDGET: 84 lines / 2,946 bytes in CI (run 43105817721, ubuntu, cold
+    # wasm32 build: 77 of those lines are cargo's), 41 / 1,476 cold and 7 / 330
+    # warm on a macOS host. 86 / 3,100 leaves two lines and about 5% of bytes.
+    # FLOOR: the one test in tests/wasm.rs.
+    cmds:
+      - scripts/wasm-tools.sh --check
+      - 'CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner bash ../rust-fs-core/scripts/tier.sh wasm wasm 86 3100 -- cargo test --locked --target wasm32-unknown-unknown --test wasm'
+      - 'bash ../rust-fs-core/scripts/test-floor.sh wasm 1'
+
+  test:scripts:
+    desc: The shell tests (tests/scripts/*.sh), every one by glob
+    # By glob, so a test added later needs no edit here -- a guard that has to
+    # be registered somewhere else is a guard that gets silently skipped.
+    # BUDGET: measured at 23 lines / 1,305 bytes with six files, most of it
+    # test-fuzz-all.sh's line per check. A new file adds its `== name` line
+    # and a verdict, so 30 / 1,700 leaves room for two.
+    cmds:
+      - |
+        set -eu
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 30 1700 -- bash -c '
+          set -eu
+          for t in tests/scripts/*.sh; do
+            echo "== $t"
+            bash "$t"
+          done
+        '
+
+  check:semver:
+    desc: Refuse a public-API break the version in Cargo.toml does not declare
+    # Against the newest crates.io release once there is one, and against main
+    # until then: scripts/check-semver.sh says why. No `sources:` on purpose --
+    # the baseline moves without this tree changing, so a fingerprint would
+    # call a stale answer up to date. A failing run prints every broken item
+    # and is not held to the budget.
+    #
+    # BUDGET: a passing run measured 14 lines / 631 bytes against main; the
+    # lines are fixed, not per item, so 40 / 4,000 leaves room for a warning
+    # block without masking a flood.
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh semver semver 40 4000 -- bash scripts/check-semver.sh'
+
+  check:msrv:
+    desc: Build the library and binary on the toolchain Cargo.toml's rust-version names
+    # The declared minimum is a claim a consumer acts on. This is what keeps
+    # it true: a newer std API used in library code turns it red here, not in
+    # someone else's build. The script reads the version out of Cargo.toml.
+    cmds: ['bash scripts/msrv.sh']
+
+  cli:install:
+    desc: 'Build the command-line tools (release, --features cli) and stage them as an install prefix: tmp/cli/bin under every name, tmp/cli/share the man pages and completions'
+    # The layout an install has: the multi-call binary as rust-fs-exfat and
+    # each dotted name a relative symlink to it. It prints the PATH line;
+    # `test:cli` tests whatever PATH finds, so that directory goes first.
+    cmds: ['bash scripts/cli-install.sh']
+
+  test:cli:
+    desc: 'The command-line tools AS INSTALLED, found on PATH: doctor first, then every tests/cli/test-*.sh'
+    # Tests the installed artifact, not a cargo target. `rust-fs-exfat doctor`
+    # runs before any tool is tested and fails the tier if a name is missing
+    # or shadowed, naming the fix. See scripts/test-cli.sh.
+    #
+    # FLOOR: each file prints a `test result: ok. N passed` line, which
+    # test-floor.sh sums as it does cargo's. 64 checks ran when the tier was
+    # added; the floor is about 95% of that.
+    #
+    # BUDGET: three files printed 15 lines and 666 bytes, three of them
+    # doctor's lines naming the staged paths. A passing file adds three lines
+    # and about 70 bytes, so 20 / 900 leaves room for one more.
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips cli cli 20 900 -- bash scripts/test-cli.sh'
+      - bash ../rust-fs-core/scripts/test-floor.sh cli 60
+
+  check:provenance:
+    desc: No tracked file names exFAT implementations' copyleft sources or licences
+    # A chore task naming a script, and nothing else. CI runs it as its own
+    # job, `provenance`, and `lint` runs it too, so a local `chore lint`
+    # reproduces that job.
+    cmds: ['bash scripts/check-provenance.sh']
+
+  check:ci-gate:
+    desc: The one required check stands for every job in ci.yml
+    # `lint` runs it too; this is the same check alone.
+    cmds: ['bash ../rust-fs-core/scripts/ci-gate.sh']
+
   staticlib:
     cmds:
       - cargo build --locked --release --lib

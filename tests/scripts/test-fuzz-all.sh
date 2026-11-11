@@ -8,7 +8,7 @@ fails=0
 ok() { printf 'ok    %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; fails=$((fails + 1)); }
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 sandbox="$(mktemp -d "${TMPDIR:-/tmp}/test-fuzz-all.XXXXXX")" || exit 1
 trap 'rm -r "$sandbox"' EXIT
 

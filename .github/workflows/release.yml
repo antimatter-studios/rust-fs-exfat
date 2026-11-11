@@ -1,0 +1,190 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# EVERY JOB READS, AND ONE JOB WRITES (#329).
+#
+# `contents: write` is held by the `cli` job alone, which calls
+# rust-fs-core's release-cli workflow; there, only its `attach` job holds
+# it, and that job checks nothing out. Every action here is pinned to
+# a commit SHA, with the tag it stood for beside it: a tag is a pointer its
+# owner can move, and a job holding a token should not run whatever it
+# points at today. Every checkout sets `persist-credentials: false`, so no
+# later step finds the token in .git/config.
+# tests/scripts/test-write-jobs-pinned.sh fails a write job that runs an
+# unpinned action or persists its token.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CHORE_VERSION: "0.19.0"
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: verify tag matches Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate_ver=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"(.*)"/\1/')
+          if [ "$tag" != "$crate_ver" ]; then
+            echo "tag $tag does not match Cargo.toml version $crate_ver" >&2
+            exit 1
+          fi
+
+      # The same gate as a pull request's CI, through the same chore
+      # tasks: the siblings at their pinned refs (rust-fs-core is the
+      # path dependency), the oracle tools, the kernel-made fixtures in
+      # the fs-linux-test-harness VM (ubuntu-latest is x86_64 with KVM),
+      # lint, and every Linux tier: unit, images, the exfatprogs and kernel
+      # oracles, relan/exfat, the package and the scripts. The macOS oracle
+      # runs in test-macos below, because `chore test` includes it and it
+      # needs a Mac.
+      - name: install chore
+        run: scripts/ci-install-chore.sh
+      - name: chore siblings
+        run: chore siblings
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # The VM host first: `chore tools` fails a Linux host without
+      # Vagrant, QEMU and /dev/kvm, and this is the step that installs
+      # them (tests/scripts/test-vm-host-before-tools.sh).
+      - name: KVM, QEMU and Vagrant
+        run: ../fs-linux-test-harness/scripts/ci-setup-linux.sh
+      - name: chore tools
+        run: chore tools
+      - name: chore fixtures
+        run: chore fixtures
+      - name: chore lint
+        run: chore lint
+      - name: the Linux tiers
+        run: |
+          set -euo pipefail
+          for tier in test:unit test:images test:oracle test:kernel test:third test:package test:scripts; do
+            chore "$tier"
+          done
+
+  test-macos:
+    name: test (macOS oracle)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: install chore
+        run: scripts/ci-install-chore.sh
+      - name: chore siblings
+        run: chore siblings
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+      - name: chore test:oracle-macos
+        run: chore build && chore test:oracle-macos
+
+  # THE RELEASE TARBALL is rust-fs-core's release-cli workflow, called here
+  # (#481). It builds the multi-call binary natively on darwin-arm64 and
+  # linux-x86_64, packages it with `../rust-fs-core/scripts/package-cli.sh` from what
+  # Cargo.toml's [package.metadata.package-cli] declares -- bin/rust-fs-exfat,
+  # fs.exfat and fsck.exfat as relative symlinks to it, the man pages and
+  # completions the binary writes, share/rust-fs-exfat/CAVEATS and
+  # LICENSE -- and checks it; then its one write job attests both tarballs
+  # and attaches them to this tag's release. This repository once carried
+  # its own copy of all of that, and the family's copies drifted.
+  #
+  # Pinned to a commit SHA, with the tag it stood for beside it: the called
+  # workflow runs with the grants below, and a tag can be moved. core-ref
+  # is the tag chores.yml pins the sibling to, and toolchain the one
+  # rust-toolchain.toml pins; tests/ci_profile.rs holds all three to that.
+  #
+  # The attestation is signed by the called workflow, so a download is
+  # checked with `gh attestation verify <tarball> --repo
+  # antimatter-studios/rust-fs-exfat --signer-workflow
+  # antimatter-studios/rust-fs-core/.github/workflows/release-cli.yml`.
+  cli:
+    needs: [test, test-macos, publish]
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: antimatter-studios/rust-fs-core/.github/workflows/release-cli.yml@9271095beb76dda54729b517e85179883ad851b4 # v0.4.3
+    with:
+      core-ref: v0.4.3
+      toolchain: 1.95.0
+
+  publish:
+    name: publish to crates.io
+    needs: [test, test-macos]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # The path dependency, at the ref chores.yml pins (read from there
+      # rather than restated; chore itself has no build for every runner
+      # this job uses).
+      - name: clone rust-fs-core sibling
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin() { sed -n "s/^  $1: *//p" chores.yml | tr -d '\r'; }
+          git clone --depth 1 --branch "$(pin FS_CORE_REF)" "$(pin FS_CORE_URL)" ../rust-fs-core
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+
+      # A version already on crates.io cannot be published again, and a
+      # re-tag — or a release published by hand — would otherwise fail
+      # this job every time. Skip instead, so the workflow is idempotent
+      # and a red run means something actually went wrong.
+      #
+      # 200 is published and 404 is not; anything else -- a 429, a 5xx, a
+      # timeout -- is retried and then fails the step, rather than being
+      # read as "not published" and sent on to a `cargo publish` that
+      # fails with "already exists" (#329).
+      # tests/scripts/test-crates-io-check.sh runs this step against a
+      # stubbed curl.
+      - name: skip if this version is already on crates.io
+        id: already
+        shell: bash
+        run: scripts/crates-io-published.sh >> "$GITHUB_OUTPUT"
+
+      - uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+        if: steps.already.outputs.published == 'false'
+        id: auth
+
+      # A tag the CHANGELOG does not describe stops here, before crates.io has
+      # anything: the release body is that section, from github-guard's changelog
+      # extraction through agent-skills' changelog-notes action.
+      - name: the CHANGELOG describes this version
+        uses: antimatter-studios/agent-skills/.github/actions/changelog-notes@ed0b96812c5908478dcd84543debf4d5f8bf87e3
+        with:
+          tag: ${{ github.ref_name }}
+      - name: cargo publish
+        if: steps.already.outputs.published == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        # No `--locked`: publish must rewrite the `rust-fs-core` path
+        # dependency into its registry equivalent in the packaged
+        # lockfile, which `--locked` forbids ("cannot update the lock
+        # file"). The verify-build resolves rust-fs-core from crates.io
+        # via the `version` constraint, so the published artifact is
+        # pinned by that constraint, not by the local path checkout.
+        run: cargo publish

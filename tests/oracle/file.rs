@@ -75,8 +75,9 @@ fn walk<Device: BlockRead>(
 
 #[test]
 fn every_file_hash_length_and_timestamp_match_the_read_only_macos_driver() {
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
     for sector in [512, 4096] {
         let image = directory.join(format!("reference-{sector}.dmg"));
         assert!(std::fs::symlink_metadata(&image)
@@ -130,8 +131,9 @@ fn every_file_hash_length_and_timestamp_match_the_read_only_macos_driver() {
 /// fails here, which tells a change in the platform from a regression in the reader.
 #[test]
 fn an_unaligned_valid_length_is_exact_here_and_the_macos_driver_rounds_it_or_agrees() {
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
     for sector in [512u64, 4096] {
         let mut image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
         let volume = Volume::open(Bytes(image.clone())).unwrap();
@@ -240,8 +242,9 @@ fn cluster_plans_rebuild_every_file_as_the_read_only_macos_driver_reads_it() {
         }
     }
 
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
     for sector in [512, 4096] {
         let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
         let volume = Volume::open(Bytes(image.clone())).unwrap();
