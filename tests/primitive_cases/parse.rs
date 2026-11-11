@@ -241,6 +241,46 @@ fn a_matching_set_checksum_bypasses_only_the_plausibility_filters() {
     assert!(!parse_set(&bytes, 0, LIMITS).unwrap().checksum_ok);
 }
 
+/// `Limits` has public fields and no stated range, so the plausibility filter
+/// answers for every value: the heap ends at `cluster_count + 2` and holds
+/// `cluster_count * cluster_size` bytes, even where neither fits its type.
+#[test]
+fn the_plausibility_filter_answers_for_limits_outside_the_specifications_range() {
+    const MAX: u32 = u32::MAX;
+    let cases: [(u32, u64, u32, u64, bool); 12] = [
+        (MAX, 1, 2, 5, true),
+        (MAX, 1, MAX, 5, true),
+        (MAX, 1, 1, 5, false),
+        (MAX, 1, 2, u64::from(MAX), true),
+        (MAX, 1, 2, u64::from(MAX) + 1, false),
+        (MAX - 1, 1, MAX, 5, true),
+        (MAX - 2, 1, MAX, 5, false),
+        (MAX, u64::MAX, 2, 0, true),
+        (MAX, u64::MAX, MAX, u64::MAX, true),
+        (2, u64::MAX, 3, u64::MAX, true),
+        (2, u64::MAX, 4, 0, false),
+        (0, u64::MAX, 0, 0, true),
+    ];
+    for (cluster_count, cluster_size, first_cluster, length, kept) in cases {
+        let limits = Limits {
+            cluster_count,
+            cluster_size,
+        };
+        let mut bytes = permissive_set();
+        bytes[52..56].copy_from_slice(&first_cluster.to_le_bytes());
+        bytes[56..64].copy_from_slice(&length.to_le_bytes());
+        seal_permissive_set(&mut bytes);
+        bytes[2] ^= 1;
+        let context = format!("{limits:?}, first cluster {first_cluster:#x}, length {length:#x}");
+        assert_eq!(parse_set(&bytes, 0, limits).is_some(), kept, "{context}");
+        assert_eq!(
+            find_sets(&bytes, bytes.len(), limits).len(),
+            usize::from(kept),
+            "{context}"
+        );
+    }
+}
+
 /// Reserved bytes of a set: File bytes 6-7 and 25-31 (section 7.4, Table 27)
 /// and Stream Extension bytes 2, 6-7 and 16-19 (section 7.6, Table 33), the
 /// stream following the 32-byte File entry.
