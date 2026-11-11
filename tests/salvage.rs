@@ -517,6 +517,34 @@ fn walks_stop_at_unreadable_fat_sectors() {
 }
 
 #[test]
+fn a_bad_fat_sector_spares_the_words_of_its_neighbours() {
+    // The FAT's last sector holds no word a chain here uses; every walk reads
+    // its words from the first sector, which reads (#107).
+    let healthy = Bytes(fixtures::build_volume());
+    let (adapter, found) = scan(&healthy);
+    let source = Failing {
+        inner: Bytes(fixtures::build_volume()),
+        bad: vec![Extent::new(fat_word(0).offset + 7 * SECTOR as u64, 512)],
+    };
+    for candidate in &found {
+        assert_eq!(
+            adapter.walk_extents(&source, candidate).unwrap(),
+            adapter.walk_extents(&healthy, candidate).unwrap(),
+            "{:?}",
+            candidate.name
+        );
+    }
+    assert_eq!(
+        adapter.rebuild_tree(&source, &found).unwrap(),
+        adapter.rebuild_tree(&healthy, &found).unwrap()
+    );
+    assert!(!damage(&source)
+        .iter()
+        .any(|damage| damage.structure.starts_with("root directory")
+            || damage.location == fat_word(ROOT_CLUSTER)));
+}
+
+#[test]
 fn the_tree_keeps_parents_orphans_and_conflicts() {
     let mut builder = volume();
     builder.directory(
