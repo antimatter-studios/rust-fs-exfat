@@ -36,18 +36,7 @@ jobs:
       - name: install chore
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/chore"
-          case "$RUNNER_OS-$RUNNER_ARCH" in
-            Linux-X64) archive=chore-0.19.0-linux-x86_64.tar.gz ;;
-            macOS-ARM64) archive=chore-0.19.0-darwin-arm64.tar.gz ;;
-            *) echo "unsupported runner $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
-          esac
-          gh release download v0.19.0 -R antimatter-studios/chore -p "$archive" -p checksums.txt -D "$RUNNER_TEMP/chore"
-          cd "$RUNNER_TEMP/chore"
-          grep " $archive\$" checksums.txt | shasum -a 256 -c -
-          tar -xzf "$archive"
-          echo "$RUNNER_TEMP/chore" >> "$GITHUB_PATH"
+        run: rust-fs-exfat/scripts/ci-install-chore.sh
       - run: python3 -m venv "$RUNNER_TEMP/python" && "$RUNNER_TEMP/python/bin/pip" install PyYAML==6.0.3
       - run: echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
       - run: chore build && chore lint && chore test:unit && chore package && chore test:package
@@ -60,9 +49,43 @@ jobs:
         with:
           name: logs-${{ matrix.os }}
           path: rust-fs-exfat/tmp/logs/
+  harness-vm:
+    # The harness guest boots on x86_64 KVM, and scripts/vm-setup.sh, which
+    # runs in it, fails unless exfatprogs and the kernel's exfat module are
+    # there. `chore tools` runs the harness's own host check.
+    name: harness VM (x86_64 KVM)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - name: install chore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: rust-fs-exfat/scripts/ci-install-chore.sh
+      - run: python3 -m venv "$RUNNER_TEMP/python" && "$RUNNER_TEMP/python/bin/pip" install PyYAML==6.0.3
+      - run: echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - run: chore siblings
+        working-directory: rust-fs-exfat
+      - name: KVM, QEMU and Vagrant
+        id: vm-host
+        run: ../fs-linux-test-harness/scripts/ci-setup-linux.sh
+        working-directory: rust-fs-exfat
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.vagrant.d/boxes
+          key: ${{ steps.vm-host.outputs.box-cache-key }}
+      - run: chore tools
+        working-directory: rust-fs-exfat
+      - run: chore vm:up
+        working-directory: rust-fs-exfat
+      - run: chore vm:down
+        working-directory: rust-fs-exfat
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [test]
+    needs: [test, harness-vm]
     if: always()
     steps:
       - env:

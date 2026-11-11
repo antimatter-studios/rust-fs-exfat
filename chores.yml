@@ -1,7 +1,111 @@
 version: "3"
 chore_min_version: 0.19.0
 
+# THE TEST CONTRACT, copied from rust-fs-ext4's chores.yml (the template the
+# filesystem repos share; the harness README's "Consumer test contract" is
+# its general form) and adapted to exFAT:
+#
+#   chore siblings     check out ../rust-fs-core and ../fs-linux-test-harness
+#                      at their pinned refs
+#   chore tools        install and verify what the HOST needs: ripgrep,
+#                      python3, and the VM (Vagrant, QEMU, KVM/HVF). NOT
+#                      exfatprogs
+#   chore vm:*         the harness's tasks: boot, provision (scripts/vm-setup.sh:
+#                      exfatprogs and the kernel's exfat module), tear down
+#
+# NOTHING SKIPS: a missing tool, fixture or VM fails the test that needed
+# it, naming the task that provides it.
+
+vars:
+  # The sibling pins. One place, read by `chore siblings`. URL as well as
+  # ref, as rust-fs-ext4 has them.
+  FS_CORE_URL: https://github.com/antimatter-studios/rust-fs-core.git
+  # The tiers run ../rust-fs-core/scripts/tier.sh and test-floor.sh in place;
+  # v0.4.3 is the release Cargo.toml depends on and CI checks out.
+  FS_CORE_REF: v0.4.3
+  LINUX_HARNESS_URL: https://github.com/antimatter-studios/fs-linux-test-harness.git
+  # v0.6.2: the release whose guest-run.sh the family's shared guest
+  # (FLTH_SHARED_ROOT) was booted with, so this consumer can join it.
+  LINUX_HARNESS_REF: v0.6.2
+
+# The harness's consumer tasks, as `chore vm:<task>`. OPTIONAL because the
+# harness is a sibling that `chore siblings` itself checks out: without it
+# this file must still load far enough to run that task.
+#
+# No `dir:`: the harness's tasks run from this repository's root, where
+# fs-linux-test-harness.toml is.
+includes:
+  vm:
+    taskfile: ../fs-linux-test-harness/vm.chores.yml
+    optional: true
+
+# The reaper: any chore invocation stops a VM nothing else brought down.
+# Fails soft, and does nothing before the harness is checked out.
+lifecycle:
+  after_all:
+    - '[ ! -x ../fs-linux-test-harness/scripts/vm.sh ] || ../fs-linux-test-harness/scripts/vm.sh reap'
+
 tasks:
+  siblings:
+    desc: Check out the sibling repos this crate tests against, at their pinned refs
+    # rust-fs-ext4's task. init + fetch-by-ref rather than clone: a ref may
+    # be a bare commit, which `git clone --branch` cannot name. REFUSES TO
+    # MOVE A DIRTY SIBLING, and treats a pin as a FLOOR: a sibling at or
+    # ahead of its pin is left on whatever branch it is on, because one copy
+    # is shared by every crate on the machine. Only a main below the pin is
+    # fast-forwarded; anything else is reported for a person to move.
+    #
+    # SIBLINGS LIVE BESIDE THE MAIN TREE, NOT BESIDE THIS CHECKOUT:
+    # --git-common-dir names the main checkout from a worktree too, so every
+    # worktree resolves the same copy.
+    cmds:
+      - |
+        set -eu
+        common="$(git rev-parse --path-format=absolute --git-common-dir)"
+        siblings_root="$(cd "$common/../.." && pwd)"
+        printf '%s\t%s\t%s\n' \
+          rust-fs-core          '{{.FS_CORE_URL}}'       '{{.FS_CORE_REF}}' \
+          fs-linux-test-harness '{{.LINUX_HARNESS_URL}}' '{{.LINUX_HARNESS_REF}}' \
+        | while IFS="$(printf '\t')" read -r name url ref; do
+            dir="$siblings_root/$name"
+            if [ ! -e "$dir/.git" ]; then
+              echo "siblings: cloning $name at $ref"
+              git init --quiet "$dir"
+              git -C "$dir" remote add origin "$url"
+              git -C "$dir" fetch --quiet origin "$ref"
+              git -C "$dir" checkout --quiet FETCH_HEAD
+              continue
+            fi
+            if [ -n "$(git -C "$dir" status --porcelain)" ]; then
+              echo "siblings: $name has uncommitted changes -- refusing to move it." >&2
+              exit 1
+            fi
+            git -C "$dir" fetch --quiet origin main "refs/tags/$ref:refs/tags/$ref" 2>/dev/null ||
+              git -C "$dir" fetch --quiet origin main "$ref"
+            current="$(git -C "$dir" rev-parse --abbrev-ref HEAD)"
+            if git -C "$dir" merge-base --is-ancestor "$ref" HEAD; then
+              echo "siblings: $name at or ahead of $ref (on $current)"
+            elif [ "$current" = "main" ] && git -C "$dir" merge --ff-only --quiet origin/main 2>/dev/null; then
+              echo "siblings: $name fast-forwarded to $(git -C "$dir" rev-parse --short HEAD)"
+            else
+              echo "siblings: $name is on '$current' and below $ref; this task will not move it." >&2
+              echo "          It is one checkout shared by every crate here -- move it yourself." >&2
+              exit 1
+            fi
+          done
+          # A worktree beside the main checkout reaches the siblings as ../<name>.
+          # One elsewhere has nothing there, and every tier names ../rust-fs-core.
+          here="$(cd .. && pwd)"
+          [ "$here" = "$siblings_root" ] || {
+            echo "siblings: this checkout is not beside $siblings_root, where the siblings are;" >&2
+            echo "          ../rust-fs-core and ../fs-linux-test-harness would not resolve." >&2
+            exit 1
+          }
+
+  tools:
+    desc: "Install and verify what the HOST needs: ripgrep, python3, and the VM the Linux oracles live in"
+    cmds: ['scripts/tools.sh']
+
   build:
     cmds: ['cargo build --locked --all-targets --all-features']
   fmt:
