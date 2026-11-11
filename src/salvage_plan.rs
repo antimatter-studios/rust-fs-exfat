@@ -4,7 +4,11 @@
 use super::{append, Extent, Feature, MaterializedRange, SalvageAdapter, SalvageError};
 use fs_core::BlockRead;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt;
+
+/// The prefix of [`Plan::canonical_bytes`]: a name and encoding version 1.
+const PLAN_ENCODING: &[u8; 16] = b"fs-salvage-plan\x01";
 
 /// The span a failed source read is retried in, aligned on the source, to
 /// narrow what is lost.
@@ -178,6 +182,96 @@ impl Plan {
     pub fn validate(&self, source_size: u64) -> Result<u64, SalvageError> {
         self.resolve(source_size, None)
             .map(|resolved| resolved.length)
+    }
+
+    /// The plan's canonical encoding, version 1, which [`Self::digest`]
+    /// hashes. It is fixed: a release that changed it would be a new
+    /// version with a new prefix, never a new meaning for these bytes.
+    ///
+    /// Integers are little-endian `u64`, and text is UTF-8. In order:
+    ///
+    /// 1. The 15 bytes `fs-salvage-plan`, then a version byte, 1.
+    /// 2. The step count, then each step as a tag byte and its fields:
+    ///    `1` extent (offset, length), `2` zeros (length), `3` bytes (length,
+    ///    then the bytes), `4` clusters (first, count).
+    /// 3. The final length, then the valid length, each as `0` when absent
+    ///    or `1` and the value.
+    /// 4. The name, created, modified and accessed metadata, each as `0` when
+    ///    absent or `1`, the byte length and the bytes.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        fn number(out: &mut Vec<u8>, value: u64) {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        fn optional(out: &mut Vec<u8>, value: Option<u64>) {
+            match value {
+                None => out.push(0),
+                Some(value) => {
+                    out.push(1);
+                    number(out, value);
+                }
+            }
+        }
+        fn text(out: &mut Vec<u8>, value: &Option<String>) {
+            match value {
+                None => out.push(0),
+                Some(value) => {
+                    out.push(1);
+                    number(out, value.len() as u64);
+                    out.extend_from_slice(value.as_bytes());
+                }
+            }
+        }
+        let mut out = Vec::new();
+        out.extend_from_slice(PLAN_ENCODING);
+        number(&mut out, self.steps.len() as u64);
+        for step in &self.steps {
+            match step {
+                PlanStep::Extent(extent) => {
+                    out.push(1);
+                    number(&mut out, extent.offset);
+                    number(&mut out, extent.length);
+                }
+                PlanStep::Zeros(length) => {
+                    out.push(2);
+                    number(&mut out, *length);
+                }
+                PlanStep::Bytes(bytes) => {
+                    out.push(3);
+                    number(&mut out, bytes.len() as u64);
+                    out.extend_from_slice(bytes);
+                }
+                PlanStep::Clusters { first, count } => {
+                    out.push(4);
+                    number(&mut out, *first);
+                    number(&mut out, *count);
+                }
+            }
+        }
+        optional(&mut out, self.length);
+        optional(&mut out, self.valid_length);
+        let metadata = &self.metadata;
+        for value in [
+            &metadata.name,
+            &metadata.created,
+            &metadata.modified,
+            &metadata.accessed,
+        ] {
+            text(&mut out, value);
+        }
+        out
+    }
+
+    /// A stable identity for the plan: the SHA-256 of its
+    /// [canonical encoding](Self::canonical_bytes), as 64 lowercase hex
+    /// digits. It is the same on every platform and in every release, and
+    /// changes with any step, length or metadata, so a consumer can tell when
+    /// a file must be materialized again. Two plans with the same digest give
+    /// the same bytes from the same source.
+    pub fn digest(&self) -> String {
+        Sha256::digest(self.canonical_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     pub(crate) fn has_clusters(&self) -> bool {
