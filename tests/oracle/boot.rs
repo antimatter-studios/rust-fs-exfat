@@ -12,6 +12,34 @@ use fs_exfat::{boot::BootRegions, device::Reader};
 use std::path::PathBuf;
 use support::Bytes;
 
+/// Volumes that newfs_exfat formatted and the macOS driver wrote break none
+/// of the rules in docs/spec-rules.md: an independent writer's structures
+/// agree with how this crate reads the specification.
+#[test]
+fn macos_formatted_and_written_volumes_break_no_specification_rule() {
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR")
+            .expect("run chore test:oracle on macOS to create independent reference images"),
+    );
+    for sector in [512, 4096] {
+        let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
+        let report = fs_exfat::check::spec_deviations(Bytes(image));
+        // macOS 26 writers leave PercentInUse stale after writing files (spec
+        // 3.1.18 asks for an update or FFh). That is a Warning the runner shows
+        // and this test records; every other rule must hold.
+        let unexpected: Vec<_> = report
+            .found
+            .iter()
+            .filter(|d| {
+                !(d.rule == fs_exfat::check::Rule::PercentInUse
+                    && d.severity == fs_exfat::salvage::Severity::Warning)
+            })
+            .collect();
+        assert!(unexpected.is_empty(), "{sector}: {unexpected:?}");
+        assert!(report.complete, "{sector}: {:?}", report.skipped);
+    }
+}
+
 #[test]
 fn macos_formatter_and_checker_agree_with_both_boot_regions() {
     let directory = PathBuf::from(

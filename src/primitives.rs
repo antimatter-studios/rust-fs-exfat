@@ -22,6 +22,10 @@
 //! [`uninterpreted_entries`] walks directory bytes for the entries this driver
 //! does not interpret, vendor entries and unknown types, with each one's InUse
 //! bit and the validity of the entry set it lies in.
+//! [`Rule`] is the table of specification rules in `docs/spec-rules.md`;
+//! [`boot_region_deviations`], [`fat_head_deviations`] and [`DirectoryRules`]
+//! report each field that breaks one as a [`Deviation`] with its byte offset,
+//! section and severity, without rejecting anything.
 //!
 //! Chain, island and allocation-class names describe general concepts. FAT and
 //! cluster-heap geometry retain their exFAT-defined names. These helpers are not
@@ -60,6 +64,16 @@ mod streaming;
 mod stale;
 
 pub use stale::{stale_chains, ClusterRecord, StaleChainWalk, StaleEnd, StaleSummary};
+
+#[path = "primitive_deviations.rs"]
+mod deviations;
+
+pub use deviations::{
+    backup_boot_deviations, bitmap_reserved_byte, boot_region_deviations, fat_head_deviations,
+    invalid_name_character, percent_in_use_deviation, system_allocation_deviations,
+    timestamp_valid, Deviation, DeviationReport, DirectoryOutcome, DirectoryRules, EntryAllocation,
+    RootStreams, Rule, VolumeRules, MAX_LISTED_PER_RULE,
+};
 
 #[path = "primitive_uninterpreted.rs"]
 mod uninterpreted;

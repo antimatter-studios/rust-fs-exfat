@@ -218,3 +218,55 @@ fn fsck_counts_uninterpreted_entries_apart_from_its_verdict() {
         assert_eq!(counts[kind], 0, "{kind}");
     }
 }
+
+#[test]
+fn fsck_lists_spec_deviations_apart_from_its_verdict() {
+    // The fixture's ClusterCount (100) is less than the 4064 clusters its
+    // VolumeLength holds (specification section 3.1.9), in both boot sectors,
+    // and its PercentInUse is 0 with 8 of 100 clusters allocated (3.1.18).
+    let fixture = interface_support::Temp::new();
+    let output = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
+        .arg("fsck")
+        .arg(&fixture.image)
+        .arg("-n")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["healthy"], true);
+    let deviations = &report["deviations"];
+    let found: Vec<_> = deviations["found"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|deviation| {
+            (
+                deviation["rule"].as_str().unwrap(),
+                deviation["section"].as_str().unwrap(),
+                deviation["severity"].as_str().unwrap(),
+                deviation["offset"].as_u64().unwrap(),
+                deviation["length"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("cluster-count", "3.1.9", "warning", 92, 4),
+            ("cluster-count", "3.1.9", "warning", 6236, 4),
+            ("percent-in-use", "3.1.18", "warning", 112, 1),
+        ]
+    );
+    assert!(deviations["found"][0]["detail"]
+        .as_str()
+        .unwrap()
+        .contains("4064"));
+    assert_eq!(deviations["omitted"], serde_json::json!({}));
+    assert_eq!(deviations["complete"], true);
+    assert_eq!(deviations["skipped"], serde_json::json!([]));
+    assert_eq!(deviations["skipped_omitted"], 0);
+}

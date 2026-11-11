@@ -416,15 +416,21 @@ pub(super) fn check_reader<Device: BlockRead>(
         names.finish(&mut budget)?;
     }
     let allocated_clusters = primitives::bitmap_count(&bitmap, boot.cluster_count);
+    let referenced_clusters = ownership.count;
+    // The audit's buffers go before the deviation scan takes its own.
+    drop((bitmap, ownership, pending, upcase));
     Ok(CheckReport {
         files,
         directories,
         allocated_clusters,
-        referenced_clusters: ownership.count,
-        unreferenced_clusters: allocated_clusters - ownership.count,
+        referenced_clusters,
+        unreferenced_clusters: allocated_clusters - referenced_clusters,
         dirty: state.dirty,
         media_failure: state.media_failure,
         boot_differences: regions.differences,
         uninterpreted,
+        // Scanned only once the audit has accepted the volume, so deviations
+        // can never turn a verdict into an error or the reverse.
+        deviations: super::deviations::scan(reader, max_memory_bytes),
     })
 }
