@@ -311,7 +311,78 @@ fn fat_and_bitmap_cases() -> Vec<Case> {
         case(Rule::UpcaseCoverage, ROOT + 56, Rejects, |b| {
             support::put64(b, ROOT + 56, 0)
         }),
+        // The compressed table's last word starts a run with no count.
+        case(Rule::UpcaseRun, UPCASE + 56, Rejects, |b| {
+            let mut words = vec![0xFFFF, 97];
+            words.extend(65..=90);
+            words.push(0xFFFF);
+            upcase(b, &words);
+        }),
+        // Its last run counts one character past FFFFh.
+        case(Rule::UpcaseRun, UPCASE + 56, Rejects, |b| {
+            let mut words = vec![0xFFFF, 97];
+            words.extend(65..=90);
+            words.extend([0xFFFF, 65414]);
+            upcase(b, &words);
+        }),
     ]
+}
+
+/// The image's own compressed table up to 'z', 28 words.
+fn upcase_start() -> Vec<u16> {
+    let mut words = vec![0xFFFF, 97];
+    words.extend(65..=90);
+    words
+}
+
+#[test]
+fn compressed_upcase_deviations_point_at_their_words() {
+    // A run of one for FFFFh, the last character, breaks no rule.
+    let mut bytes = image();
+    upcase(
+        &mut bytes,
+        &[upcase_start(), vec![0xFFFF, 65412, 0xFFFF, 1]].concat(),
+    );
+    assert_eq!(places(&deviations(&bytes)), places(&deviations(&image())));
+    assert!(check_device(Bytes(bytes)).is_ok());
+
+    // A word after the mapping of FFFFh is reported where it lies.
+    let mut bytes = image();
+    upcase(
+        &mut bytes,
+        &[upcase_start(), vec![0xFFFF, 65413, 0x41]].concat(),
+    );
+    let report = deviations(&bytes);
+    let found: Vec<_> = report.of(Rule::UpcaseCoverage).collect();
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].offset, found[0].length), (UPCASE as u64 + 60, 2));
+
+    // A run of no characters is one deviation, at its FFFFh and count; the
+    // table's coverage past it is unknown, so it is not reported as well.
+    let mut bytes = image();
+    upcase(
+        &mut bytes,
+        &[upcase_start(), vec![0xFFFF, 0, 0xFFFF, 65413]].concat(),
+    );
+    let report = deviations(&bytes);
+    let run: Vec<_> = report.of(Rule::UpcaseRun).collect();
+    assert_eq!(run.len(), 1);
+    assert_eq!((run[0].offset, run[0].length), (UPCASE as u64 + 56, 4));
+    assert_eq!(report.count(Rule::UpcaseCoverage), 0);
+    // The 123 mappings before it follow Table 24; the rest are unknown.
+    assert_eq!(report.count(Rule::UpcaseMandatory), 0);
+    assert!(check_device(Bytes(bytes)).is_err());
+
+    // 'a' up-cases to 'B': the deviation spans the 30 words that encode the
+    // first 128 mappings, not 256 bytes.
+    let mut bytes = image();
+    let mut words = vec![0xFFFF, 97, 66];
+    words.extend(66..=90);
+    words.extend([0xFFFF, 65413]);
+    upcase(&mut bytes, &words);
+    let report = deviations(&bytes);
+    let found: Vec<_> = report.of(Rule::UpcaseMandatory).collect();
+    assert_eq!((found[0].offset, found[0].length), (UPCASE as u64, 60));
 }
 
 fn root_cases() -> Vec<Case> {

@@ -23,6 +23,9 @@ mod entry_sets;
 #[path = "primitive_cases/metadata.rs"]
 mod metadata;
 
+#[path = "primitive_cases/upcase.rs"]
+mod upcase;
+
 #[path = "primitive_cases/chains.rs"]
 mod chains;
 

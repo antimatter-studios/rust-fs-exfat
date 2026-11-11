@@ -168,10 +168,16 @@ pub fn upcase_table(data: &[u8]) -> bool {
         panic!("a table with the wrong checksum was accepted");
     });
     let Ok(table) = UpcaseTable::parse(data, checksum32(data)) else {
+        assert!(
+            !primitive.usable(),
+            "usable() accepted what the strict table refused"
+        );
         return false;
     };
+    assert!(primitive.usable());
     assert!(primitive.length_ok && primitive.complete && primitive.ascii_ok);
     assert_eq!(primitive.issue, None);
+    assert!(primitive.mandatory_bytes > 0 && primitive.mandatory_bytes <= data.len());
     assert_eq!(table.map(u16::MAX), primitive.mappings[65535]);
     for unit in 0u16..128 {
         let expected = if (97..=122).contains(&unit) {

@@ -55,7 +55,9 @@ non-zero, which the specification allows, with the chains they still link.
 directory entries the driver does not interpret, Vendor Extension and Vendor
 Allocation entries and unknown primary and secondary types, which the
 specification lets a reader skip, with each one's offset, type, InUse bit and
-whether it lies in a valid entry set.
+whether it lies in a valid entry set. `ExfatSalvage::upcase_table` reads the
+volume's Up-case Table, compressed or not, so salvage compares names by the
+volume's own case mappings.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).

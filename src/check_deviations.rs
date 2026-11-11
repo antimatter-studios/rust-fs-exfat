@@ -10,10 +10,10 @@ use super::MAX_AUDIT_MEMORY_BYTES;
 use crate::device::Reader;
 use crate::primitives::{
     backup_boot_deviations, bitmap_count, bitmap_reserved_byte, boot_region_deviations,
-    checked_bitmap_bit, claim_bitmap_cluster, fat_head_deviations, percent_in_use_deviation,
-    system_allocation_deviations, BootSectorHeader, DeviationReport, DirectoryRules,
-    EntryAllocation, FatValue, FatWindow, RawUpcaseTable, RootStreams, Rule, VolumeRules,
-    ENTRY_SIZE,
+    checked_bitmap_bit, claim_bitmap_cluster, fat_head_deviations, mandatory_upcase,
+    percent_in_use_deviation, system_allocation_deviations, BootSectorHeader, DeviationReport,
+    DirectoryRules, EntryAllocation, FatValue, FatWindow, RawUpcaseTable, RootStreams, Rule,
+    UpcaseIssue, VolumeRules, ENTRY_SIZE,
 };
 use fs_core::BlockRead;
 
@@ -513,18 +513,57 @@ impl<Device: BlockRead> Scan<'_, Device> {
                     format!("TableChecksum {checksum:08X}h, computed {computed:08X}h")
                 });
         }
-        if table.issue.is_some() || !table.complete {
-            let mapped = table.mappings.len();
-            let first = length.min(self.geometry.cluster_size);
-            self.out.report(Rule::UpcaseCoverage, at, first, || {
-                format!("the {length}-byte table maps {mapped} characters, not 65536")
-            });
-        }
-        if !table.ascii_ok {
-            self.out
-                .report(Rule::UpcaseMandatory, at, length.min(256), || {
-                    "a mapping of the first 128 characters differs from Table 24".into()
+        let mapped = table.mappings.len();
+        let cluster_size = self.geometry.cluster_size;
+        match (table.issue, table.issue_at) {
+            (Some(UpcaseIssue::ExtraMappings), Some(position)) => {
+                let extra = bytes.len() - position;
+                let offset = self.stream_offset(&clusters, position as u64);
+                self.out.report(Rule::UpcaseCoverage, offset, 2, || {
+                    format!("{extra} bytes follow the mapping of FFFFh")
                 });
+            }
+            // A compressed table's identity run that cannot be expanded
+            // (section 7.2.5): its FFFFh, with the count after it when the
+            // stream holds one in the same cluster. Coverage past it is
+            // unknown, so it is not reported as well.
+            (Some(issue), Some(position)) => {
+                let offset = self.stream_offset(&clusters, position as u64);
+                let (span, detail) = if issue == UpcaseIssue::TruncatedRun {
+                    (2, "ends the table with no count of identity mappings")
+                } else {
+                    let room = cluster_size - position as u64 % cluster_size;
+                    (4.min(room), "has a count of 0, or one that runs past FFFFh")
+                };
+                self.out.report(Rule::UpcaseRun, offset, span, || {
+                    format!("the identity run at character {mapped:04X}h {detail}")
+                });
+            }
+            _ if !table.complete => {
+                let first = length.min(cluster_size);
+                self.out.report(Rule::UpcaseCoverage, at, first, || {
+                    format!("the {length}-byte table maps {mapped} characters, not 65536")
+                });
+            }
+            _ => {}
+        }
+        // Table 24 is broken by a decoded mapping of the first 128 that
+        // differs, or by a table that ends before them. A faulty run before
+        // them leaves the rest unknown, not wrong.
+        let stopped = matches!(
+            table.issue,
+            Some(UpcaseIssue::TruncatedRun | UpcaseIssue::RunOutsideRange)
+        );
+        let differs = (0u16..128)
+            .zip(&table.mappings)
+            .any(|(unit, mapped)| *mapped != mandatory_upcase(unit));
+        if differs || (!table.ascii_ok && !stopped) {
+            // The words that encode the first 128 mappings, fewer than 256
+            // bytes when identity runs cover some of them.
+            let span = (table.mandatory_bytes as u64).min(cluster_size);
+            self.out.report(Rule::UpcaseMandatory, at, span, || {
+                "a mapping of the first 128 characters differs from Table 24".into()
+            });
         }
         if table.checksum_ok && table.complete && table.issue.is_none() {
             Some(table.mappings)
