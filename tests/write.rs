@@ -317,3 +317,62 @@ fn a_mount_dropped_by_a_panic_is_left_dirty() {
     assert!(result.is_err());
     assert_eq!(flags(&held.snapshot(), geometry.sector, false), 2);
 }
+
+/// A 512-byte-sector volume on a raw device that accepts only 4096-byte
+/// transfers mounts for writing (#152): every write is widened to the
+/// device's block, with the sectors around it read first, and the tree it
+/// writes reads back. Clusters of one sector put metadata, directories and
+/// file data in the same device block.
+#[test]
+fn a_512_byte_sector_volume_mounts_for_writing_on_a_4096_byte_device() {
+    for cluster_shift in [0, 3] {
+        let layout = Layout {
+            cluster_shift,
+            ..Layout::default()
+        };
+        let (image, _) = format(&layout);
+        let device = Memory::new(image).with_block(4096);
+        let mut volume = WriteVolume::mount(device.clone()).unwrap();
+        let pattern = |seed: u8, length: usize| -> Vec<u8> {
+            (0..length)
+                .map(|index| (index as u8).wrapping_mul(31) ^ seed)
+                .collect()
+        };
+        volume.mkdir("/dir").unwrap();
+        volume.mkdir("/dir/deeper").unwrap();
+        volume.write_file("/one.bin", &pattern(1, 1)).unwrap();
+        volume.write_file("/dir/odd.bin", &pattern(2, 513)).unwrap();
+        volume
+            .write_file("/dir/deeper/large.bin", &pattern(3, 70_000))
+            .unwrap();
+        volume.create("/dir/patched.bin").unwrap();
+        volume
+            .pwrite("/dir/patched.bin", 777, &pattern(4, 5000))
+            .unwrap();
+        volume.truncate("/dir/deeper/large.bin", 9_999).unwrap();
+        volume.write_file("/gone.bin", &pattern(5, 3000)).unwrap();
+        volume.unlink("/gone.bin").unwrap();
+        volume.rename("/one.bin", "/dir/moved.bin").unwrap();
+        volume.set_label("BLOCKS").unwrap();
+        volume.unmount().unwrap();
+
+        let reader = fs_exfat::volume::Volume::open(Memory::new(device.snapshot())).unwrap();
+        assert_eq!(reader.boot().volume_flags & 2, 0, "unmounted clean");
+        assert_eq!(reader.metadata().label.as_deref(), Some("BLOCKS"));
+        let read = |path: &str| {
+            let entry = reader.lookup(path).unwrap().entry().unwrap().clone();
+            let file = reader.open_file(&entry).unwrap();
+            let mut bytes = vec![0; file.len() as usize];
+            file.read_at(0, &mut bytes).unwrap();
+            bytes
+        };
+        let mut patched = vec![0; 777];
+        patched.extend(pattern(4, 5000));
+        assert_eq!(read("/dir/moved.bin"), pattern(1, 1));
+        assert_eq!(read("/dir/odd.bin"), pattern(2, 513));
+        assert_eq!(read("/dir/deeper/large.bin"), pattern(3, 9_999));
+        assert_eq!(read("/dir/patched.bin"), patched);
+        assert!(matches!(reader.lookup("/gone.bin"), Err(Error::NotFound)));
+        assert!(matches!(reader.lookup("/one.bin"), Err(Error::NotFound)));
+    }
+}

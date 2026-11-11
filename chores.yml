@@ -180,9 +180,12 @@ tasks:
     # notices the scale audits may print adds a line and about 165 bytes, so
     # 527 / 31,400; plus 24 lines / 1,263 bytes for the formatter's tests
     # (#132): tests/mkfs.rs and four tests in tests/capi.rs and tests/cli.rs.
+    # Directory times (#151) and device blocks (#152) add three tests:
+    # measured 550 / 32,436 with no cold build and no notice, so 552 / 32,664
+    # with both notices (114 bytes each here).
     # CI runs `chore build` first, so the log holds no cold build.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 551 32663 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test test_contract --test mkfs && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 552 32700 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test test_contract --test mkfs && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:images:
     desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'
