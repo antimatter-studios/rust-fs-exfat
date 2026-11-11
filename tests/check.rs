@@ -51,6 +51,21 @@ fn lost_allocations_and_dirty_flags_are_reported_without_writes() {
 }
 
 #[test]
+fn allocated_clusters_the_fat_marks_bad_are_not_unreferenced() {
+    // Section 7.1.5.1: a set bitmap bit may mean the active FAT describes the
+    // cluster as bad (FFFFFFF7h, section 4.1.3) rather than that an
+    // allocation consumes it. macOS fsck_exfat accepts such a volume.
+    let mut bytes = interface_support::image();
+    bytes[33 * 512 + 1] |= 1;
+    bytes[24 * 512 + 10 * 4..24 * 512 + 11 * 4].copy_from_slice(&[0xf7, 0xff, 0xff, 0xff]);
+    let volume = Volume::open(support::Bytes(bytes)).unwrap();
+    let report = check(&volume).unwrap();
+    assert_eq!(report.unreferenced_clusters, 0);
+    assert_eq!(report.bad_clusters, 1);
+    assert!(report.healthy());
+}
+
+#[test]
 fn media_failure_alone_is_not_reported_clean() {
     let mut bytes = interface_support::image();
     support::put16(&mut bytes, 106, 4);
