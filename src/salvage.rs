@@ -27,9 +27,10 @@ pub mod adapter;
 #[path = "salvage_exfat.rs"]
 mod exfat;
 
+pub use crate::primitives::StaleEnd;
 pub use adapter::{
     Candidate, CandidateKind, CandidateState, Capabilities, Damage, DamageKind, DamageReport,
     Extent, ExtentWalk, Feature, Integrity, MaterializeReport, MaterializedRange, Parent, Plan,
     PlanStep, SalvageAdapter, SalvageError, ScanReport, Severity, Sink, Tree, TreeNode, WalkEnd,
 };
-pub use exfat::{EntrySetDetail, ExfatSalvage};
+pub use exfat::{EntrySetDetail, ExfatSalvage, StaleChain, StaleChainReport, StaleEntry};

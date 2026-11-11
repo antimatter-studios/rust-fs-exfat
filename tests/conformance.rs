@@ -4,7 +4,7 @@
 
 use fs_core::BlockRead;
 use fs_exfat::conformance::{self, Damaged, Driver, Evidence};
-use fs_exfat::salvage::{DamageKind, ExfatSalvage, Extent};
+use fs_exfat::salvage::{DamageKind, ExfatSalvage, Extent, StaleEnd};
 use fs_exfat::volume::Volume;
 
 mod support;
@@ -24,7 +24,7 @@ fn cluster(index: u32) -> usize {
 
 /// A strict-valid volume: a contiguous file with a valid-data tail, an empty
 /// file and a directory in the root; in that directory a small file, a
-/// FAT-chained file and a deleted file.
+/// FAT-chained file and a deleted FAT-chained file whose entry stayed.
 fn healthy() -> Vec<u8> {
     let mut bytes = metadata_volume();
     let mut example = file_set("Example.txt", 0x20, 5, 1030, true);
@@ -39,7 +39,7 @@ fn healthy() -> Vec<u8> {
     bytes[ROOT + 96..ROOT + 96 + root.len()].copy_from_slice(&root);
 
     // Deletion clears the in-use bits and keeps the live checksum.
-    let mut old = file_set("Old.txt", 0x20, 12, 100, true);
+    let mut old = file_set("Old.txt", 0x20, 12, 100, false);
     for slot in (0..old.len()).step_by(32) {
         old[slot] &= 0x7f;
     }
@@ -51,11 +51,14 @@ fn healthy() -> Vec<u8> {
     .concat();
     bytes[cluster(8)..cluster(8) + sub.len()].copy_from_slice(&sub);
 
-    // Clusters 2 to 11 are in use; 12 held the deleted file.
+    // Clusters 2 to 11 are in use; 12 held the deleted file. Its FAT entry
+    // stays: only the bitmap records allocation (specification section 7.1),
+    // so a free cluster's non-zero entry is legal, not damage.
     bytes[BITMAP] = 0xff;
     bytes[BITMAP + 1] = 0x03;
     put32(&mut bytes, FAT + 10 * 4, 11);
     put32(&mut bytes, FAT + 11 * 4, 0xffff_ffff);
+    put32(&mut bytes, FAT + 12 * 4, 0xffff_ffff);
     for (index, value) in bytes[cluster(5)..cluster(8)].iter_mut().enumerate() {
         *value = b'a' + (index % 26) as u8;
     }
@@ -146,4 +149,17 @@ impl Driver for Exfat {
 #[test]
 fn the_exfat_driver_conforms() {
     conformance::run(&Exfat).assert_conforms();
+}
+
+#[test]
+fn the_healthy_image_keeps_a_stale_fat_entry() {
+    let source = support::Bytes(healthy());
+    let mut chains = Vec::new();
+    let report = ExfatSalvage::probe(&source)
+        .stale_chains(&source, &mut chains)
+        .unwrap();
+    assert_eq!(report.unclassified, 0);
+    assert_eq!(chains.len(), 1);
+    assert_eq!(chains[0].head(), Some(12));
+    assert_eq!(chains[0].end, StaleEnd::End);
 }

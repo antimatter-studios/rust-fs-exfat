@@ -269,3 +269,49 @@ fn chain_and_boot_value_types_keep_defaults_cloning_and_camel_case_fields() {
         ("eof", "joins-another")
     );
 }
+
+#[test]
+fn stale_chains_ask_only_for_recorded_clusters_and_count_the_rest() {
+    use fs_exfat::primitives::{
+        stale_chains, ClusterRecord, StaleChainWalk, StaleEnd, StaleSummary,
+    };
+    use std::ops::ControlFlow;
+    // Ten heap clusters, 2 to 11, of which only 2 to 7 have records.
+    let record = |cluster| match cluster {
+        2 => ClusterRecord::Allocated,
+        3 => ClusterRecord::Free(4),
+        4 => ClusterRecord::Free(9),
+        5 => ClusterRecord::Free(0),
+        6 => ClusterRecord::Unknown,
+        7 => ClusterRecord::Free(6),
+        _ => panic!("cluster {cluster} has no record"),
+    };
+    let mut chains = Vec::new();
+    let summary = stale_chains(10, 6, record, |walk| {
+        chains.push(walk);
+        ControlFlow::Continue(())
+    });
+    assert_eq!(
+        chains,
+        [
+            StaleChainWalk {
+                links: vec![(3, 4), (4, 9)],
+                end: StaleEnd::Unknown(9),
+            },
+            StaleChainWalk {
+                links: vec![(7, 6)],
+                end: StaleEnd::Unknown(6),
+            },
+        ]
+    );
+    let expected = StaleSummary {
+        chains: 2,
+        entries: 3,
+        unknown: 5,
+        stopped: false,
+    };
+    assert_eq!(summary, expected);
+    // A record count past the heap is clamped to it.
+    let summary = stale_chains(1, u32::MAX, |_| ClusterRecord::Free(0), |_| unreachable!());
+    assert_eq!(summary, StaleSummary::default());
+}

@@ -18,6 +18,9 @@ use std::ops::ControlFlow;
 
 mod support;
 
+#[path = "salvage_cases/stale_chains.rs"]
+mod stale_chains;
+
 use support::Bytes;
 
 const FEATURES: [Feature; 8] = [

@@ -16,6 +16,9 @@
 //! [`chain_head`]; [`chain_islands`] and [`compute_stats`] expose topology and
 //! allocation without requiring a device or a reporting layer. [`boot_check`]
 //! compares already-read boot copies using the checksum primitives above.
+//! [`stale_chains`] groups the non-zero FAT entries of free clusters into the
+//! chains they link and classifies each chain's end, over caller-supplied
+//! [`ClusterRecord`] lookups rather than whole FAT or bitmap slices.
 //!
 //! Chain, island and allocation-class names describe general concepts. FAT and
 //! cluster-heap geometry retain their exFAT-defined names. These helpers are not
@@ -49,6 +52,11 @@ mod structures;
 
 #[path = "primitive_streaming.rs"]
 mod streaming;
+
+#[path = "primitive_stale.rs"]
+mod stale;
+
+pub use stale::{stale_chains, ClusterRecord, StaleChainWalk, StaleEnd, StaleSummary};
 
 pub use streaming::{
     bitmap_contains_all, bitmap_count, claim_bitmap_cluster, directory_record, walk_allocation,
