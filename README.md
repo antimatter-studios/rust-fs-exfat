@@ -47,11 +47,13 @@ directory workspace budgeting and the complete-report requirement stay in
 [driver convention](docs/convention.md) and implements it for exFAT on the
 primitives alone. It needs no strict mount, takes sources only as `BlockRead`,
 and returns candidates, extent walks, parent claims and damage as serializable
-evidence rather than trusted files. Plans materialize into a caller's
-`io::Write`, never into the source. A plan names source extents, zeros, literal
-bytes and cluster runs, which map through the adapter's `cluster_layout`, and
-may declare a final length, a valid length past which output is zeros, and the
-file's name and times. As an exFAT extension outside the common
+evidence rather than trusted files. A file entry set that runs past its
+cluster into a distant one, as in a directory that grew after other data was
+written, is read across the clusters the FAT links. Plans materialize into a
+caller's `io::Write`, never into the source. A plan names source extents, zeros,
+literal bytes and cluster runs, which map through the adapter's `cluster_layout`,
+and may declare a final length, a valid length past which output is zeros, and
+the file's name and times. As an exFAT extension outside the common
 trait, `ExfatSalvage::stale_chains` lists free clusters whose FAT entries are
 non-zero, which the specification allows, with the chains they still link.
 `ExfatSalvage::uninterpreted_entries`, another such extension, lists the

@@ -36,7 +36,7 @@ fn vendor_extension() -> [u8; ENTRY_SIZE] {
 
 /// A one-name-entry file set grown with Vendor Extension entries to
 /// `secondaries` secondary entries and resealed.
-fn vendor_set(secondaries: usize) -> Vec<u8> {
+pub(super) fn vendor_set(secondaries: usize) -> Vec<u8> {
     let mut set = file_set("vendor.bin", 0x20, 0, 0, false);
     while set.len() < (secondaries + 1) * ENTRY_SIZE {
         set.extend(vendor_extension());
