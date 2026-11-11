@@ -133,6 +133,25 @@ fn macos_agrees_on_high_cluster_cross_links_and_unreferenced_allocations() {
 }
 
 #[test]
+fn macos_agrees_that_an_allocated_cluster_the_fat_marks_bad_is_not_lost() {
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    let image = Image::sparse(65536, 0);
+    let cluster = image.allocated as u32 + 7;
+    image
+        .file
+        .write_all_at(
+            &0xffff_fff7u32.to_le_bytes(),
+            24 * 512 + u64::from(cluster) * 4,
+        )
+        .unwrap();
+    image.allocate(cluster);
+    native_check(&image, true);
+    let report = clean(image.check());
+    assert_eq!(report["bad_clusters"], 1);
+    assert_eq!(report["unreferenced_clusters"], 0);
+}
+
+#[test]
 fn macos_agrees_on_a_directory_with_more_than_a_million_entries() {
     std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
     let image = Image::sparse(OLD_CAP + 65536, OLD_CAP + 1);

@@ -194,7 +194,10 @@ These are states or strict-layer checks, not rules the bytes break:
   run.
 - Lost clusters, allocated in the bitmap with no allocation consuming them,
   are the existing `unreferenced_clusters` inconsistency. Section 7.1.5.1
-  does not require an owner for a set bit.
+  does not require an owner for a set bit. Since #72 an allocated cluster
+  that no allocation consumes and the active FAT marks bad (FFFFFFF7h,
+  section 4.1.3) is counted as `bad_clusters` instead: section 7.1.5.1 names
+  that as a reason for a set bit, and macOS `fsck_exfat -n` accepts it.
 - The strict layer also rejects, with no rule of the specification behind it:
   names and labels that are not well-formed UTF-16; two allocations sharing a
   cluster; a FAT chain whose length is not DataLength / cluster size, rounded
@@ -250,5 +253,6 @@ bytes. Only images made for the run were attached.
   refused it, while `fsck_exfat -n` exited 0; since #75 both accept it. FFFFh's own mapping written as a run of
   one passed all three.
 - Outside the deviation report, `check` exits 4 where macOS exits 0 on a
-  Vendor Allocation that owns an allocated cluster (#71) and on an allocated
-  cluster the FAT marks bad (#72): both are counted as unreferenced.
+  Vendor Allocation that owns an allocated cluster (#71): it is counted as
+  unreferenced. An allocated cluster the FAT marks bad (#72) is counted as
+  `bad_clusters` and no longer makes `check` exit 4.

@@ -417,6 +417,7 @@ pub(super) fn check_reader<Device: BlockRead>(
     }
     let allocated_clusters = primitives::bitmap_count(&bitmap, boot.cluster_count);
     let referenced_clusters = ownership.count;
+    let bad_clusters = unowned_bad_clusters(&mut fat, &bitmap, &ownership.bytes)?;
     // The audit's buffers go before the deviation scan takes its own.
     drop((bitmap, ownership, pending, upcase));
     Ok(CheckReport {
@@ -424,7 +425,8 @@ pub(super) fn check_reader<Device: BlockRead>(
         directories,
         allocated_clusters,
         referenced_clusters,
-        unreferenced_clusters: allocated_clusters - referenced_clusters,
+        bad_clusters,
+        unreferenced_clusters: allocated_clusters - referenced_clusters - bad_clusters,
         dirty: state.dirty,
         media_failure: state.media_failure,
         boot_differences: regions.differences,
@@ -433,4 +435,42 @@ pub(super) fn check_reader<Device: BlockRead>(
         // can never turn a verdict into an error or the reverse.
         deviations: super::deviations::scan(reader, max_memory_bytes),
     })
+}
+
+/// Counts clusters the bitmap marks allocated, no allocation consumes, and the
+/// active FAT marks bad.
+///
+/// exFAT specification section 4.1 (FAT region) and 4.1.3 (FatEntry[2] ..
+/// FatEntry[ClusterCount+1]): an entry is a next cluster (2 ..
+/// ClusterCount + 1), FFFFFFF7h for a bad cluster, or FFFFFFFFh for the end
+/// of a chain. Section 7.1.5.1: a set bitmap bit means the cluster is not
+/// available because "a cluster allocation may already consume the
+/// corresponding cluster or the active FAT may describe the corresponding
+/// cluster as bad". Such a cluster is therefore not lost.
+fn unowned_bad_clusters(
+    fat: &mut Fat<'_, impl BlockRead>,
+    bitmap: &[u8],
+    owned: &[u8],
+) -> Result<u64> {
+    let mut bad = 0u64;
+    for (index, allocated) in bitmap.iter().enumerate() {
+        let mut unowned = allocated & !owned.get(index).copied().unwrap_or(0);
+        while unowned != 0 {
+            let bit = unowned.trailing_zeros();
+            unowned &= unowned - 1;
+            let Some(cluster) = u32::try_from(index * 8)
+                .ok()
+                .and_then(|offset| offset.checked_add(bit + primitives::FIRST_CLUSTER))
+            else {
+                break;
+            };
+            if cluster - primitives::FIRST_CLUSTER >= fat.boot.cluster_count {
+                break;
+            }
+            if matches!(fat.entry(cluster)?.kind, FatValue::Bad) {
+                bad += 1;
+            }
+        }
+    }
+    Ok(bad)
 }

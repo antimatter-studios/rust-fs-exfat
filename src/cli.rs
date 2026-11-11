@@ -366,6 +366,7 @@ fn fsck_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
             "referenced_clusters",
             Json::from(report.referenced_clusters),
         ),
+        ("bad_clusters", Json::from(report.bad_clusters)),
         (
             "unreferenced_clusters",
             Json::from(report.unreferenced_clusters),

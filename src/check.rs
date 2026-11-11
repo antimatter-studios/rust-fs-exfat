@@ -20,6 +20,10 @@ pub struct CheckReport {
     pub directories: u64,
     pub allocated_clusters: u64,
     pub referenced_clusters: u64,
+    /// Allocated clusters no allocation consumes that the active FAT marks
+    /// bad (FFFFFFF7h). Section 7.1.5.1 allows them, so they are neither
+    /// unreferenced nor part of [`Self::healthy`].
+    pub bad_clusters: u64,
     pub unreferenced_clusters: u64,
     pub dirty: bool,
     pub media_failure: bool,
