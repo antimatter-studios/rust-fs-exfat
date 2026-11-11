@@ -294,10 +294,11 @@ for sector in 512 4096; do
     [ -f "$image" ] && [ ! -L "$image" ]
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"
     accept_receipt
-    /sbin/fsck_exfat -n "$device"
+    /sbin/fsck_exfat -n "$device" | tee "$directory/written-fsck-$sector.txt"
     /usr/bin/hdiutil detach "$device"
     device=''
     attached=0
+    grep -Fqx "** Volume name is $(cat "$directory/written-label-$sector.txt")." "$directory/written-fsck-$sector.txt"
     mkdir "$directory/written-mount-$sector"
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/written-mount-$sector" -plist "$image" > "$directory/attach.plist"
     accept_receipt
@@ -314,13 +315,15 @@ for current, directories, files in os.walk(root):
         if item.is_symlink():
             raise SystemExit('oracle: unexpected symlink on written image')
         path = unicodedata.normalize('NFC', str(item.relative_to(root)))
+        metadata = item.stat()
+        # ReadOnly, Hidden and a clear Archive bit, as the driver shows them.
+        flags = f'{metadata.st_flags & (0x2 | 0x8000 | 0x10000):x}'
         if item.is_dir():
-            records.append(f'd\t0\t-\t{path}\n')
+            records.append(f'd\t0\t-\t{flags}\t{path}\n')
         else:
-            metadata = item.stat()
             digest = hashlib.sha256(item.read_bytes()).hexdigest()
             times = f'{metadata.st_mtime_ns // 1000000}\t{metadata.st_atime_ns // 1000000}\t{round(metadata.st_birthtime * 1000)}'
-            records.append(f'f\t{metadata.st_size}\t{digest}\t{times}\t{path}\n')
+            records.append(f'f\t{metadata.st_size}\t{digest}\t{flags}\t{times}\t{path}\n')
 with open(sys.argv[2], 'w') as output:
     output.writelines(sorted(records))
 PY

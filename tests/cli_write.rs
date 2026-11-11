@@ -102,6 +102,48 @@ fn mkdir_and_write_change_the_image_and_leave_it_clean() {
     let removed = json(&run(&image, &["rmdir", "/a/b/c"], b""));
     assert_eq!(removed["removed"], "/a/b/c");
     json(&run(&image, &["write", "/kept.txt"], b"kept"));
+    json(&run(&image, &["mv", "/kept.txt", "/a/moved.txt"], b""));
+    assert_eq!(run(&image, &["cat", "/a/moved.txt"], b"").stdout, b"kept");
+    json(&run(
+        &image,
+        &[
+            "touch",
+            "--modified",
+            "1700000000120",
+            "--utc-offset",
+            "-300",
+            "/a/moved.txt",
+        ],
+        b"",
+    ));
+    let stat = json(&run(&image, &["stat", "/a/moved.txt"], b""));
+    assert_eq!(stat["modified"]["unix_milliseconds"], 1_700_000_000_120i64);
+    assert_eq!(stat["modified"]["utc_offset_minutes"], -300);
+    json(&run(&image, &["touch", "/a/new-empty"], b""));
+    assert_eq!(
+        json(&run(&image, &["stat", "/a/new-empty"], b""))["size"],
+        0
+    );
+    json(&run(
+        &image,
+        &["attributes", "--set", "hidden,read-only", "/a/moved.txt"],
+        b"",
+    ));
+    assert_eq!(
+        json(&run(&image, &["stat", "/a/moved.txt"], b""))["attributes"],
+        3
+    );
+    assert!(!run(
+        &image,
+        &["attributes", "--set", "bogus", "/a/moved.txt"],
+        b""
+    )
+    .status
+    .success());
+    assert_eq!(json(&run(&image, &["label", "CLI"], b""))["label"], "CLI");
+    assert!(!run(&image, &["label", "far too long a label"], b"")
+        .status
+        .success());
     let bytes = std::fs::read(&image).unwrap();
     assert_eq!(bytes[106] & 2, 0, "the volume is left clean");
     let check = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))

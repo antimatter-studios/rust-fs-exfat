@@ -66,6 +66,7 @@ def check(source):
         'EXFAT_ORACLE_DEVICE="$device" EXFAT_ORACLE_SECTOR="$sector" EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_device -- --nocapture',
         '/sbin/newfs_exfat -R -S "$sector" -b 4096 -v M1ORACLE "$device" | tee "$directory/format-$sector.txt"',
         '/sbin/fsck_exfat -n "$device"',
+        '/sbin/fsck_exfat -n "$device" | tee "$directory/written-fsck-$sector.txt"',
     }
     if lines.count(initialization) != 1 or lines.count('trap cleanup EXIT') != 1 or lines.count(image_binding) != 1:
         refuse("images must be bound to this run's fresh private temporary directory")

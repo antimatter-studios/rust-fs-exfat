@@ -319,3 +319,75 @@ fn truncate_unlink_and_rmdir_report_errno() {
         "every cluster made was freed"
     );
 }
+
+#[test]
+fn rename_utimens_attributes_and_label() {
+    let (image, _) = format(&Layout::default());
+    let scratch = Scratch::new(&image);
+    let path = CString::new(scratch.image.to_str().unwrap()).unwrap();
+    let from = CString::new("/a.txt").unwrap();
+    let to = CString::new("/dir/b.txt").unwrap();
+    let directory = CString::new("/dir").unwrap();
+    let label = CString::new("C LABEL").unwrap();
+    let long_label = CString::new("much too long").unwrap();
+    unsafe {
+        let handle = fs_exfat_mount_rw(path.as_ptr(), 0);
+        assert!(!handle.is_null(), "{}", last_error());
+        assert_eq!(fs_exfat_mkdir(handle, directory.as_ptr()), 0);
+        assert_eq!(
+            fs_exfat_write_file(handle, from.as_ptr(), b"abc".as_ptr(), 3),
+            3
+        );
+        assert_eq!(
+            fs_exfat_rename(handle, from.as_ptr(), to.as_ptr()),
+            0,
+            "{}",
+            last_error()
+        );
+        assert_eq!(fs_exfat_rename(handle, from.as_ptr(), to.as_ptr()), -1);
+        assert_eq!(fs_exfat_last_errno(), 2, "ENOENT");
+        assert_eq!(fs_exfat_rename(handle, to.as_ptr(), directory.as_ptr()), -1);
+        assert_eq!(fs_exfat_last_errno(), 21, "EISDIR");
+        assert_eq!(read_back(handle, "/dir/b.txt", 3), b"abc");
+        let modified = FsExfatTimestamp {
+            unix_milliseconds: 1_700_000_000_120,
+            utc_offset_minutes: 60,
+            offset_known: 1,
+            ..FsExfatTimestamp::default()
+        };
+        let created = FsExfatTimestamp {
+            unix_milliseconds: 1_600_000_000_000,
+            ..FsExfatTimestamp::default()
+        };
+        assert_eq!(
+            fs_exfat_utimens(handle, to.as_ptr(), &created, &modified, ptr::null()),
+            0,
+            "{}",
+            last_error()
+        );
+        let mut metadata = FsExfatStat::default();
+        assert_eq!(fs_exfat_stat(handle, to.as_ptr(), &mut metadata), 0);
+        assert_eq!(metadata.modified.unix_milliseconds, 1_700_000_000_120);
+        assert_eq!(metadata.modified.utc_offset_minutes, 60);
+        assert_eq!(metadata.created.unix_milliseconds, 1_600_000_000_000);
+        assert_eq!(metadata.created.utc_offset_minutes, 0);
+        assert_eq!(fs_exfat_set_attributes(handle, to.as_ptr(), 0x03), 0);
+        assert_eq!(fs_exfat_stat(handle, to.as_ptr(), &mut metadata), 0);
+        assert_eq!(metadata.attributes, 0x03);
+        assert_eq!(fs_exfat_set_attributes(handle, to.as_ptr(), 0x10), -1);
+        assert_eq!(fs_exfat_last_errno(), 22, "EINVAL");
+        assert_eq!(fs_exfat_set_volume_label(handle, label.as_ptr()), 0);
+        assert_eq!(fs_exfat_set_volume_label(handle, long_label.as_ptr()), -1);
+        let mut information = std::mem::MaybeUninit::uninit();
+        assert_eq!(
+            fs_exfat_get_volume_info(handle, information.as_mut_ptr()),
+            0
+        );
+        let information: FsExfatVolumeInfo = information.assume_init();
+        assert_eq!(
+            CStr::from_ptr(information.label.as_ptr()).to_str().unwrap(),
+            "C LABEL"
+        );
+        assert_eq!(fs_exfat_umount_checked(handle), 0, "{}", last_error());
+    }
+}

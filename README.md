@@ -9,8 +9,10 @@ C ABI and command-line tools are implemented, which completes
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
 Writing is being built ([#135](https://github.com/antimatter-studios/rust-fs-exfat/issues/135)):
 a volume can be mounted for writing, files and directories created, written,
-truncated and removed. Renaming and changing times, attributes or the label are
-not implemented yet, and there is no formatter or repair operation.
+truncated, removed and renamed, and times, attributes and the label set. There
+is no formatter ([#132](https://github.com/antimatter-studios/rust-fs-exfat/issues/132))
+or repair operation, and the Linux kernel and exfatprogs do not check the
+writer yet ([#133](https://github.com/antimatter-studios/rust-fs-exfat/issues/133)).
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
@@ -75,6 +77,21 @@ directory. On the macOS reference volumes, files macOS made and files this
 crate made are truncated both ways and removed, named through the volume's
 case mapping, and the result passes `fsck_exfat -n` and reads back through the
 read-only macOS driver as this crate records it.
+
+`rename` moves an entry within or across directories by writing the set under
+its new name, then removing the old one after a barrier, so a move that stops
+partway leaves two names for one stream rather than none. It replaces a file
+with a file and an empty directory with a directory as POSIX rename(2) does,
+refuses to move a directory below itself, and rewrites a change of case in
+place. `set_times` sets Create, LastModified and LastAccessed with their
+hundredths and UTC offsets, `set_attributes` sets ReadOnly, Hidden, System and
+Archive, and `set_label` writes the Volume Label entry, an empty label being
+one with no characters as the macOS formatter writes. On the macOS reference
+volumes, renames and moves between macOS's directories and this crate's,
+replacements, times, attributes on files and a directory, and a non-ASCII label
+pass `fsck_exfat -n`; the read-only macOS driver shows the same names, sizes,
+SHA-256s, times and flags (ReadOnly as UF_IMMUTABLE, Hidden as UF_HIDDEN, a
+file's clear Archive bit as SF_ARCHIVED), and `fsck_exfat` names the label.
 See [features](docs/features.md) and [provenance](PROVENANCE.md).
 Directory entry types, primary/stream/name fields, UTF-16 names, entry-set
 checksums and name hashes are decoded by `fs_exfat::primitives`. Its
@@ -159,6 +176,10 @@ target/release/rust-fs-exfat fs image.dmg write /backup/2026/notes.txt < notes.t
 target/release/rust-fs-exfat fs image.dmg truncate --size 0 /backup/2026/notes.txt
 target/release/rust-fs-exfat fs image.dmg rm /backup/2026/notes.txt
 target/release/rust-fs-exfat fs image.dmg rmdir /backup/2026
+target/release/rust-fs-exfat fs image.dmg mv /notes.txt /backup/notes.txt
+target/release/rust-fs-exfat fs image.dmg touch --modified 1700000000120 /backup/notes.txt
+target/release/rust-fs-exfat fs image.dmg attributes --set hidden /backup/notes.txt
+target/release/rust-fs-exfat fs image.dmg label BACKUP
 target/release/rust-fs-exfat fsck image.dmg -n
 ```
 
@@ -169,8 +190,8 @@ an image and must be 512-byte aligned. Export uses `fs_core::cli::transfer`:
 it stages locally, refuses source aliases and existing destinations by default,
 and verifies staged length and SHA-256 before publication when `--verify` is set.
 Only the destination is written; the source always stays read-only. `mkdir`,
-`write`, `truncate`, `rm` and `rmdir` are the only verbs that open the image
-for writing: the volume is
+`write`, `truncate`, `rm`, `rmdir`, `mv`, `touch`, `attributes` and `label`
+are the only verbs that open the image for writing: the volume is
 marked dirty while they run and clean when they finish, and one already marked
 dirty is refused.
 
