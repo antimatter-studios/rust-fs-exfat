@@ -35,5 +35,5 @@ pub use adapter::{
 };
 pub use exfat::{
     EntrySetDetail, ExfatSalvage, HoldingSet, StaleChain, StaleChainReport, StaleEntry,
-    UninterpretedEntry, UninterpretedReport,
+    UninterpretedEntry, UninterpretedReport, UpcaseReport,
 };

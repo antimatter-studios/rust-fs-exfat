@@ -115,6 +115,8 @@ It has no capability flag yet; see section 8. `ExfatSalvage::uninterpreted_entri
 in [src/salvage_uninterpreted.rs](../src/salvage_uninterpreted.rs) is a second
 such method (#43), over `primitives::uninterpreted_entries` in
 [src/primitive_uninterpreted.rs](../src/primitive_uninterpreted.rs).
+`ExfatSalvage::upcase_table` in [src/salvage_upcase.rs](../src/salvage_upcase.rs)
+is a third (#42), over `primitives::RawUpcaseTable`.
 
 ## 3. Strict versus permissive
 
@@ -290,15 +292,20 @@ Existing exFAT work illustrates the boundary:
   `stale_chains` extension, not a common verb. It is evidence, not damage: the
   specification lets a free cluster keep any FAT entry, so `report_damage` and
   the strict API ignore these chains.
-- [#42](https://github.com/antimatter-studios/rust-fs-exfat/issues/42) remains
-  open. **#42 — starting position, adjust as needed:** treat it as acceptance
-  work and reconcile its criteria against this convention first. Compressed
-  upcase decoding already exists in `UpcaseTable::parse`
-  ([src/metadata.rs](../src/metadata.rs)). Lookup uses the volume table
-  ([src/path.rs](../src/path.rs)). Do not treat the open issue as proof that
-  decoding is absent. Move that decoding under primitives through
-  [#49](https://github.com/antimatter-studios/rust-fs-exfat/issues/49), rather
-  than inventing a common upcase verb.
+- [#42](https://github.com/antimatter-studios/rust-fs-exfat/issues/42) is
+  acceptance work, reconciled against this convention as its starting position
+  asked. `primitives::RawUpcaseTable::parse`
+  ([src/primitives.rs](../src/primitives.rs)) decodes both forms of section
+  7.2.5, compressed and uncompressed, and reports the table's own consistency
+  without rejecting it. The strict `UpcaseTable::parse`
+  ([src/metadata.rs](../src/metadata.rs)) rejects on top of it, and lookup
+  uses that volume table ([src/path.rs](../src/path.rs)). Salvage reads it
+  through `ExfatSalvage::upcase_table`
+  ([src/salvage_upcase.rs](../src/salvage_upcase.rs)), an exFAT extension
+  like `stale_chains`, not a common verb: its `UpcaseReport` compares
+  candidate names by the volume's table, or by Table 24 alone when the table
+  is unusable. The deviation report places a faulty compressed run at its
+  word as `upcase-run`.
 - [#43](https://github.com/antimatter-studios/rust-fs-exfat/issues/43) adds
   evidence for uninterpreted entries as the exFAT adapter's
   `uninterpreted_entries` extension, not a common verb: vendor entries and

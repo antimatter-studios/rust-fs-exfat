@@ -15,6 +15,18 @@ a million-entry root with the platform checker. The format-maximum boundary and
 resource/I/O refusal tests are synthetic evidence only. The budget and exact
 per-cluster cost are documented in `docs/fsck-memory.md`.
 
+## Compressed Up-case Table
+
+For #42, the decoder, the `upcase-run` deviation rule and the salvage
+`upcase_table` extension are new code written from Microsoft's public exFAT
+specification, sections 7.2.2 "TableChecksum Field", 7.2.5 "Up-case Table" and
+7.2.5.1 "Recommended Up-case Table". No other filesystem implementation was an
+input. The tests build their tables from those rules, not from formatter output.
+Table 25 was transcribed from the specification's source only for a one-off
+comparison: it sums to E619D30Dh, as section 7.2.5.1 says, and macOS
+`newfs_exfat` wrote the same 5836 bytes on fresh images at 512 and 4096 bytes
+per sector. The table is not stored in this repository.
+
 ## Permissive structure snapshots
 
 For #35, on 2026-11-09 the owner authorized the current Captain Salvage

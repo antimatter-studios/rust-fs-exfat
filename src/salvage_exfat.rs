@@ -10,6 +10,7 @@
 //! | Materialize | the trait's provided method over read by extent |
 //! | Stale FAT chains (extension) | [`primitives::stale_chains`] over [`primitives::RawAllocationBitmap`] and active-FAT words |
 //! | Uninterpreted entries (extension) | [`primitives::uninterpreted_entries`] over the root and directory-candidate claims |
+//! | Up-case Table for name lookups (extension) | [`primitives::RawRootMetadata`] and [`primitives::RawUpcaseTable`], compressed or not |
 //!
 //! Geometry comes from the first usable boot copy: a checksum-valid main copy,
 //! then a checksum-valid backup, then either copy with the exFAT name. No
@@ -24,8 +25,8 @@ use super::adapter::{
 use crate::device::AlignedDevice;
 use crate::primitives::{
     self, BootRegion, BootSector, EntrySet, FatChainStep, FatValue, FatWindow, Limits,
-    RawRootMetadata, RawUpcaseTable, RootEntryKind, SystemStream, VolumeState, BOOT_REGION_SECTORS,
-    ENTRY_SIZE, FIRST_CLUSTER,
+    RawRootMetadata, RawUpcaseTable, RootEntryKind, SystemStream, UpcaseIssue, VolumeState,
+    BOOT_REGION_SECTORS, ENTRY_SIZE, FIRST_CLUSTER,
 };
 use crate::Error;
 use fs_core::BlockRead;
@@ -42,6 +43,11 @@ pub use stale::{StaleChain, StaleChainReport, StaleEntry};
 mod uninterpreted;
 
 pub use uninterpreted::{HoldingSet, UninterpretedEntry, UninterpretedReport};
+
+#[path = "salvage_upcase.rs"]
+mod upcase;
+
+pub use upcase::UpcaseReport;
 
 const SECTOR: u64 = 512;
 /// A file entry set holds at most one primary and eighteen secondaries.
@@ -1044,12 +1050,20 @@ fn audit_upcase(
         )?;
     }
     if let Some(issue) = table.issue {
+        // Section 7.2.5: a compressed table's identity run, or the words
+        // after the mapping of FFFFh.
+        let at = table.issue_at.unwrap_or(0);
+        let detail = match issue {
+            UpcaseIssue::TruncatedRun => "an identity run with no count",
+            UpcaseIssue::RunOutsideRange => "an identity run of 0 or past FFFFh",
+            UpcaseIssue::ExtraMappings => "a word after the mapping of FFFFh",
+        };
         out.add(
             DamageKind::Malformed,
             Severity::Error,
             location,
             structure,
-            format!("{issue:?}"),
+            format!("{detail} at byte {at} of the table"),
         )?;
     }
     ControlFlow::Continue(())

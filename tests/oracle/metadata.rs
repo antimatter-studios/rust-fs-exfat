@@ -1,6 +1,8 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+use fs_exfat::primitives::RawUpcaseTable;
+use fs_exfat::salvage::ExfatSalvage;
 use fs_exfat::volume::Volume;
 use std::path::PathBuf;
 use support::Bytes;
@@ -67,6 +69,36 @@ fn macos_formatter_system_metadata_is_readable() {
                 .parse()
                 .unwrap();
             assert_eq!(expected, observed, "{label}");
+        }
+    }
+}
+
+#[test]
+fn macos_formatter_writes_the_compressed_recommended_upcase_table() {
+    // Section 7.2.5.1: the recommended table, in compressed form, has
+    // TableChecksum E619D30Dh. newfs_exfat writes it, and the strict reader
+    // and salvage expand it to the same 65536 mappings (#42).
+    let directory =
+        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
+    for sector in [512, 4096] {
+        let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
+        let source = Bytes(image.clone());
+        let report = ExfatSalvage::probe(&source).upcase_table(&source).unwrap();
+        let mut table = Vec::new();
+        for extent in &report.extents {
+            table.extend_from_slice(&image[extent.offset as usize..extent.end().unwrap() as usize]);
+        }
+        assert_eq!(table.len(), 5836, "{sector}");
+        let raw = RawUpcaseTable::parse(&table, 0xe619_d30d);
+        assert!(
+            raw.checksum_ok && raw.compressed && raw.usable(),
+            "{sector}"
+        );
+        assert!(report.compressed && report.usable, "{sector}");
+        assert_eq!(report.mappings, raw.mappings, "{sector}");
+        let volume = Volume::open(source).unwrap();
+        for unit in 0..=u16::MAX {
+            assert_eq!(volume.upcase().map(unit), raw.mappings[usize::from(unit)]);
         }
     }
 }

@@ -92,6 +92,7 @@ rules! {
     UpcaseChecksum "upcase-checksum" "7.2.2" Error;
     UpcaseMandatory "upcase-mandatory" "7.2.5 (Table 24)" Error;
     UpcaseCoverage "upcase-coverage" "7.2.5, 7.2.5.1" Error;
+    UpcaseRun "upcase-run" "7.2.5" Error;
     LabelCount "label-count" "7.3" Error;
     LabelLength "label-length" "7.3.2" Error;
     LabelCharacters "label-characters" "7.3.3" Error;

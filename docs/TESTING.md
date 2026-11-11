@@ -14,7 +14,7 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | 2026-11-11 spec-deviation report, cached target: 378 lines, 22328 bytes, 274 tests (before it: 368 lines, 21716 bytes) | 378 lines, 22400 bytes, allowing timing digits | 150 |
+| unit | 2026-11-11 compressed Up-case Table, cached target: 384 lines, 22750 bytes, 280 tests (before it: 378 lines, 22328 bytes, 274 tests) | 384 lines, 22822 bytes, allowing timing digits | 150 |
 | oracle | 2026-11-10: 223 lines, 11070 bytes, 25 tests including large-volume and million-entry comparisons | 270 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |

@@ -694,11 +694,35 @@ impl<'a> RawAllocationBitmap<'a> {
     }
 }
 
+/// Characters an up-case table maps: 0000h to FFFFh (section 7.2.5.1).
+const UPCASE_CHARACTERS: usize = 0x1_0000;
+/// The word that starts an identity run in a compressed up-case table.
+const UPCASE_RUN: u16 = 0xFFFF;
+/// Characters whose mappings Table 24 fixes.
+const UPCASE_MANDATORY: usize = 128;
+
+/// A character up-cased by the mandatory mappings of section 7.2.5, Table 24,
+/// alone: a–z become A–Z and every other character stays as it is. Section
+/// 7.2.5 lets an implementation that supports only those 128 characters
+/// up-case names this way, leaving the rest intact.
+pub fn mandatory_upcase(unit: u16) -> u16 {
+    if (0x61..=0x7A).contains(&unit) {
+        unit - 0x20
+    } else {
+        unit
+    }
+}
+
 /// The first structural problem encountered while expanding an upcase stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpcaseIssue {
+    /// FFFFh, which starts an identity run, is the stream's last word: the
+    /// count that should follow it is missing.
     TruncatedRun,
+    /// An identity run counts no characters, or more than are left up to
+    /// FFFFh.
     RunOutsideRange,
+    /// Words follow the mapping of FFFFh, the last character.
     ExtraMappings,
 }
 
@@ -713,43 +737,79 @@ pub struct RawUpcaseTable<'a> {
     pub issue: Option<UpcaseIssue>,
     pub complete: bool,
     pub ascii_ok: bool,
+    /// At least one identity run was expanded: the stream uses the
+    /// compressed form of section 7.2.5.
+    pub compressed: bool,
+    /// The byte offset in `data` of the word where `issue` was found: the
+    /// FFFFh that starts a faulty run, or the first word after the mapping of
+    /// FFFFh.
+    pub issue_at: Option<usize>,
+    /// How many bytes at the start of `data` encode the first 128 mappings,
+    /// those Table 24 fixes: 256 in an uncompressed table, fewer when runs
+    /// cover them, and all of `data` when it maps fewer characters.
+    pub mandatory_bytes: usize,
 }
 
 impl<'a> RawUpcaseTable<'a> {
+    /// Expands an up-case table as section 7.2.5 "Up-case Table" describes,
+    /// in either form, and reports its own consistency without rejecting it.
+    ///
+    /// Each word is the up-cased form of the next character, except FFFFh,
+    /// which with the word after it stands for that many identity mappings:
+    /// the compressed form. The table does not say which form it uses. At the
+    /// last character, FFFFh, the word FFFFh is that character's identity
+    /// mapping, as in an uncompressed table and in the recommended table of
+    /// section 7.2.5.1, unless a count of 1 follows it: then it is a run of
+    /// one, the only run that fits there. TableChecksum covers the stream as
+    /// stored, whichever form it takes (sections 7.2.2 and 7.2.5); the table
+    /// must map exactly 0000h to FFFFh (section 7.2.5.1), and its first 128
+    /// mappings must be Table 24's.
     pub fn parse(data: &'a [u8], expected_checksum: u32) -> Self {
         let checksum = checksum32(data);
-        let mut mappings = Vec::with_capacity(65536);
-        let mut words = data.chunks_exact(2).map(|word| u16_at(word, 0));
+        let word = |index: usize| {
+            data.get(index * 2..index * 2 + 2)
+                .map(|word| u16_at(word, 0))
+        };
+        let mut mappings = Vec::with_capacity(UPCASE_CHARACTERS);
         let mut issue = None;
-        while let Some(value) = words.next() {
-            if value == 0xffff && mappings.len() < 65535 {
-                let Some(count) = words.next().map(usize::from) else {
+        let mut issue_at = None;
+        let mut compressed = false;
+        let mut mandatory_bytes = None;
+        let mut index = 0;
+        while let Some(value) = word(index) {
+            let left = UPCASE_CHARACTERS - mappings.len();
+            let count = word(index + 1);
+            if value == UPCASE_RUN && (left > 1 || (left == 1 && count == Some(1))) {
+                let Some(count) = count.map(usize::from) else {
                     issue = Some(UpcaseIssue::TruncatedRun);
+                    issue_at = Some(index * 2);
                     break;
                 };
-                let end = mappings.len() + count;
-                if count == 0 || end > 65536 {
+                if count == 0 || count > left {
                     issue = Some(UpcaseIssue::RunOutsideRange);
+                    issue_at = Some(index * 2);
                     break;
                 }
-                mappings.extend((mappings.len()..end).map(|unit| unit as u16));
+                let start = mappings.len();
+                mappings.extend((start..start + count).map(|unit| unit as u16));
+                compressed = true;
+                index += 2;
             } else {
-                if mappings.len() == 65536 {
+                if left == 0 {
                     issue = Some(UpcaseIssue::ExtraMappings);
+                    issue_at = Some(index * 2);
                     break;
                 }
                 mappings.push(value);
+                index += 1;
+            }
+            if mandatory_bytes.is_none() && mappings.len() >= UPCASE_MANDATORY {
+                mandatory_bytes = Some(index * 2);
             }
         }
-        let complete = mappings.len() == 65536;
-        let ascii_ok = (0u16..128).all(|unit| {
-            let expected = if (97..=122).contains(&unit) {
-                unit - 32
-            } else {
-                unit
-            };
-            mappings.get(usize::from(unit)) == Some(&expected)
-        });
+        let complete = mappings.len() == UPCASE_CHARACTERS;
+        let ascii_ok = (0..UPCASE_MANDATORY as u16)
+            .all(|unit| mappings.get(usize::from(unit)) == Some(&mandatory_upcase(unit)));
         Self {
             data,
             mappings,
@@ -759,7 +819,18 @@ impl<'a> RawUpcaseTable<'a> {
             issue,
             complete,
             ascii_ok,
+            compressed,
+            issue_at,
+            mandatory_bytes: mandatory_bytes.unwrap_or(data.len()),
         }
+    }
+
+    /// The table passed every check of its own: length, TableChecksum,
+    /// encoding, coverage of 0000h to FFFFh and Table 24. Names compare with
+    /// it only then (section 7.2.2: implementations verify TableChecksum
+    /// before using the table).
+    pub fn usable(&self) -> bool {
+        self.length_ok && self.checksum_ok && self.issue.is_none() && self.complete && self.ascii_ok
     }
 }
 

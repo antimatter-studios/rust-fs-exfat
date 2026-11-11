@@ -24,6 +24,9 @@ mod stale_chains;
 #[path = "salvage_cases/uninterpreted.rs"]
 mod uninterpreted;
 
+#[path = "salvage_cases/upcase.rs"]
+mod upcase;
+
 use support::Bytes;
 
 const FEATURES: [Feature; 8] = [
