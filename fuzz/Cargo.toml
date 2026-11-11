@@ -18,6 +18,8 @@ cargo-fuzz = true
 libfuzzer-sys = "=0.4.13"
 rust-fs-exfat = { path = ".." }
 rust-fs-core = "=0.4.3"
+serde = "=1.0.229"
+serde_json = "=1.0.149"
 
 [[bin]]
 name = "boot_sector"
@@ -78,6 +80,34 @@ bench = false
 [[bin]]
 name = "image"
 path = "fuzz_targets/image.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "entry_sets"
+path = "fuzz_targets/entry_sets.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chain_islands"
+path = "fuzz_targets/chain_islands.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "salvage"
+path = "fuzz_targets/salvage.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "plan"
+path = "fuzz_targets/plan.rs"
 test = false
 doc = false
 bench = false

@@ -13,6 +13,11 @@
 #[path = "../../tests/support/mod.rs"]
 pub mod support;
 
+mod recovery;
+// Each cargo-fuzz binary uses one target of the module, and the gate all of them.
+#[allow(unused_imports)]
+pub use recovery::*;
+
 use fs_core::BlockRead;
 use fs_exfat::boot::{boot_checksum, BootSector};
 use fs_exfat::check::{check, spec_deviations, CheckReport};
@@ -609,14 +614,20 @@ fn template() -> &'static [u8] {
 
 fn patched_image(input: &[u8]) -> (Vec<u8>, String) {
     let mut image = template().to_vec();
-    let mut path = String::new();
-    let (flags, mut rest) = input.split_first().map_or((0, input), |(f, r)| (*f, r));
+    let (flags, rest) = input.split_first().map_or((0, input), |(f, r)| (*f, r));
+    let path = apply_patches(&mut image, &REGIONS, rest);
+    seal(&mut image, flags);
+    (image, path)
+}
+
+/// Copies each `region:u8 offset:u16 count:u8 bytes[count]` patch into its
+/// region, and returns the rest of the input as a path when a region is 0xff.
+fn apply_patches(image: &mut [u8], regions: &[(usize, usize)], mut rest: &[u8]) -> String {
     while let [region, low, high, count, tail @ ..] = rest {
         if *region == 0xff {
-            path = String::from_utf8_lossy(&rest[1..]).into_owned();
-            break;
+            return String::from_utf8_lossy(&rest[1..]).into_owned();
         }
-        let (start, size) = REGIONS[usize::from(*region) % REGIONS.len()];
+        let (start, size) = regions[usize::from(*region) % regions.len()];
         let offset = usize::from(u16::from_le_bytes([*low, *high])) % size;
         let count = usize::from(*count).min(tail.len());
         let (bytes, remainder) = tail.split_at(count);
@@ -624,6 +635,13 @@ fn patched_image(input: &[u8]) -> (Vec<u8>, String) {
         image[start + offset..start + offset + length].copy_from_slice(&bytes[..length]);
         rest = remainder;
     }
+    String::new()
+}
+
+/// Recomputes what the patch flags do not leave stale: bit 0 the boot checksum,
+/// copied to the backup region, bit 1 the set checksums and bit 2 the upcase
+/// checksum.
+fn seal(image: &mut [u8], flags: u8) {
     if flags & 2 == 0 {
         let upcase_table = &geometry().1;
         reseal_sets(&mut image[ROOT..ROOT + SECTOR], upcase_table);
@@ -633,13 +651,12 @@ fn patched_image(input: &[u8]) -> (Vec<u8>, String) {
     if flags & 4 == 0 && image[ROOT + 32] == 0x82 {
         let length = support::upcase_bytes().len();
         let checksum = checksum32(&image[UPCASE..UPCASE + length]);
-        put32(&mut image, ROOT + 36, checksum);
+        put32(image, ROOT + 36, checksum);
     }
     if flags & 1 == 0 {
-        seal_boot(&mut image, SECTOR);
+        seal_boot(image, SECTOR);
         image.copy_within(..SECTOR * 12, SECTOR * 12);
     }
-    (image, path)
 }
 
 /// One patch input for each way of breaking the template that a person would
