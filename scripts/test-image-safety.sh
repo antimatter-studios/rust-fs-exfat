@@ -52,13 +52,14 @@ variants = {
     'unowned-device-test': source.replace("device=''\n", "device=''\n" + next(line.strip() for line in source.splitlines() if line.strip().startswith('EXFAT_ORACLE_DEVICE=')) + '\n', 1),
     'foreign-device-test': source.replace('EXFAT_ORACLE_DEVICE="$device"', 'EXFAT_ORACLE_DEVICE="$foreign"'),
     'other-device-test': source.replace('--test macos_device --', '--test other_device --'),
+    'notice-rider': source.replace('export com_apple_hdiutil_nodeprecatedwarning=1', 'export com_apple_hdiutil_nodeprecatedwarning=1; /usr/bin/hdiutil eject "$image"'),
 }
 for name, contents in variants.items():
     if contents == source:
         raise SystemExit('image-safety: mutation did not change the source: ' + name)
     (directory / (name + '.bad')).write_text(contents)
 PY
-for source_file in "$directory/other-verb.bad" "$directory/other-device.bad" "$directory/missing-plist.bad" "$directory/reassignment.bad" "$directory/foreign-receipt.bad" "$directory/receipt-reuse.bad" "$directory/foreign-image.bad" "$directory/foreign-detach.bad" "$directory/unowned-query.bad" "$directory/loop-rebinding.bad" "$directory/heredoc-device.bad" "$directory/purge.bad" "$directory/process-kill.bad" "$directory/libc-flush.bad" "$directory/missing-fixture-producer.bad" "$directory/missing-fixture-validation.bad" "$directory/foreign-fixture.bad" "$directory/writable-fixture.bad" "$directory/unowned-device-test.bad" "$directory/foreign-device-test.bad" "$directory/other-device-test.bad"; do
+for source_file in "$directory/other-verb.bad" "$directory/other-device.bad" "$directory/missing-plist.bad" "$directory/reassignment.bad" "$directory/foreign-receipt.bad" "$directory/receipt-reuse.bad" "$directory/foreign-image.bad" "$directory/foreign-detach.bad" "$directory/unowned-query.bad" "$directory/loop-rebinding.bad" "$directory/heredoc-device.bad" "$directory/purge.bad" "$directory/process-kill.bad" "$directory/libc-flush.bad" "$directory/missing-fixture-producer.bad" "$directory/missing-fixture-validation.bad" "$directory/foreign-fixture.bad" "$directory/writable-fixture.bad" "$directory/unowned-device-test.bad" "$directory/foreign-device-test.bad" "$directory/other-device-test.bad" "$directory/notice-rider.bad"; do
     if bash scripts/check-image-safety.sh "$source_file" > "$directory/rejected.log" 2>&1; then
         echo "image-safety: unsafe mutation was incorrectly accepted: $source_file" >&2
         exit 1

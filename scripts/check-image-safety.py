@@ -47,6 +47,7 @@ def check(source):
     fixture_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"'
     tools = 'for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil; do'
     query = '/usr/sbin/diskutil info -plist "$device" > "$directory/info-$sector.plist"'
+    notices = 'export com_apple_hdiutil_nodeprecatedwarning=1'
     create = '/usr/bin/hdiutil create -size 64m -layout NONE "$image"'
     detach = '/usr/bin/hdiutil detach "$device"'
     attachments = {
@@ -153,7 +154,7 @@ def check(source):
             if active:
                 refuse("a live attachment cannot lose its ownership binding")
             continue
-        if re.search(r"diskutil|hdiutil|newfs_exfat|fsck_exfat", line) and line != tools:
+        if re.search(r"diskutil|hdiutil|newfs_exfat|fsck_exfat", line) and line not in (tools, notices):
             refuse("only the reviewed image commands and exact receipt-owned info query are permitted")
         if re.search(r"EXFAT_ORACLE_DEVICE|\$device|\b(?:device|image|directory)\s*\+?=|\b(?:read|for|declare|typeset|export|local|unset)\b.*\b(?:device|image|directory)\b|printf\s+-v\s+(?:device|image|directory)\b", line):
             refuse("a device or image binding outside its reviewed ownership boundary is forbidden")
