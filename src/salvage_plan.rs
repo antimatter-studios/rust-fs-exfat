@@ -315,7 +315,7 @@ impl Plan {
             if length > 0 {
                 last_start = total;
             }
-            spans.push((from, length));
+            spans.push((from, length, index));
             total = total.checked_add(length).ok_or(SalvageError::Bounds)?;
         }
         let length = match self.length {
@@ -340,7 +340,7 @@ impl Plan {
         };
         let mut pieces = Vec::with_capacity(spans.len() + 1);
         let mut output = 0;
-        for (from, span) in spans {
+        for (from, span, step) in spans {
             let kept = span.min(length - output);
             let valid_part = kept.min(valid.saturating_sub(output));
             if valid_part > 0 {
@@ -348,6 +348,7 @@ impl Plan {
                     output,
                     length: valid_part,
                     from,
+                    step,
                 });
             }
             if kept > valid_part {
@@ -355,12 +356,46 @@ impl Plan {
                     output: output + valid_part,
                     length: kept - valid_part,
                     from: Origin::Zeros,
+                    step,
                 });
             }
             output += kept;
         }
-        Ok(Resolved { pieces, length })
+        Ok(Resolved {
+            pieces,
+            length,
+            valid,
+        })
     }
+}
+
+/// What checking a plan found without reading: its lengths, and the source
+/// bytes more than one step reads.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanCheck {
+    /// The output length.
+    pub length: u64,
+    /// Where the output's zeros begin: the declared valid length, or the
+    /// output length.
+    pub valid_length: u64,
+    /// Source bytes that two steps both read: one finding per pair of
+    /// steps, in source order. A plan may repeat bytes on
+    /// purpose, so these are findings, not refusals. Only bytes the plan reads
+    /// count, so a step past the valid length overlaps nothing.
+    pub overlaps: Vec<PlanOverlap>,
+}
+
+/// Source bytes that two plan steps both read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanOverlap {
+    /// The lower step index.
+    pub first: usize,
+    /// The higher step index.
+    pub second: usize,
+    /// The source bytes both read.
+    pub source: Extent,
 }
 
 /// A plan mapped onto the source: output pieces in order, covering the whole
@@ -369,6 +404,43 @@ impl Plan {
 pub(crate) struct Resolved {
     pub(crate) pieces: Vec<Piece>,
     pub(crate) length: u64,
+    /// Where the output's zeros begin.
+    pub(crate) valid: u64,
+}
+
+impl Resolved {
+    /// The check's findings for this mapping.
+    pub(crate) fn check(&self) -> PlanCheck {
+        let mut reads: Vec<(u64, u64, usize)> = self
+            .pieces
+            .iter()
+            .filter_map(|piece| match piece.from {
+                Origin::Source(offset) => Some((offset, offset + piece.length, piece.step)),
+                _ => None,
+            })
+            .collect();
+        reads.sort_unstable();
+        let mut open: Vec<(u64, usize)> = Vec::new();
+        let mut overlaps = Vec::new();
+        for (start, end, step) in reads {
+            open.retain(|(open_end, _)| *open_end > start);
+            for &(open_end, open_step) in &open {
+                overlaps.push(PlanOverlap {
+                    first: open_step.min(step),
+                    second: open_step.max(step),
+                    source: Extent::new(start, open_end.min(end) - start),
+                });
+            }
+            open.push((end, step));
+        }
+        overlaps
+            .sort_unstable_by_key(|overlap| (overlap.source.offset, overlap.first, overlap.second));
+        PlanCheck {
+            length: self.length,
+            valid_length: self.valid,
+            overlaps,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -377,6 +449,8 @@ pub(crate) struct Piece {
     pub(crate) output: u64,
     pub(crate) length: u64,
     pub(crate) from: Origin,
+    /// The plan step it comes from.
+    pub(crate) step: usize,
 }
 
 #[derive(Clone, Copy, Debug)]

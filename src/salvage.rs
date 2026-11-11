@@ -31,8 +31,8 @@ pub use crate::primitives::{FatCopy, StaleEnd, UninterpretedCounts, Uninterprete
 pub use adapter::{
     Candidate, CandidateKind, CandidateState, Capabilities, ClusterLayout, Damage, DamageKind,
     DamageReport, Extent, ExtentWalk, Feature, Integrity, MaterializeReport, MaterializedRange,
-    Parent, Plan, PlanFault, PlanMetadata, PlanRead, PlanReader, PlanStep, SalvageAdapter,
-    SalvageError, ScanReport, Severity, Sink, Tree, TreeNode, WalkEnd,
+    Parent, Plan, PlanCheck, PlanFault, PlanMetadata, PlanOverlap, PlanRead, PlanReader, PlanStep,
+    SalvageAdapter, SalvageError, ScanReport, Severity, Sink, Tree, TreeNode, WalkEnd,
 };
 pub use exfat::{
     CopyDifference, CopyKind, CopyPair, CopyReport, CrossLink, CrossLinkReport, EntrySetDetail,
