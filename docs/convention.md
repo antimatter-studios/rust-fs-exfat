@@ -341,6 +341,15 @@ exFAT-specific names. It must check that:
 - Evidence and plans serialize without handles; large results stream to the
   caller's sink, which must not alias the source device.
 
+#53 builds the set as `conformance` in
+[src/conformance.rs](../src/conformance.rs), behind the `test-support`
+feature. A driver implements its `Driver` trait with the adapter's
+constructor, a run of the strict API over a whole source, one healthy image
+and damaged images that each declare their evidence, then calls `run`. The
+returned `Report` names the rule each violation breaks, and a rule that ran no
+checks fails it. The exFAT runner is
+[tests/conformance.rs](../tests/conformance.rs).
+
 An unsupported capability is not a passing exercise of that capability.
 Existing exFAT primitive, strict-reader and read-only tests are supporting
 evidence, not a substitute for this adapter suite
