@@ -228,28 +228,44 @@ pub fn boot_check(main: &[u8], backup: &[u8], bytes_per_sector: usize) -> BootCh
 /// partial words are ignored; extra entries and damaged values are retained.
 pub fn decode_fat(raw: &[u8], boot: &BootSector) -> Vec<u32> {
     let mut fat: Vec<u32> = raw.chunks_exact(4).map(|entry| u32_at(entry, 0)).collect();
-    let last = boot.last_cluster_exclusive();
-    if fat.len() < last as usize {
-        fat.resize(last as usize, 0);
+    let entries = cluster_slots(boot);
+    if fat.len() < entries {
+        fat.resize(entries, 0);
     }
     fat
 }
 
+/// FAT entries 0 to the heap's last cluster that a `u32` can name.
+fn cluster_slots(boot: &BootSector) -> usize {
+    let entries = boot.heap_end().min(u64::from(u32::MAX) + 1);
+    usize::try_from(entries).unwrap_or(usize::MAX)
+}
+
+/// Whether a FAT entry links to a heap cluster. End of chain is never a link,
+/// even where a cluster count of FFFFFFFEh or more puts FFFFFFFFh in the heap.
+fn links(boot: &BootSector, value: u32) -> bool {
+    value != FAT_END && valid_cluster(boot, value)
+}
+
 /// The root directory's clusters, stopping before an invalid or repeated cluster.
 pub fn root_chain(boot: &BootSector, fat: &[u32]) -> Vec<u32> {
-    let last = boot.last_cluster_exclusive();
     let mut clusters = Vec::new();
     let mut current = boot.root_cluster;
     let mut seen = HashSet::new();
-    while (FIRST_CLUSTER..last).contains(&current) && seen.insert(current) {
+    while valid_cluster(boot, current) && seen.insert(current) {
         clusters.push(current);
         current = fat[current as usize];
+        if current == FAT_END {
+            break;
+        }
     }
     clusters
 }
 
+/// Whether `cluster` is in the heap, 2 to `cluster_count + 1`, compared in
+/// `u64` so that every cluster count gets a defined answer.
 pub fn valid_cluster(boot: &BootSector, cluster: u32) -> bool {
-    (FIRST_CLUSTER..boot.last_cluster_exclusive()).contains(&cluster)
+    cluster >= FIRST_CLUSTER && u64::from(cluster) < boot.heap_end()
 }
 
 /// Reads the raw allocation bit, without validating the cluster or bitmap length.
@@ -276,7 +292,9 @@ pub fn allocation_class(fat: &[u32], bitmap: &[u8], cluster: u32) -> u8 {
 
 /// The byte offset in the cluster heap, without validating the cluster number.
 pub fn cluster_offset(boot: &BootSector, cluster: u32) -> u64 {
-    boot.heap_offset() + u64::from(cluster - FIRST_CLUSTER) * boot.cluster_size()
+    u64::from(cluster - FIRST_CLUSTER)
+        .saturating_mul(boot.cluster_size())
+        .saturating_add(boot.heap_offset())
 }
 
 /// Clusters a stream claims. `clusters` is shorter than `needed` when the
@@ -296,9 +314,11 @@ pub fn clusters_for(
         };
     }
     if no_fat_chain {
-        let end = (u64::from(first) + needed).min(u64::from(boot.last_cluster_exclusive()));
+        let end = (u64::from(first) + needed).min(cluster_slots(boot) as u64);
         return StreamClusters {
-            clusters: (first..end as u32).collect(),
+            clusters: (u64::from(first)..end)
+                .map(|cluster| cluster as u32)
+                .collect(),
             needed,
         };
     }
@@ -308,6 +328,9 @@ pub fn clusters_for(
     while valid_cluster(boot, current) && (clusters.len() as u64) < needed && seen.insert(current) {
         clusters.push(current);
         current = fat[current as usize];
+        if current == FAT_END {
+            break;
+        }
     }
     StreamClusters { clusters, needed }
 }
@@ -335,11 +358,10 @@ pub fn chain_head(predecessors: &[u32], cluster: u32) -> u32 {
 
 /// Builds a predecessor index, choosing the lowest source when links converge.
 pub fn compute_predecessors(boot: &BootSector, fat: &[u32]) -> Vec<u32> {
-    let last = boot.last_cluster_exclusive();
-    let mut predecessors = vec![0u32; last as usize];
-    for cluster in FIRST_CLUSTER..last {
+    let mut predecessors = vec![0u32; cluster_slots(boot)];
+    for cluster in boot.heap_clusters() {
         let value = fat[cluster as usize];
-        if valid_cluster(boot, value) && predecessors[value as usize] == 0 {
+        if links(boot, value) && predecessors[value as usize] == 0 {
             predecessors[value as usize] = cluster;
         }
     }
@@ -348,17 +370,16 @@ pub fn compute_predecessors(boot: &BootSector, fat: &[u32]) -> Vec<u32> {
 
 /// Counts allocation classes and cross-link targets, grouping only headed islands.
 pub fn compute_stats(boot: &BootSector, fat: &[u32], bitmap: &[u8]) -> AllocationStats {
-    let last = boot.last_cluster_exclusive();
     let mut stats = AllocationStats::default();
-    let mut targeted = vec![0u8; last as usize];
-    for cluster in FIRST_CLUSTER..last {
+    let mut targeted = vec![0u8; cluster_slots(boot)];
+    for cluster in boot.heap_clusters() {
         match allocation_class(fat, bitmap, cluster) {
             ALLOC_ALLOCATED => stats.allocated += 1,
             ALLOC_FREE_FAT => stats.free_with_fat += 1,
             _ => stats.free_zero_fat += 1,
         }
         let value = fat[cluster as usize];
-        if valid_cluster(boot, value) {
+        if links(boot, value) {
             targeted[value as usize] = targeted[value as usize].saturating_add(1);
         }
     }
@@ -381,11 +402,10 @@ pub fn compute_stats(boot: &BootSector, fat: &[u32], bitmap: &[u8]) -> Allocatio
 /// Splits the FAT into islands: runs that start at an entry nothing points
 /// to, and end where the chain stops or meets a cluster already walked.
 pub fn chain_islands(boot: &BootSector, fat: &[u32], bitmap: &[u8]) -> Vec<Island> {
-    let last = boot.last_cluster_exclusive();
-    let mut targeted = vec![0u8; last as usize];
-    for cluster in FIRST_CLUSTER..last {
+    let mut targeted = vec![0u8; cluster_slots(boot)];
+    for cluster in boot.heap_clusters() {
         let value = fat[cluster as usize];
-        if valid_cluster(boot, value) {
+        if links(boot, value) {
             targeted[value as usize] = targeted[value as usize].saturating_add(1);
         }
     }
@@ -393,10 +413,9 @@ pub fn chain_islands(boot: &BootSector, fat: &[u32], bitmap: &[u8]) -> Vec<Islan
 }
 
 fn walk_islands(boot: &BootSector, fat: &[u32], bitmap: &[u8], targeted: &[u8]) -> Vec<Island> {
-    let last = boot.last_cluster_exclusive();
-    let mut visited = vec![false; last as usize];
+    let mut visited = vec![false; cluster_slots(boot)];
     let mut islands = Vec::new();
-    for head in FIRST_CLUSTER..last {
+    for head in boot.heap_clusters() {
         if !fat_in_use(boot, fat, head) || targeted[head as usize] != 0 {
             continue;
         }
