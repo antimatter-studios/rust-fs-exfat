@@ -1,3 +1,5 @@
+#[path = "check/deviations.rs"]
+mod deviations;
 mod interface_support;
 #[path = "check/scale.rs"]
 mod scale;

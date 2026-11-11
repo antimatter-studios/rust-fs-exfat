@@ -4,7 +4,8 @@ use crate::directory::DirectoryEntry;
 use crate::file::File;
 use crate::interface;
 use crate::path::Node;
-use crate::primitives::UninterpretedCounts;
+use crate::primitives::{DeviationReport, UninterpretedCounts};
+use crate::salvage::Severity;
 use crate::timestamp::Timestamp;
 use crate::Error;
 use fs_core::cli::clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
@@ -92,7 +93,7 @@ fn fsck_command() -> Command {
         .arg(offset())
         .arg(Arg::new("no-repair").short('n').long("no-repair").action(ArgAction::SetTrue).help("Check only (always enabled; repairs are impossible)"))
         .args(cli::format_args())
-        .after_help("Checks both boot copies, system metadata, directory entry sets, allocation ownership and file chains.\nCounts vendor and unknown directory entries it does not interpret, without failing on them.\nAll exFAT cluster counts are supported: bitmap and ownership use 1/4 byte per cluster, with a 1,537 MiB audit payload ceiling.\nFAT and directories are streamed in 64 KiB chunks; directory workspace is budgeted, not entry-count limited.\nAn exhausted budget or incomplete audit fails explicitly; no partial clean result is emitted.\nExit codes: 0 clean, 4 uncorrected inconsistencies, 8 I/O or unsupported audit limits, 16 usage.\nThere is no repair mode.")
+        .after_help("Checks both boot copies, system metadata, directory entry sets, allocation ownership and file chains.\nCounts vendor and unknown directory entries it does not interpret, without failing on them.\nLists deviations from the exFAT specification with byte offset, section and severity, without failing on them.\nAll exFAT cluster counts are supported: bitmap and ownership use 1/4 byte per cluster, with a 1,537 MiB audit payload ceiling.\nFAT and directories are streamed in 64 KiB chunks; directory workspace is budgeted, not entry-count limited.\nAn exhausted budget or incomplete audit fails explicitly; no partial clean result is emitted.\nExit codes: 0 clean, 4 uncorrected inconsistencies, 8 I/O or unsupported audit limits, 16 usage.\nThere is no repair mode.")
 }
 
 fn error(error: Error) -> CliError {
@@ -277,6 +278,56 @@ fn uninterpreted_json(counts: UninterpretedCounts) -> Json {
     ])
 }
 
+/// Spec deviations, apart from the verdict: each with its volume byte offset,
+/// section and severity (`docs/spec-rules.md`).
+fn deviations_json(report: &DeviationReport) -> Json {
+    let found = report
+        .found
+        .iter()
+        .map(|deviation| {
+            Json::object([
+                ("rule", Json::from(deviation.rule.id())),
+                ("section", Json::from(deviation.section)),
+                (
+                    "severity",
+                    Json::from(match deviation.severity {
+                        Severity::Notice => "notice",
+                        Severity::Warning => "warning",
+                        Severity::Error => "error",
+                    }),
+                ),
+                ("offset", Json::from(deviation.offset)),
+                ("length", Json::from(deviation.length)),
+                ("detail", Json::from(deviation.detail.as_str())),
+            ])
+        })
+        .collect();
+    Json::object([
+        ("found", Json::Arr(found)),
+        (
+            "omitted",
+            Json::object(
+                report
+                    .omitted
+                    .iter()
+                    .map(|(rule, count)| (rule.id(), Json::from(*count))),
+            ),
+        ),
+        ("complete", Json::from(report.complete)),
+        (
+            "skipped",
+            Json::Arr(
+                report
+                    .skipped
+                    .iter()
+                    .map(|part| Json::from(part.as_str()))
+                    .collect(),
+            ),
+        ),
+        ("skipped_omitted", Json::from(report.skipped_omitted)),
+    ])
+}
+
 fn fsck_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
     let image = Path::new(matches.get_one::<OsString>("target").unwrap());
     let offset = *matches.get_one::<u64>("offset").unwrap();
@@ -326,6 +377,7 @@ fn fsck_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
             "uninterpreted_entries",
             uninterpreted_json(report.uninterpreted),
         ),
+        ("deviations", deviations_json(&report.deviations)),
     ]))
     .with_code(if healthy { 0 } else { 4 }))
 }

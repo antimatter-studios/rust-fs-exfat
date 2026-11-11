@@ -1,10 +1,15 @@
 #[path = "check_audit.rs"]
 mod audit;
 
+#[path = "check_deviations.rs"]
+mod deviations;
+
 pub use audit::{check_device, check_device_with_budget, MAX_AUDIT_MEMORY_BYTES};
+pub use deviations::spec_deviations;
 
 use crate::boot::BootDifference;
 use crate::primitives::UninterpretedCounts;
+pub use crate::primitives::{Deviation, DeviationReport, Rule};
 use crate::volume::Volume;
 use crate::Result;
 use fs_core::BlockRead;
@@ -23,10 +28,17 @@ pub struct CheckReport {
     /// by kind: vendor entries and unknown types the specification lets a
     /// reader skip. Counted, never rejected, and not part of [`Self::healthy`].
     pub uninterpreted: UninterpretedCounts,
+    /// Every place the bytes break a rule of the specification
+    /// (`docs/spec-rules.md`), with its byte offset, section and severity.
+    /// Evidence apart from the verdict: not part of [`Self::healthy`], the
+    /// exit status, or what the strict reader accepts. [`spec_deviations`]
+    /// lists them for a volume the check rejects.
+    pub deviations: DeviationReport,
 }
 
 impl CheckReport {
-    /// No inconsistency was found. Uninterpreted entries do not count.
+    /// No inconsistency was found. Uninterpreted entries and spec deviations
+    /// do not count.
     pub fn healthy(&self) -> bool {
         !self.dirty && !self.media_failure && self.unreferenced_clusters == 0
     }

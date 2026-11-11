@@ -310,10 +310,17 @@ Existing exFAT work illustrates the boundary:
   [src/directory.rs](../src/directory.rs)); `check` counts
   the ones it skips by kind, apart from its verdict.
 - [#44](https://github.com/antimatter-studios/rust-fs-exfat/issues/44) adds
-  deviations with byte offsets, specification sections and severity. The
-  current `CheckReport` has counts, flags and boot differences, not that list
-  ([src/check.rs](../src/check.rs)). Such format details can enrich damage
-  evidence without adding format-named verbs to the common trait.
+  deviations with byte offsets, specification sections and severity, as
+  `CheckReport::deviations` and, for a volume the check rejects,
+  `check::spec_deviations` ([src/check_deviations.rs](../src/check_deviations.rs)).
+  The rules are the table in [spec-rules.md](spec-rules.md); `primitives::Rule`
+  and its evaluators in
+  [src/primitive_deviations.rs](../src/primitive_deviations.rs) decode the
+  fields. Deviations are evidence apart from the verdict: they change no
+  accept or reject decision, exit status or salvage result. Each one reuses
+  the damage core's `Severity` and carries a byte offset and length, its
+  location; its rule and section are format-specific detail. No verb was
+  added to the common trait.
 
 ### 5a. Read-only images
 
@@ -419,7 +426,10 @@ rules. The remaining design details belong to #52, with conformance in #53:
    `Feature` set. The same holds for `uninterpreted_entries` (#43).
 4. What concrete types represent the shared damage fields, and how do #44's
    byte offsets and specification references map into the shared core and
-   format-specific details without adding exFAT names to the trait?
+   format-specific details without adding exFAT names to the trait? #44
+   reuses `Severity` and reports location as an offset and a length; whether
+   deviations also flow through `report_damage` waits for the shared-core
+   extraction.
 
 The following are recorded decisions to begin implementation, not unanswered
 questions:

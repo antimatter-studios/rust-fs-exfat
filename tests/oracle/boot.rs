@@ -12,6 +12,23 @@ use fs_exfat::{boot::BootRegions, device::Reader};
 use std::path::PathBuf;
 use support::Bytes;
 
+/// Volumes that newfs_exfat formatted and the macOS driver wrote break none
+/// of the rules in docs/spec-rules.md: an independent writer's structures
+/// agree with how this crate reads the specification.
+#[test]
+fn macos_formatted_and_written_volumes_break_no_specification_rule() {
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR")
+            .expect("run chore test:oracle on macOS to create independent reference images"),
+    );
+    for sector in [512, 4096] {
+        let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
+        let report = fs_exfat::check::spec_deviations(Bytes(image));
+        assert!(report.is_empty(), "{sector}: {:?}", report.found);
+        assert!(report.complete, "{sector}: {:?}", report.skipped);
+    }
+}
+
 #[test]
 fn macos_formatter_and_checker_agree_with_both_boot_regions() {
     let directory = PathBuf::from(

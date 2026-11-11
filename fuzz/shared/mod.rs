@@ -15,7 +15,7 @@ pub mod support;
 
 use fs_core::BlockRead;
 use fs_exfat::boot::{boot_checksum, BootSector};
-use fs_exfat::check::{check, CheckReport};
+use fs_exfat::check::{check, spec_deviations, CheckReport};
 use fs_exfat::directory::{self, DirectoryEntry};
 use fs_exfat::file::File;
 use fs_exfat::metadata::{
@@ -344,6 +344,16 @@ fn check_timestamp(timestamp: &Timestamp) {
 /// A region of 0xff makes the rest of the input one path to look up.
 pub fn image(data: &[u8]) -> bool {
     let (image, path) = patched_image(data);
+    // The deviation report runs on every patch, accepted or not, and only ever
+    // points inside the volume.
+    let deviations = spec_deviations(Bytes(image.clone()));
+    for deviation in &deviations.found {
+        assert_eq!(deviation.section, deviation.rule.section());
+        assert!(
+            deviation.offset + deviation.length <= image.len() as u64,
+            "{deviation:?}"
+        );
+    }
     let Ok(volume) = Volume::open_with_limits(Bytes(image), IMAGE_LIMITS) else {
         return false;
     };
