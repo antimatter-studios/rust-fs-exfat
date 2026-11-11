@@ -2,6 +2,7 @@
 mod support;
 
 mod primitives;
+mod salvage;
 mod scale;
 mod windows;
 
