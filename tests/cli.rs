@@ -292,3 +292,115 @@ fn the_cli_tiers_sample_volume_is_the_one_these_tests_build() {
          tests/interface_support::image()"
     );
 }
+
+fn mkfs(arguments: &[&str], target: &std::path::Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
+        .arg("mkfs")
+        .args(arguments)
+        .arg(target)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn mkfs_creates_a_volume_the_reader_and_checker_accept() {
+    let fixture = interface_support::Temp::new();
+    let target = fixture.directory.join("formatted.img");
+    let output = mkfs(
+        &[
+            "--size", "64M", "-L", "Backup", "--serial", "1234abcd", "-S", "4096",
+        ],
+        &target,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["dry_run"], false);
+    assert_eq!(report["label"], "Backup");
+    assert_eq!(report["bytes_per_sector"], 4096);
+    assert_eq!(report["cluster_size"], 4096);
+    assert_eq!(report["volume_serial"], "1234abcd");
+    assert_eq!(std::fs::metadata(&target).unwrap().len(), 64 << 20);
+    let check = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
+        .args(["fsck", "-n"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+    let check: Value = serde_json::from_slice(&check.stdout).unwrap();
+    assert_eq!(check["healthy"], true);
+    assert_eq!(check["deviations"]["found"], Value::Array(Vec::new()));
+    let listing = run(&target, &["ls", "/"]);
+    assert_eq!(listing.stdout, b"[]\n");
+    // A second format of the existing file, with another layout.
+    let output = mkfs(
+        &[
+            "--cluster-size",
+            "16K",
+            "--fats",
+            "2",
+            "--guid",
+            "00112233-4455-6677-8899-aabbccddeeff",
+        ],
+        &target,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["cluster_size"], 16384);
+    assert_eq!(report["number_of_fats"], 2);
+    assert_eq!(report["label"], Value::Null);
+    assert_eq!(report["guid"], "00112233445566778899aabbccddeeff");
+}
+
+#[test]
+fn mkfs_dry_runs_and_refusals_write_nothing() {
+    let fixture = interface_support::Temp::new();
+    let target = fixture.directory.join("absent.img");
+    let output = mkfs(&["--size", "40G", "-n"], &target);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["dry_run"], true);
+    assert_eq!(report["cluster_size"], 128 << 10);
+    assert!(!target.exists());
+    for arguments in [
+        &["--size", "64M", "-L", "a label too long"][..],
+        &["--size", "64M", "-S", "8192"],
+        &["--size", "64M", "--cluster-size", "3000"],
+        &["--size", "512K"],
+        &["--size", "64M", "--fats", "3"],
+        &["--size", "64Q"],
+        &[],
+    ] {
+        let output = mkfs(arguments, &target);
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(!target.exists(), "{arguments:?}");
+    }
+    let original = std::fs::read(&fixture.image).unwrap();
+    let output = mkfs(&["-n"], &fixture.image);
+    assert!(output.status.success());
+    let output = mkfs(&["--size", "1T"], &fixture.image);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(std::fs::read(&fixture.image).unwrap(), original);
+    let help = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
+        .args(["mkfs.exfat", "--version"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8(help.stdout)
+        .unwrap()
+        .contains("mkfs.exfat"));
+}

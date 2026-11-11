@@ -12,19 +12,25 @@ rust-fs-exfat generate completions "$share" >/dev/null
 check "generate completions exits 0" test $? -eq 0
 
 names="$(rust-fs-exfat generate names)"
-check "generate names lists fs.exfat and fsck.exfat" test "$(echo $names)" = "fs.exfat fsck.exfat"
+check "generate names lists fs.exfat, fsck.exfat and mkfs.exfat" \
+    test "$(echo $names)" = "fs.exfat fsck.exfat mkfs.exfat"
 for name in rust-fs-exfat $names; do
     check "$name answers --version as $CRATE $version" \
         test "$("$name" --version)" = "$name ($CRATE) $version"
     "$name" --help >"$SANDBOX/help" 2>&1
     check "$name --help exits 0" test $? -eq 0
-    check "$name --help says it reads read-only" grep -qi 'read-only' "$SANDBOX/help"
+    if [ "$name" = mkfs.exfat ]; then
+        check "$name --help says it writes only to its target" grep -qi 'writes only to TARGET' "$SANDBOX/help"
+    else
+        check "$name --help says it reads read-only" grep -qi 'read-only' "$SANDBOX/help"
+    fi
     check "$name has bash completions" test -s "$share/bash-completion/completions/$name"
     check "$name has zsh completions" test -s "$share/zsh/site-functions/_$name"
     check "$name has fish completions" test -s "$share/fish/vendor_completions.d/$name.fish"
 done
 check "fs.exfat has its man page" test -s "$share/man/man1/fs.exfat.1"
 check "fsck.exfat has its man page, in section 8" test -s "$share/man/man8/fsck.exfat.8"
+check "mkfs.exfat has its man page, in section 8" test -s "$share/man/man8/mkfs.exfat.8"
 for verb in ls stat cat export; do
     check "fs.exfat $verb has its man page" test -s "$share/man/man1/fs.exfat-$verb.1"
 done

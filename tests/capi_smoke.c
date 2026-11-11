@@ -6,8 +6,26 @@ _Static_assert(sizeof(fs_exfat_timestamp) == 24, "timestamp ABI");
 _Static_assert(sizeof(fs_exfat_stat_t) == 96, "stat ABI");
 _Static_assert(sizeof(fs_exfat_dir_entry) == 1120, "directory ABI");
 _Static_assert(sizeof(fs_exfat_volume_info) == 96, "volume information ABI");
+_Static_assert(sizeof(fs_exfat_format_options) == 64, "format options ABI");
+
+/* Formats an existing, empty file through the C ABI, then mounts it. */
+static int format_and_mount(const char *path) {
+    fs_exfat_format_options options;
+    memset(&options, 0, sizeof(options));
+    options.bytes_per_sector = 4096;
+    options.label = "C ABI";
+    if (fs_exfat_mkfs(path, &options) != 0) return 20;
+    fs_exfat_t *handle = fs_exfat_mount(path, 0);
+    if (handle == NULL) return 21;
+    fs_exfat_volume_info info;
+    if (fs_exfat_get_volume_info(handle, &info) != 0 || strcmp(info.label, "C ABI") != 0 || info.sector_size != 4096) return 22;
+    fs_exfat_umount(handle);
+    puts("capi: C formatter and mount of the formatted file passed");
+    return 0;
+}
 
 int main(int argc, char **argv) {
+    if (argc == 3 && strcmp(argv[1], "--mkfs") == 0) return format_and_mount(argv[2]);
     if (argc != 2) return 2;
     fs_exfat_t *handle = fs_exfat_mount(argv[1], 0);
     if (handle == NULL) return 3;

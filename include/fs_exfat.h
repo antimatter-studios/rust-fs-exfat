@@ -93,6 +93,27 @@ int fs_exfat_set_volume_label(const fs_exfat_t *, const char *label);
 const char *fs_exfat_last_error(void);
 int fs_exfat_last_errno(void);
 
+/* The formatter. A zero option takes its default; NULL options take every
+   default. Each returns 0, or -1 with fs_exfat_last_error() set. A callback
+   device is described as for fs_exfat_mount_rw_with_callbacks. */
+typedef struct {
+    uint64_t size_bytes;       /* 0: the whole device */
+    uint64_t alignment;        /* FAT and heap alignment in bytes; 0: the cluster size */
+    uint64_t partition_offset; /* sectors; 0: none */
+    uint32_t bytes_per_sector; /* 512, 1024, 2048 or 4096; 0: 512 */
+    uint32_t cluster_size;     /* power of two up to 32 MiB; 0: by volume size */
+    uint32_t volume_serial;
+    uint8_t serial_present;    /* 0: serial from the date and time */
+    uint8_t number_of_fats;    /* 0 or 1: one FAT; 2: TexFAT */
+    uint8_t guid_present;      /* nonzero: write a Volume GUID entry */
+    uint8_t reserved;
+    uint8_t guid[16];
+    const char *label;         /* UTF-8, at most 11 UTF-16 units; NULL: no label entry */
+} fs_exfat_format_options;
+
+int fs_exfat_mkfs(const char *path, const fs_exfat_format_options *);
+int fs_exfat_mkfs_with_callbacks(const fs_exfat_rw_callbacks *, const fs_exfat_format_options *);
+
 #ifdef __cplusplus
 }
 #endif

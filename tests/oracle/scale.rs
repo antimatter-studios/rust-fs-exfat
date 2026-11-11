@@ -61,7 +61,7 @@ fn native_check(image: &Image, healthy: bool) {
 /// How long a detach may stay busy before the image is reported left behind.
 /// The platform has held a freshly checked million-entry image for longer than
 /// the 20 seconds this once allowed (#109).
-const DETACH_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+pub(super) const DETACH_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
 
 impl Drop for Attachment {
     fn drop(&mut self) {
@@ -85,7 +85,7 @@ impl Drop for Attachment {
 /// Detaches `device` with `program`, retrying with `-force` while it reports
 /// the device busy and `window` has not passed, and records the outcome in the
 /// `attachment-state` beside the receipt in `directory`.
-fn detach(
+pub(super) fn detach(
     program: &std::path::Path,
     device: &str,
     directory: &std::path::Path,

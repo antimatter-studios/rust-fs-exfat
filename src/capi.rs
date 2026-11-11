@@ -6,8 +6,8 @@
 //! Pointer arguments must reference valid, correctly aligned memory of the stated
 //! length. Buffers cannot overlap handles or callback storage. A read-only mount
 //! never writes; a mount made by a `_rw` constructor writes through
-//! `fs_exfat::write` and serializes its calls with a lock. Every fallible
-//! boundary catches Rust panics.
+//! `fs_exfat::write` and serializes its calls with a lock. The formatter's
+//! entry points are in [`mkfs`]. Every fallible boundary catches Rust panics.
 
 use crate::boot::BootSector;
 use crate::directory::DirectoryEntry;
@@ -64,6 +64,11 @@ fn errno_of(error: &Error) -> c_int {
         Error::Invalid(_) | Error::Bounds => EINVAL,
     }
 }
+
+mod mkfs;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use mkfs::fs_exfat_mkfs;
+pub use mkfs::{fs_exfat_mkfs_with_callbacks, FsExfatFormatOptions};
 
 pub type ReadCallback = unsafe extern "C" fn(*mut c_void, u64, *mut u8, usize) -> c_int;
 pub type WriteCallback = unsafe extern "C" fn(*mut c_void, u64, *const u8, usize) -> c_int;

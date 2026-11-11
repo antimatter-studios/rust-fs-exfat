@@ -86,3 +86,22 @@ Timestamp records preserve calendar fields and the volume's UTC offset.
 `present` distinguishes absent root timestamps; `offset_known` distinguishes
 unknown UTC offsets. Unix milliseconds are meaningful only when both are set.
 No UTC offset is guessed from the host clock.
+
+## Formatter
+
+`fs_exfat_mkfs(path, options)` formats an existing UTF-8 image or device path,
+opened read-write. `fs_exfat_mkfs_with_callbacks(device, options)` formats a
+callback device described by the writable mount's `fs_exfat_rw_callbacks`:
+`read` and `write` are required and `flush` is optional; each returns zero on
+success. Both return 0, or -1 with `fs_exfat_last_error` set and
+`fs_exfat_last_errno` EINVAL for a refused layout, EROFS for a read-only device
+and EIO for any other device failure.
+
+Every zero field of `fs_exfat_format_options` takes its default, and NULL
+options take every default: the whole device, 512-byte sectors, a cluster size
+chosen by volume size, the FAT and heap aligned to the cluster size, one FAT,
+no label, no GUID and a serial number from the clock. `serial_present` and
+`guid_present` select `volume_serial` and `guid`; `number_of_fats` 2 makes a
+TexFAT volume; `label` is NUL-terminated UTF-8 of at most 11 UTF-16 code units,
+or NULL for no Volume Label entry. The options record is 64 bytes, which the C smoke test asserts. A refused layout writes
+nothing.
