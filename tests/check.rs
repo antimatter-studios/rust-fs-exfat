@@ -203,3 +203,50 @@ fn streaming_audits_reject_truncated_sets_and_wrong_file_chain_lengths() {
         .to_string()
         .contains("duplicate root system metadata"));
 }
+
+#[cfg(test)]
+mod issue_73_red {
+    use super::interface_support::{self, base as support};
+    use fs_exfat::check::check_device;
+    use fs_exfat::volume::Volume;
+
+    const SECTOR: usize = 512;
+    const ROOT: usize = 32 * SECTOR;
+
+    fn revision_1_01() -> Vec<u8> {
+        let mut bytes = interface_support::image();
+        for base in [0, 12 * SECTOR] {
+            let region = &mut bytes[base..base + 12 * SECTOR];
+            support::put16(region, 104, 0x0101);
+            support::seal_boot(region, SECTOR);
+        }
+        bytes
+    }
+
+    fn longer_bitmap() -> Vec<u8> {
+        let mut bytes = interface_support::image();
+        // ClusterCount 100 needs 13 bytes; 14 still fits the one-cluster stream.
+        support::put64(&mut bytes, ROOT + 24, 14);
+        bytes
+    }
+
+    #[test]
+    fn red_revision_1_01_opens() {
+        Volume::open(support::Bytes(revision_1_01())).unwrap();
+    }
+
+    #[test]
+    fn red_revision_1_01_checks() {
+        check_device(support::Bytes(revision_1_01())).unwrap();
+    }
+
+    #[test]
+    fn red_longer_bitmap_opens() {
+        Volume::open(support::Bytes(longer_bitmap())).unwrap();
+    }
+
+    #[test]
+    fn red_longer_bitmap_checks() {
+        check_device(support::Bytes(longer_bitmap())).unwrap();
+    }
+}

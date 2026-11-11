@@ -720,10 +720,11 @@ fn every_documented_rule_is_in_code_and_has_a_case() {
 }
 
 #[test]
-fn the_strict_layer_rejects_some_volumes_the_specification_allows() {
+fn the_strict_layer_accepts_volumes_the_specification_allows() {
     // Revision 1.01 (section 3.1.12: implementations should mount any minor
-    // revision) and a bitmap longer than ClusterCount needs (Table 22's
-    // Reserved bits): no deviation, yet the strict check refuses both.
+    // revision) and a bitmap longer than ClusterCount needs (section 7.1.5,
+    // Table 22's Reserved bits): no deviation, and the strict check accepts
+    // both.
     let cases: [fn(&mut Vec<u8>); 2] = [
         |b| both_boot(b, |r| support::put16(r, 104, 0x0101)),
         |b| support::put64(b, ROOT + 24, 14),
@@ -733,7 +734,7 @@ fn the_strict_layer_rejects_some_volumes_the_specification_allows() {
         let mut bytes = image();
         edit(&mut bytes);
         assert_eq!(places(&deviations(&bytes)), clean);
-        assert!(check_device(Bytes(bytes)).is_err());
+        assert!(check_device(Bytes(bytes)).is_ok());
     }
 }
 

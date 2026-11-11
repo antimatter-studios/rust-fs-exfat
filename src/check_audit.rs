@@ -409,7 +409,10 @@ pub(super) fn check_reader<Device: BlockRead>(
     let mut bitmap_allocation = Allocation::system(
         metadata.bitmaps[active].ok_or(Error::Invalid("active bitmap missing"))?,
     );
-    if bitmap_allocation.length != bitmap_length as u64 {
+    // Section 7.1.5, Table 22: the bits past ClusterCount are Reserved, so a
+    // bitmap longer than ClusterCount needs is valid. The whole chain is
+    // claimed, but only the first `bitmap_length` bytes are read.
+    if bitmap_allocation.length < bitmap_length as u64 {
         return Err(Error::Invalid("bitmap stream length"));
     }
     ownership.walk(&mut fat, None, &mut bitmap_allocation)?;
@@ -424,7 +427,7 @@ pub(super) fn check_reader<Device: BlockRead>(
     for (identity, stream) in metadata.bitmaps.iter().enumerate() {
         if identity != active {
             if let Some(stream) = stream {
-                if stream.length != bitmap_length as u64 {
+                if stream.length < bitmap_length as u64 {
                     return Err(Error::Invalid("bitmap stream length"));
                 }
                 ownership.walk(&mut fat, Some(&bitmap), &mut Allocation::system(*stream))?;

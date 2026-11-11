@@ -123,7 +123,9 @@ impl Driver for Exfat {
             damaged(
                 "allocation bitmap length",
                 Evidence::Damage(DamageKind::Mismatch),
-                |image| put64(image, ROOT + 24, 14),
+                // Section 7.1.5, Table 22: a longer bitmap is valid; 12 bytes
+                // are fewer than ClusterCount 100 needs.
+                |image| put64(image, ROOT + 24, 12),
             ),
             damaged(
                 "upcase table checksum",

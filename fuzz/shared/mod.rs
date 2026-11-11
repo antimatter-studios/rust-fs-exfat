@@ -128,9 +128,11 @@ pub fn allocation_bitmap(data: &[u8]) -> bool {
     let raw = u32::from_le_bytes(*head);
     let primitive = RawAllocationBitmap::parse(bytes, raw);
     assert_eq!(primitive.bytes, bytes);
+    // Section 7.1.5, Table 22: bits past ClusterCount are Reserved, so a
+    // longer bitmap holds the count as well as an exact one.
     assert_eq!(
         primitive.length_ok,
-        bytes.len() as u64 == u64::from(raw).div_ceil(8)
+        bytes.len() as u64 >= u64::from(raw).div_ceil(8)
     );
     if let Ok(bitmap) = AllocationBitmap::parse(bytes.to_vec(), raw) {
         assert!(primitive.length_ok);

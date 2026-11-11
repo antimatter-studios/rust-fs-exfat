@@ -451,8 +451,10 @@ fn audit_root_entries(
                         format!("BitmapFlags {flags:#04x} sets reserved bits"),
                     )?;
                 }
+                // Section 7.1.5, Table 22: the bits past ClusterCount are
+                // Reserved, so only a bitmap too short for the heap is damage.
                 let required = u64::from(geometry.boot.cluster_count).div_ceil(8);
-                if stream.length != required {
+                if stream.length < required {
                     out.add(
                         DamageKind::Mismatch,
                         Severity::Error,
