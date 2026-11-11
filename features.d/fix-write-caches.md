@@ -1,0 +1,3 @@
+## Writing
+
+| Write caches | Experimental; a write mount keeps each directory it has read and checked, with an index of its up-cased names and the offset before which every entry is in use, and each stream's checked cluster list, keyed by first cluster; every entry set written and every cluster allocated, extended, shrunk or freed updates them, and a failed operation empties them; a `pwrite` 24 directories deep reads what one at the top does, a 256 MiB FAT-chained file written in 1 MiB calls reads no more per call at its end than near its start, and creating 10,000 files in one directory reads no more per file at the end than near the start | Unreleased (#153) | #153 | `tests/write_cost.rs` |

@@ -12,10 +12,64 @@
 //! Every FAT update is written to each FAT the volume has, and every bitmap
 //! update to each Allocation Bitmap, so a two-FAT (TexFAT) volume keeps its
 //! second FAT and bitmap in step with the first.
+//!
+//! # The chain cache
+//!
+//! A stream's clusters are walked and checked against the FAT and the
+//! Allocation Bitmap once, and kept in a [`ChainCache`] keyed by the first
+//! cluster, so a write into a long file does not walk its chain again. Every
+//! change to a stream's clusters goes through [`WriteVolume::allocate_clusters`],
+//! [`WriteVolume::extend_clusters`] or [`WriteVolume::shrink_clusters`], and
+//! each of them updates the cache with the change it made: a new stream
+//! replaces any entry its first cluster had, growth appends, shrinking
+//! truncates, and freeing a whole stream drops its entry.
 
 use super::WriteVolume;
 use crate::{primitives, Error, Result};
 use fs_core::BlockDevice;
+use std::collections::HashMap;
+
+/// The most clusters the chain cache holds before it is emptied between
+/// operations: 32 MiB of cluster numbers, a 128 GiB file at 4 KiB clusters.
+const CHAIN_CACHE_CLUSTERS: usize = 8 * 1024 * 1024;
+
+/// Checked cluster lists of streams, keyed by their first cluster.
+#[derive(Default)]
+pub(crate) struct ChainCache {
+    chains: HashMap<u32, Vec<u32>>,
+    clusters: usize,
+}
+
+impl ChainCache {
+    /// The list for `allocation` if the cache holds one that matches it.
+    fn get(&self, allocation: &Allocation) -> Option<&[u32]> {
+        let chain = self.chains.get(&allocation.first)?;
+        (chain.len() == allocation.count as usize && chain.last() == Some(&allocation.last))
+            .then_some(chain.as_slice())
+    }
+
+    fn insert(&mut self, first: u32, chain: Vec<u32>) {
+        self.clusters += chain.len();
+        if let Some(old) = self.chains.insert(first, chain) {
+            self.clusters -= old.len();
+        }
+    }
+
+    fn remove(&mut self, first: u32) -> Option<Vec<u32>> {
+        let chain = self.chains.remove(&first)?;
+        self.clusters -= chain.len();
+        Some(chain)
+    }
+
+    /// Empties the cache when it holds more than its limit. Only called
+    /// between operations, so nothing in use loses its list.
+    pub(crate) fn trim(&mut self) {
+        if self.clusters > CHAIN_CACHE_CLUSTERS {
+            self.chains.clear();
+            self.clusters = 0;
+        }
+    }
+}
 
 /// The clusters of one stream: where it starts and ends, how many clusters
 /// it holds, and whether they are consecutive and unlinked in the FAT.
@@ -124,6 +178,38 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         Ok(clusters)
     }
 
+    /// Puts `allocation`'s clusters in the chain cache, walking and checking
+    /// them only if it does not hold them already.
+    pub(crate) fn load_chain(&mut self, allocation: &Allocation) -> Result<()> {
+        if allocation.count == 0 || self.chains.get(allocation).is_some() {
+            return Ok(());
+        }
+        let clusters = self.clusters(allocation)?;
+        self.chains.insert(allocation.first, clusters);
+        Ok(())
+    }
+
+    /// The allocation of a FAT-chained stream of `count` clusters from
+    /// `first`, if the chain cache holds its list.
+    pub(crate) fn cached_chain(&self, first: u32, count: u32) -> Option<Allocation> {
+        let chain = self.chains.chains.get(&first)?;
+        if chain.len() != count as usize {
+            return None;
+        }
+        Some(Allocation::from_parts(first, *chain.last()?, count, false))
+    }
+
+    /// The clusters of an allocation already loaded with
+    /// [`Self::load_chain`], in stream order.
+    pub(crate) fn chain(&self, allocation: &Allocation) -> Result<&[u32]> {
+        if allocation.count == 0 {
+            return Ok(&[]);
+        }
+        self.chains
+            .get(allocation)
+            .ok_or(Error::Invalid("stream clusters are not loaded"))
+    }
+
     /// The FAT chain from `first`, read a window of the active FAT at a
     /// time. Every link must stay in the heap and the chain must end within
     /// ClusterCount links, so a cycle is refused.
@@ -179,6 +265,7 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 self.mark(cluster, true)?;
             }
             self.next_free = self.wrap(last + 1);
+            self.chains.insert(first, (first..=last).collect());
             return Ok(Allocation::from_parts(first, last, count, true));
         }
         let clusters = self.free_list(count, start)?;
@@ -188,7 +275,9 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         self.link(&clusters)?;
         let last = *clusters.last().expect("count is not zero");
         self.next_free = self.wrap(last + 1);
-        Ok(Allocation::from_parts(clusters[0], last, count, false))
+        let first = clusters[0];
+        self.chains.insert(first, clusters);
+        Ok(Allocation::from_parts(first, last, count, false))
     }
 
     pub(crate) fn extend_clusters(&mut self, allocation: &mut Allocation, more: u32) -> Result<()> {
@@ -207,12 +296,18 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         if u64::from(more) > self.free_clusters() {
             return Err(Error::NoSpace);
         }
+        // The stream's list is loaded first, so the clusters added below
+        // can be appended to it.
+        self.load_chain(allocation)?;
+        let mut chain = self.chains.remove(allocation.first).expect("loaded above");
         let next = allocation.last.checked_add(1).ok_or(Error::Bounds)?;
         if allocation.no_fat_chain {
             if self.run_is_free(next, more)? {
                 for cluster in next..=allocation.last + more {
                     self.mark(cluster, true)?;
                 }
+                chain.extend(next..=allocation.last + more);
+                self.chains.insert(allocation.first, chain);
                 allocation.last += more;
                 allocation.count = total;
                 self.next_free = self.wrap(allocation.last + 1);
@@ -237,6 +332,8 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         allocation.last = *clusters.last().expect("more is not zero");
         allocation.count = total;
         self.next_free = self.wrap(allocation.last + 1);
+        chain.extend(clusters);
+        self.chains.insert(allocation.first, chain);
         Ok(())
     }
 
@@ -244,7 +341,8 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         if keep >= allocation.count {
             return Ok(());
         }
-        let clusters = self.clusters(allocation)?;
+        self.load_chain(allocation)?;
+        let mut clusters = self.chains.remove(allocation.first).expect("loaded above");
         let (kept, freed) = clusters.split_at(keep as usize);
         if let Some(last) = kept.last() {
             if !allocation.no_fat_chain {
@@ -268,6 +366,10 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 Allocation::from_parts(*first, last, keep, contiguous)
             }
         };
+        if keep > 0 {
+            clusters.truncate(keep as usize);
+            self.chains.insert(allocation.first, clusters);
+        }
         Ok(())
     }
 

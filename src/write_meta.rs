@@ -82,18 +82,13 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             entry[2 + index * 2..4 + index * 2].copy_from_slice(&unit.to_le_bytes());
         }
         self.operation(|volume| {
-            let mut root = volume.root_dir()?;
-            let existing = root
-                .bytes
-                .chunks_exact(ENTRY)
-                .take_while(|candidate| candidate[0] != 0)
-                .position(|candidate| candidate[0] == LABEL);
+            volume.root_changed = true;
+            let (mut root, existing) = volume.root_entry(LABEL)?;
             match existing {
-                Some(index) => {
+                Some(offset) => {
                     let set = super::dir::Set {
-                        clusters: root.clusters.clone(),
-                        in_root: true,
-                        offset: index * ENTRY,
+                        dir: root.first,
+                        offset,
                         raw: entry,
                     };
                     volume.write_set(&set)

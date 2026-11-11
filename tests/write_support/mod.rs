@@ -20,6 +20,8 @@ pub struct Memory {
     /// The only transfer alignment the device accepts, as a raw device with
     /// larger logical blocks does: anything else fails with InvalidInput.
     pub block: u64,
+    /// Every read the device accepted: calls, then bytes.
+    pub reads: Arc<(AtomicU64, AtomicU64)>,
 }
 
 impl Memory {
@@ -29,7 +31,16 @@ impl Memory {
             writes_left: Arc::new(AtomicU64::new(u64::MAX)),
             writable: true,
             block: 512,
+            reads: Arc::new((AtomicU64::new(0), AtomicU64::new(0))),
         }
+    }
+
+    /// Read calls and bytes so far.
+    pub fn read_count(&self) -> (u64, u64) {
+        (
+            self.reads.0.load(Ordering::SeqCst),
+            self.reads.1.load(Ordering::SeqCst),
+        )
     }
 
     /// The same device, refusing transfers not aligned to `block` bytes.
@@ -65,6 +76,10 @@ impl BlockRead for Memory {
                 size: bytes.len() as u64,
             })?;
         output.copy_from_slice(source);
+        self.reads.0.fetch_add(1, Ordering::SeqCst);
+        self.reads
+            .1
+            .fetch_add(output.len() as u64, Ordering::SeqCst);
         Ok(())
     }
 

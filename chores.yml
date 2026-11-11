@@ -225,17 +225,17 @@ tasks:
       - cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - cargo clippy --locked --all-targets --all-features -- -D warnings
   test:unit:
-    # BUDGET: measured 550 lines / 32,436 bytes on a macOS host, with CI's
+    # BUDGET: measured 559 lines / 32,847 bytes on a macOS host, with CI's
     # target path, with renames, times, attributes and the label (#131),
     # tests/cli.rs's sample-volume check (#127), tests/test_contract.rs
     # (#123), the formatter's tests (#132): tests/mkfs.rs and four tests in
-    # tests/capi.rs and tests/cli.rs, directory times (#151) and device
-    # blocks (#152) (398 tests), plus the two slow-test notices macOS CI
-    # prints for the scale audits (112 and 116 bytes) and 40 bytes for timing
-    # digits.
+    # tests/capi.rs and tests/cli.rs, directory times (#151), device blocks
+    # (#152) and the write cost tests (#153), tests/write_cost.rs (401
+    # tests), plus the two slow-test notices macOS CI prints for the scale
+    # audits (112 and 116 bytes) and 40 bytes for timing digits.
     # CI runs `chore build` first, so the log holds no cold build.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 552 32704 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 561 33115 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:images:
     desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'

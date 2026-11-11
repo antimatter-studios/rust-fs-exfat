@@ -47,11 +47,11 @@ fn now_times(now: Timestamp) -> Timestamps {
     }
 }
 
-/// A regular file's entry set and stream, opened for change.
+/// A regular file's entry set and stream, opened for change. Its clusters
+/// are in the chain cache.
 struct OpenFile {
     set: Set,
     allocation: Allocation,
-    clusters: Vec<u32>,
     length: u64,
     valid: u64,
 }
@@ -160,6 +160,7 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 &vec![0; cluster_size as usize],
             )?;
             self.barrier()?;
+            self.cache_new_dir(allocation)?;
             set_stream(&mut raw, &allocation, cluster_size, cluster_size);
             seal(&mut raw);
         }
@@ -168,16 +169,15 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         self.touch(&mut parent, &now)
     }
 
-    fn open_for_write(&self, target: Target) -> Result<OpenFile> {
+    fn open_for_write(&mut self, target: Target) -> Result<OpenFile> {
         let (set, entry): (Set, DirectoryEntry) = target.found.ok_or(Error::NotFound)?;
         if entry.is_directory() {
             return Err(Error::IsDirectory);
         }
-        let (allocation, clusters) = self.stream_allocation(&entry)?;
+        let allocation = self.stream_allocation(&entry)?;
         Ok(OpenFile {
             set,
             allocation,
-            clusters,
             length: entry.stream().data_length(),
             valid: entry.stream().valid_data_length(),
         })
@@ -197,7 +197,6 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         self.shrink_clusters(&mut freed, 0)?;
         self.barrier()?;
         file.allocation = Allocation::EMPTY;
-        file.clusters.clear();
         file.length = 0;
         file.valid = 0;
         Ok(())
@@ -221,12 +220,11 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 let more = needed - file.allocation.count();
                 self.extend_clusters(&mut file.allocation, more)?;
                 self.barrier()?;
-                file.clusters = self.clusters(&file.allocation)?;
             }
             if offset > file.valid {
-                self.zero_range(&file.clusters, file.valid, offset)?;
+                self.zero_range(&file.allocation, file.valid, offset)?;
             }
-            self.write_range(&file.clusters, offset, data)?;
+            self.write_range(&file.allocation, offset, data)?;
             file.length = length;
             file.valid = file.valid.max(end);
         }
@@ -238,7 +236,7 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         let needed = u32::try_from(length.div_ceil(cluster_size)).map_err(|_| Error::NoSpace)?;
         if length < file.length {
             let old = file.allocation;
-            let kept = &file.clusters[..needed as usize];
+            let kept = &self.chain(&old)?[..needed as usize];
             let allocation = match kept {
                 [] => Allocation::EMPTY,
                 [first, ..] => {
@@ -251,7 +249,6 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             file.length = length;
             file.valid = file.valid.min(length);
             file.allocation = allocation;
-            file.clusters.truncate(needed as usize);
             // The entry set stops referring to the clusters before they are
             // freed.
             self.record(file, now)?;
@@ -264,14 +261,13 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 let more = needed - file.allocation.count();
                 self.extend_clusters(&mut file.allocation, more)?;
                 self.barrier()?;
-                file.clusters = self.clusters(&file.allocation)?;
             }
             // Bytes past ValidDataLength read as zeros by the specification,
             // but some readers return what the rest of its cluster holds, so
             // that is zeroed on the device too.
             let cluster_end = file.valid.div_ceil(cluster_size) * cluster_size;
             if file.valid < cluster_end {
-                self.zero_range(&file.clusters, file.valid, cluster_end.min(length))?;
+                self.zero_range(&file.allocation, file.valid, cluster_end.min(length))?;
             }
             file.length = length;
         }
@@ -292,12 +288,12 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         self.write_set(&set)
     }
 
-    fn zero_range(&mut self, clusters: &[u32], from: u64, to: u64) -> Result<()> {
+    fn zero_range(&mut self, allocation: &Allocation, from: u64, to: u64) -> Result<()> {
         let zeros = vec![0; WRITE_CHUNK.min((to - from) as usize)];
         let mut position = from;
         while position < to {
             let count = ((to - position) as usize).min(zeros.len());
-            self.write_range(clusters, position, &zeros[..count])?;
+            self.write_range(allocation, position, &zeros[..count])?;
             position += count as u64;
         }
         Ok(())
@@ -305,7 +301,8 @@ impl<Device: BlockDevice> WriteVolume<Device> {
 
     /// Writes `data` at a stream offset, joining runs of consecutive
     /// clusters into single device writes.
-    fn write_range(&mut self, clusters: &[u32], offset: u64, data: &[u8]) -> Result<()> {
+    fn write_range(&self, allocation: &Allocation, offset: u64, data: &[u8]) -> Result<()> {
+        let clusters = self.chain(allocation)?;
         let cluster_size = self.volume.boot().cluster_size();
         let mut written = 0usize;
         while written < data.len() {
@@ -314,8 +311,12 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             let first = *clusters
                 .get(index)
                 .ok_or(Error::Invalid("write past the file's clusters"))?;
+            // The run is followed only as far as this write reaches, so a
+            // small write into a long contiguous file looks at few clusters.
+            let reach = (position + (data.len() - written).min(WRITE_CHUNK) as u64)
+                .div_ceil(cluster_size) as usize;
             let mut run = 1;
-            while clusters.get(index + run) == Some(&(first + run as u32)) {
+            while index + run < reach && clusters.get(index + run) == Some(&(first + run as u32)) {
                 run += 1;
             }
             let run_end = (index + run) as u64 * cluster_size;

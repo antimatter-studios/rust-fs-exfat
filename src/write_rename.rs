@@ -16,10 +16,8 @@ use crate::timestamp::Timestamp;
 use crate::{Error, Result};
 use fs_core::BlockDevice;
 
-const ENTRY: usize = 32;
-
 fn same_set(first: &Set, second: &Set) -> bool {
-    first.clusters.first() == second.clusters.first() && first.offset == second.offset
+    first.dir == second.dir && first.offset == second.offset
 }
 
 impl<Device: BlockDevice> WriteVolume<Device> {
@@ -60,26 +58,21 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 (false, true) => return Err(Error::IsDirectory),
                 (true, false) => return Err(Error::NotDirectory),
                 (true, true) => {
-                    let (_, clusters) = self.stream_allocation(&target_entry)?;
-                    let bytes =
-                        self.read_clusters(&clusters, target_entry.stream().data_length())?;
-                    let in_use = bytes
-                        .chunks_exact(ENTRY)
-                        .take_while(|entry| entry[0] != 0)
-                        .any(|entry| entry[0] & 0x80 != 0);
-                    if in_use {
+                    if !self.dir_is_empty(target_set.clone(), &target_entry)? {
                         return Err(Error::NotEmpty);
                     }
                 }
                 (false, false) => {}
             }
-            replaced = Some((target_set, self.stream_allocation(&target_entry)?.0));
+            let directory = target_entry.is_directory();
+            replaced = Some((
+                target_set,
+                self.stream_allocation(&target_entry)?,
+                directory,
+            ));
         }
-        if let Some((target_set, _)) = &mut replaced {
+        if let Some((target_set, _, _)) = &mut replaced {
             self.unset(target_set)?;
-            let start = target_set.offset;
-            target.parent.bytes[start..start + target_set.raw.len()]
-                .copy_from_slice(&target_set.raw);
         }
         self.insert(&mut target.parent, raw)?;
         self.touch(&mut target.parent, &now)?;
@@ -96,7 +89,10 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         if !same_parent {
             self.touch(&mut source.parent, &now)?;
         }
-        if let Some((_, allocation)) = replaced {
+        if let Some((_, allocation, directory)) = replaced {
+            if directory {
+                self.dirs.remove(allocation.first_cluster());
+            }
             self.barrier()?;
             let mut freed = allocation;
             self.shrink_clusters(&mut freed, 0)?;
