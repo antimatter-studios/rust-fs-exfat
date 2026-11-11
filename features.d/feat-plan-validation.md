@@ -1,0 +1,3 @@
+## Reading
+
+| Salvage plan validation | Experimental; a plan is checked against a source size without reading, and refused for extents past the source, cluster runs outside the volume's heap, a final length that runs past or cuts a whole step off, or a valid length past the final length; source bytes read by two steps are reported per pair of steps as findings, not refusals, counting only bytes the plan reads; the conformance set checks that the check agrees with materializing; synthetic-only evidence | Unreleased (#95) | #95 | `src/salvage_plan.rs`, `src/salvage_adapter.rs`, `src/conformance.rs`, `tests/salvage_cases/plans.rs` |

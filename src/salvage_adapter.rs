@@ -70,7 +70,10 @@ use std::ops::ControlFlow;
 mod plan;
 
 use plan::Resolved;
-pub use plan::{ClusterLayout, Plan, PlanFault, PlanMetadata, PlanRead, PlanReader, PlanStep};
+pub use plan::{
+    ClusterLayout, Plan, PlanCheck, PlanFault, PlanMetadata, PlanOverlap, PlanRead, PlanReader,
+    PlanStep,
+};
 
 /// Bytes [`SalvageAdapter::materialize`] copies per source read.
 const MATERIALIZE_CHUNK: u64 = 64 * 1024;
@@ -613,8 +616,21 @@ pub trait SalvageAdapter {
         plan: &'a Plan,
     ) -> Result<PlanReader<'a, Self>, SalvageError> {
         self.capabilities().require(Feature::Materialize)?;
-        let resolved = resolve(self, source, plan)?;
+        let resolved = resolve(self, source.size_bytes(), plan)?;
         Ok(PlanReader::new(self, source, plan, resolved))
+    }
+
+    /// Checks a plan against a source of `source_size` bytes without reading
+    /// anything, as [`Self::materialize`] checks it first.
+    ///
+    /// Refuses, as materializing would, extents past the source
+    /// ([`SalvageError::Bounds`]), cluster runs outside
+    /// [`Self::cluster_layout`] and declared lengths that disagree with the
+    /// steps ([`SalvageError::Plan`]). Otherwise returns the output and valid
+    /// lengths and the source bytes more than one step reads, as findings.
+    fn check_plan(&self, plan: &Plan, source_size: u64) -> Result<PlanCheck, SalvageError> {
+        self.capabilities().require(Feature::Materialize)?;
+        Ok(resolve(self, source_size, plan)?.check())
     }
 }
 
@@ -622,7 +638,7 @@ pub trait SalvageAdapter {
 /// is asked for only when the plan names clusters.
 fn resolve<A: SalvageAdapter + ?Sized>(
     adapter: &A,
-    source: &dyn BlockRead,
+    source_size: u64,
     plan: &Plan,
 ) -> Result<Resolved, SalvageError> {
     let layout = if plan.has_clusters() {
@@ -631,5 +647,5 @@ fn resolve<A: SalvageAdapter + ?Sized>(
     } else {
         None
     };
-    plan.resolve(source.size_bytes(), layout.as_ref())
+    plan.resolve(source_size, layout.as_ref())
 }
