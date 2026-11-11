@@ -7,7 +7,7 @@
 //! field, and salvage must rebuild every file the kernel reads. A walk is
 //! one guest call per image, tagged `[kernel vm]`.
 //!
-//! [`kernel_walk`] takes any image under the repository, so the write
+//! `kernel_walk` (tests/walk_support) takes any image under the repository, so the write
 //! direction (#133: this crate writes, the kernel reads back) uses it as it
 //! stands.
 //!
@@ -17,50 +17,17 @@
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "walk_support/mod.rs"]
+mod walk_support;
 
 use fixture_support::{
-    assert_same, differences, fixture, images, kernel_listing, manifest, parse_listing, salvage,
-    strict_listing, Listing,
+    assert_same, differences, fixture, images, kernel_listing, manifest, salvage, strict_listing,
 };
 use fs_core::{BlockRead, FileDevice};
 use fs_exfat::interface::open_path;
-use guest_support::{guest, guest_path, quote, stage_image};
 use sha2::{Digest, Sha256};
-use std::path::Path;
 use std::sync::Arc;
-
-/// The kernel's walk of `image`, mounted read-only in the guest now.
-fn kernel_walk(image: &Path) -> Listing {
-    let tool = repo_file("test-disks/fixture-tool.py");
-    let script = format!(
-        "{stage}mkdir \"$scratch/mnt\"\n\
-         trap 'umount \"$scratch/mnt\" 2>/dev/null || true; rm -rf \"$scratch\"' EXIT\n\
-         modprobe exfat\n\
-         mount -t exfat -o loop,ro,fmask=0,dmask=0,iocharset=utf8 \"$image\" \"$scratch/mnt\"\n\
-         python3 {tool} listing \"$scratch/mnt\" \"$scratch/listing.tsv\" >/dev/null\n\
-         umount \"$scratch/mnt\"\n\
-         cat \"$scratch/listing.tsv\"\n",
-        stage = stage_image(image),
-        tool = quote(&tool),
-    );
-    let name = image.file_name().unwrap().to_string_lossy();
-    let out = guest(
-        "kernel",
-        &format!("mount -o loop,ro and walk {name}"),
-        &script,
-    )
-    .success("the kernel's walk");
-    let listing = parse_listing(&out.stdout, &format!("the kernel's walk of {name}"));
-    println!(
-        "[kernel vm] the kernel listed {} entries of {name}",
-        listing.len()
-    );
-    listing
-}
-
-fn repo_file(relative: &str) -> String {
-    guest_path(&guest_support::repo().join(relative))
-}
+use walk_support::kernel_walk;
 
 fn undamaged() -> Vec<String> {
     images()

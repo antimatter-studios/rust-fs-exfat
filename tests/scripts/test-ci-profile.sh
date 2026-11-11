@@ -128,7 +128,7 @@ required = {
     "images": ["test:images"],
     "test-arm64": ["lint", "build", "test:unit", "test:images"],
     "oracle-macos": ["build", "test:unit", "test:images", "test:oracle-macos"],
-    "test": ["siblings", "tools", "test:oracle", "test:kernel", "vm:status"],
+    "test": ["siblings", "tools", "test:oracle", "test:kernel", "test:third", "vm:status"],
     "package": ["test:package"],
     "semver": ["check:semver"],
     "msrv": ["check:msrv"],

@@ -22,6 +22,9 @@ chore_min_version: 0.19.0
 #   chore test:kernel  THE REAL KERNEL reads every fixture: loop-mounted
 #                      read-only in the guest, walked, and compared with the
 #                      strict reader and salvage
+#   chore test:third   A THIRD IMPLEMENTATION, relan/exfat, built in the guest:
+#                      every fixture read three ways, by it, the kernel and
+#                      this crate
 #   chore test:oracle-macos
 #                      macOS's newfs_exfat, fsck_exfat -n and read-only
 #                      driver, on a Mac host
@@ -235,6 +238,25 @@ tasks:
       - test-disks/build-fixtures.sh --check
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 135 7300 -- scripts/test.sh --locked --release --features cli,test-support --test kernel -- --show-output'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 3
+  test:third:
+    desc: 'CROSS-VALIDATION: relan/exfat, a third implementation built in the guest, reads every fixture as the kernel and this crate do'
+    # tests/third.rs: relan/exfat's FUSE driver, exfatattrib and exfatfsck,
+    # built by scripts/vm-setup.sh at the commit tests/walk_support pins.
+    # Every undamaged fixture is read three ways, and a disagreement names the
+    # path, the field and all three values. relan's own known departures
+    # from the specification are listed in tests/third.rs, each exactly.
+    # Its own tier, like rust-fs-ext4's test:lwext4: a different oracle with
+    # a different failure mode, and its verdict is not exfatprogs'.
+    #
+    # BUDGET: 95 lines / 7,084 bytes warm on a macOS host (#125). A cold
+    # build adds the 38 lines / 1,165 bytes measured on test:oracle, which
+    # builds the same dependencies: about 133 / 8,250. 175 / 10,700 is about
+    # 30% over that. FLOOR: all three tests.
+    cmds:
+      - scripts/tools.sh --check
+      - test-disks/build-fixtures.sh --check
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored third third 175 10700 -- scripts/test.sh --locked --release --features cli,test-support --test third -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored third 3
   test:oracle-macos:
     desc: 'macOS newfs_exfat, fsck_exfat -n and the read-only macOS driver, on a Mac host'
     # The host oracle that was test:oracle before exfatprogs took the name
@@ -243,7 +265,7 @@ tasks:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 310 16000 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle-macos 25
   test:
-    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:kernel', 'chore test:oracle-macos', 'chore test:package', 'chore test:scripts']
+    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:kernel', 'chore test:third', 'chore test:oracle-macos', 'chore test:package', 'chore test:scripts']
   fuzz:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'
