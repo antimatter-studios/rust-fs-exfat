@@ -15,6 +15,20 @@ a million-entry root with the platform checker. The format-maximum boundary and
 resource/I/O refusal tests are synthetic evidence only. The budget and exact
 per-cluster cost are documented in `docs/fsck-memory.md`.
 
+## TexFAT second FAT and Allocation Bitmap
+
+For #40, the FAT layout, the copy comparisons and the salvage `fat_copies` and
+`with_fat` extensions are new code written from Microsoft's public exFAT
+specification, sections 1.5 "Windows CE and TexFAT", 2 "Volume Structure"
+(Table 3), 3.1.6 "FatOffset Field", 3.1.7 "FatLength Field", 3.1.13.1
+"ActiveFat Field", 3.1.16 "NumberOfFats Field", 4 "File Allocation Table
+Region", 7.1 "Allocation Bitmap Directory Entry" and 7.1.2.1 "BitmapIdentifier
+Field", read on 2026-11-11. No TexFAT document beyond those sections, and no
+other filesystem implementation, was an input. macOS does not
+implement TexFAT, so the tests build two-FAT images from those sections and
+check the results against a reader written in the test from the same sections,
+which shares no code with the crate's decoders.
+
 ## Compressed Up-case Table
 
 For #42, the decoder, the `upcase-run` deviation rule and the salvage

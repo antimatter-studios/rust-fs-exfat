@@ -38,6 +38,9 @@ mod stream_policy;
 #[path = "primitive_cases/uninterpreted.rs"]
 mod uninterpreted;
 
+#[path = "primitive_cases/copies.rs"]
+mod copies;
+
 #[cfg(feature = "test-support")]
 #[path = "primitive_cases/structures.rs"]
 mod structures;

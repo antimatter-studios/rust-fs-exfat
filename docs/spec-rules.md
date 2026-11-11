@@ -73,7 +73,8 @@ PercentInUse as stale.
 ## File Allocation Table
 
 The FAT rules read the active FAT (section 3.1.13.1: the inactive one is
-stale). The chain rules apply to the chains the report walks: the root
+stale; see [Not deviations](#not-deviations) for the two copies of a TexFAT
+volume). The chain rules apply to the chains the report walks: the root
 directory, the Allocation Bitmap, the Up-case Table and every directory. File
 data chains are walked only by the strict audit, whose inconsistency result
 covers them.
@@ -182,6 +183,15 @@ These are states or strict-layer checks, not rules the bytes break:
 - VolumeDirty and MediaFailure (3.1.13.2, 3.1.13.3) are states, reported as
   `CheckReport::dirty` and `media_failure`. ClearToZero (3.1.13.4) is valid
   either way.
+- On a two-FAT (TexFAT) volume, a cluster the First and Second FAT, or the
+  First and Second Allocation Bitmap, record differently (#40). Section
+  3.1.13.1 says implementations shall use the active pair and "shall consider
+  the inactive FAT and Allocation Bitmap as stale", and section 4 makes "use
+  of the inactive FAT" implementation specific, so no rule requires the
+  copies to agree. The strict reader and the FAT and bitmap rules read the
+  active pair's contents only; salvage lists the differences as evidence
+  (`ExfatSalvage::fat_copies`). macOS does not implement TexFAT and was not
+  run.
 - Lost clusters, allocated in the bitmap with no allocation consuming them,
   are the existing `unreferenced_clusters` inconsistency. Section 7.1.5.1
   does not require an owner for a set bit.

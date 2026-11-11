@@ -57,7 +57,11 @@ Allocation entries and unknown primary and secondary types, which the
 specification lets a reader skip, with each one's offset, type, InUse bit and
 whether it lies in a valid entry set. `ExfatSalvage::upcase_table` reads the
 volume's Up-case Table, compressed or not, so salvage compares names by the
-volume's own case mappings.
+volume's own case mappings. On a two-FAT (TexFAT) volume,
+`ExfatSalvage::fat_copies` lists every cluster the two FATs or the two
+Allocation Bitmaps record differently, with its byte offset in each copy, and
+`ExfatSalvage::with_fat` walks claims through the inactive pair, which the
+specification calls stale rather than invalid.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).

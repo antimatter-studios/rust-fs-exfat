@@ -19,6 +19,11 @@
 //! [`stale_chains`] groups the non-zero FAT entries of free clusters into the
 //! chains they link and classifies each chain's end, over caller-supplied
 //! [`ClusterRecord`] lookups rather than whole FAT or bitmap slices.
+//! [`FatLayout`] locates the First and Second FAT of a TexFAT volume and names
+//! the active [`FatCopy`]; [`fat_differences`] and [`bitmap_differences`]
+//! compare the two FATs and the two Allocation Bitmaps cluster by cluster
+//! without judging either, since the specification makes the inactive pair
+//! stale, not invalid.
 //! [`uninterpreted_entries`] walks directory bytes for the entries this driver
 //! does not interpret, vendor entries and unknown types, with each one's InUse
 //! bit and the validity of the entry set it lies in.
@@ -64,6 +69,11 @@ mod streaming;
 mod stale;
 
 pub use stale::{stale_chains, ClusterRecord, StaleChainWalk, StaleEnd, StaleSummary};
+
+#[path = "primitive_copies.rs"]
+mod copies;
+
+pub use copies::{bitmap_differences, fat_differences, Compared, FatCopy, FatLayout};
 
 #[path = "primitive_deviations.rs"]
 mod deviations;

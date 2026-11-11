@@ -27,6 +27,9 @@ mod uninterpreted;
 #[path = "salvage_cases/upcase.rs"]
 mod upcase;
 
+#[path = "salvage_cases/copies.rs"]
+mod copies;
+
 use support::Bytes;
 
 const FEATURES: [Feature; 8] = [

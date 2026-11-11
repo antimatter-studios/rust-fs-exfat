@@ -8,14 +8,17 @@
 //! | Report damage | [`primitives::BootRegion`], [`primitives::boot_check`], [`primitives::VolumeState`], [`primitives::RawRootMetadata`], [`primitives::RawUpcaseTable`] |
 //! | Read by extent | positioned source reads |
 //! | Materialize | the trait's provided method over read by extent |
-//! | Stale FAT chains (extension) | [`primitives::stale_chains`] over [`primitives::RawAllocationBitmap`] and active-FAT words |
+//! | Stale FAT chains (extension) | [`primitives::stale_chains`] over [`primitives::RawAllocationBitmap`] and the adapter's FAT words |
 //! | Uninterpreted entries (extension) | [`primitives::uninterpreted_entries`] over the root and directory-candidate claims |
 //! | Up-case Table for name lookups (extension) | [`primitives::RawRootMetadata`] and [`primitives::RawUpcaseTable`], compressed or not |
+//! | Both TexFAT FAT and bitmap copies compared (extension) | [`primitives::FatLayout`], [`primitives::fat_differences`] and [`primitives::bitmap_differences`] |
 //!
 //! Geometry comes from the first usable boot copy: a checksum-valid main copy,
 //! then a checksum-valid backup, then either copy with the exFAT name. No
 //! strict boot, metadata or allocation policy is applied, and no strict mount
-//! is needed.
+//! is needed. Claims are mapped through the active FAT and its Allocation
+//! Bitmap; [`ExfatSalvage::with_fat`] maps them through the other pair of a
+//! two-FAT volume instead.
 
 use super::adapter::{
     Candidate, CandidateKind, CandidateState, Capabilities, Damage, DamageKind, DamageReport,
@@ -24,8 +27,8 @@ use super::adapter::{
 };
 use crate::device::AlignedDevice;
 use crate::primitives::{
-    self, BootRegion, BootSector, EntrySet, FatChainStep, FatValue, FatWindow, Limits,
-    RawRootMetadata, RawUpcaseTable, RootEntryKind, SystemStream, UpcaseIssue, VolumeState,
+    self, BootRegion, BootSector, EntrySet, FatChainStep, FatCopy, FatLayout, FatValue, FatWindow,
+    Limits, RawRootMetadata, RawUpcaseTable, RootEntryKind, SystemStream, UpcaseIssue, VolumeState,
     BOOT_REGION_SECTORS, ENTRY_SIZE, FIRST_CLUSTER,
 };
 use crate::Error;
@@ -48,6 +51,11 @@ pub use uninterpreted::{HoldingSet, UninterpretedEntry, UninterpretedReport};
 mod upcase;
 
 pub use upcase::UpcaseReport;
+
+#[path = "salvage_copies.rs"]
+mod copies;
+
+pub use copies::{CopyDifference, CopyKind, CopyPair, CopyReport};
 
 const SECTOR: u64 = 512;
 /// A file entry set holds at most one primary and eighteen secondaries.
@@ -472,7 +480,10 @@ struct Geometry {
     sector: u64,
     cluster: u64,
     heap: u64,
-    /// The active FAT's byte offset and length.
+    /// The FAT and Allocation Bitmap pair claims are mapped through: the
+    /// active one, unless [`ExfatSalvage::with_fat`] chose the other.
+    copy: FatCopy,
+    /// That FAT's byte offset, and each FAT's length.
     fat: u64,
     fat_bytes: u64,
 }
@@ -488,20 +499,27 @@ impl Geometry {
         {
             return None;
         }
-        let sector = boot.bytes_per_sector();
-        let active = if boot.number_of_fats >= 2 {
-            VolumeState::from_flags(boot.volume_flags).active_fat as u64
-        } else {
-            0
-        };
+        let layout = FatLayout::from_boot(boot);
         Some(Self {
             boot: boot.clone(),
             origin,
-            sector,
+            sector: boot.bytes_per_sector(),
             cluster: boot.cluster_size(),
             heap: boot.heap_offset(),
-            fat: (u64::from(boot.fat_offset) + active * u64::from(boot.fat_length)) * sector,
-            fat_bytes: u64::from(boot.fat_length) * sector,
+            copy: layout.active,
+            fat: layout.offset(layout.active)?,
+            fat_bytes: layout.length,
+        })
+    }
+
+    /// The same geometry over `copy`'s FAT and Allocation Bitmap, when the
+    /// boot fields describe that FAT.
+    fn with_copy(&self, copy: FatCopy) -> Option<Self> {
+        let fat = FatLayout::from_boot(&self.boot).offset(copy)?;
+        Some(Self {
+            copy,
+            fat,
+            ..self.clone()
         })
     }
 
