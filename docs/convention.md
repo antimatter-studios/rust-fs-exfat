@@ -203,6 +203,7 @@ whose rustdoc is the reference:
 | Report damage | `report_damage(source, sink)` | `Damage` values to the sink, then a `DamageReport` |
 | Read by extent | `read_extent(source, extent, offset, output)` | Bytes read |
 | Materialize from a plan | `materialize(source, plan, sink)` | A `MaterializeReport` naming the source of every output byte |
+| Materialize from a plan | `plan_reader(source, plan)` | A `PlanReader` whose `read_at` reads any output offset on demand, with the provenance of the bytes read |
 
 `capabilities()` returns the `Feature` values a driver lacks. Its names are
 format-neutral: one per verb, plus `DeletedCandidates` and `DeletedExtents` for

@@ -1,9 +1,14 @@
 //! Materialization plans: the output a caller asks for, as plain data, and
 //! how a plan resolves onto source bytes before anything is read.
 
-use super::{Extent, Feature, SalvageError};
+use super::{append, Extent, Feature, MaterializedRange, SalvageAdapter, SalvageError};
+use fs_core::BlockRead;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+/// The span a failed source read is retried in, aligned on the source, to
+/// narrow what is lost.
+const RETRY_SPAN: u64 = 512;
 
 /// One operation of a materialization plan.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,12 +251,14 @@ impl Plan {
             let valid_part = kept.min(valid.saturating_sub(output));
             if valid_part > 0 {
                 pieces.push(Piece {
+                    output,
                     length: valid_part,
                     from,
                 });
             }
             if kept > valid_part {
                 pieces.push(Piece {
+                    output: output + valid_part,
                     length: kept - valid_part,
                     from: Origin::Zeros,
                 });
@@ -272,6 +279,8 @@ pub(crate) struct Resolved {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Piece {
+    /// Where the piece starts in the output.
+    pub(crate) output: u64,
     pub(crate) length: u64,
     pub(crate) from: Origin,
 }
@@ -285,4 +294,172 @@ pub(crate) enum Origin {
     Literal {
         step: usize,
     },
+}
+
+/// An executed plan: positioned reads over its output.
+///
+/// It holds the adapter, the source and the plan by reference, and the plan
+/// mapped onto the source, never any output bytes.
+pub struct PlanReader<'a, A: ?Sized> {
+    adapter: &'a A,
+    source: &'a dyn BlockRead,
+    plan: &'a Plan,
+    resolved: Resolved,
+}
+
+/// What one positioned read produced and where its bytes came from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanRead {
+    /// The output offset the read started at.
+    pub offset: u64,
+    /// Bytes read.
+    pub length: u64,
+    /// Contiguous, in output order, covering exactly the bytes read, as in
+    /// [`super::MaterializeReport::ranges`].
+    pub ranges: Vec<MaterializedRange>,
+}
+
+impl PlanRead {
+    /// Output ranges of this read whose source bytes could not be read.
+    pub fn unreadable(&self) -> impl Iterator<Item = Extent> + '_ {
+        self.ranges
+            .iter()
+            .filter(|range| !range.readable)
+            .map(|range| range.output)
+    }
+}
+
+impl<'a, A: SalvageAdapter + ?Sized> PlanReader<'a, A> {
+    pub(crate) fn new(
+        adapter: &'a A,
+        source: &'a dyn BlockRead,
+        plan: &'a Plan,
+        resolved: Resolved,
+    ) -> Self {
+        Self {
+            adapter,
+            source,
+            plan,
+            resolved,
+        }
+    }
+
+    /// The output length.
+    pub fn len(&self) -> u64 {
+        self.resolved.length
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The plan being executed.
+    pub fn plan(&self) -> &'a Plan {
+        self.plan
+    }
+
+    /// The source byte that produces an output byte, if one does, without
+    /// reading. Plan zeros, literals and bytes past the valid length have
+    /// none.
+    pub fn source_of(&self, output: u64) -> Option<u64> {
+        let piece = self.resolved.pieces.get(self.piece_at(output))?;
+        match piece.from {
+            Origin::Source(start) if output >= piece.output => {
+                Some(start + (output - piece.output))
+            }
+            _ => None,
+        }
+    }
+
+    /// Reads output bytes from `offset`, up to the output's end or the
+    /// buffer's length, reading only the source bytes they come from.
+    ///
+    /// A failed source read is retried in 512-byte spans aligned on the
+    /// source; spans that still fail read as zeros and are flagged
+    /// unreadable, and the rest of the request is still read. Fails with
+    /// [`SalvageError::Bounds`] only when `offset` is past the output's end.
+    pub fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<PlanRead, SalvageError> {
+        if offset > self.len() {
+            return Err(SalvageError::Bounds);
+        }
+        let length = (self.len() - offset).min(output.len() as u64);
+        let mut read = PlanRead {
+            offset,
+            length,
+            ranges: Vec::new(),
+        };
+        let end = offset + length;
+        let mut position = offset;
+        for piece in &self.resolved.pieces[self.piece_at(offset)..] {
+            if position >= end {
+                break;
+            }
+            let within = position - piece.output;
+            let count = (piece.length - within).min(end - position);
+            let bytes =
+                &mut output[(position - offset) as usize..(position - offset + count) as usize];
+            match piece.from {
+                Origin::Zeros => {
+                    bytes.fill(0);
+                    append(&mut read.ranges, position, count, None, true);
+                }
+                Origin::Literal { step } => {
+                    let PlanStep::Bytes(literal) = &self.plan.steps[step] else {
+                        unreachable!("a literal piece comes from a bytes step")
+                    };
+                    bytes.copy_from_slice(&literal[within as usize..(within + count) as usize]);
+                    append(&mut read.ranges, position, count, None, true);
+                }
+                Origin::Source(start) => {
+                    self.read_source(start + within, bytes, position, &mut read.ranges);
+                }
+            }
+            position += count;
+        }
+        Ok(read)
+    }
+
+    /// The index of the piece holding an output byte, or the piece count when
+    /// the byte is past the output.
+    fn piece_at(&self, output: u64) -> usize {
+        self.resolved
+            .pieces
+            .partition_point(|piece| piece.output + piece.length <= output)
+    }
+
+    fn read_source(
+        &self,
+        start: u64,
+        bytes: &mut [u8],
+        at: u64,
+        ranges: &mut Vec<MaterializedRange>,
+    ) {
+        let length = bytes.len() as u64;
+        let whole = Extent::new(start, length);
+        if self
+            .adapter
+            .read_extent(self.source, whole, 0, bytes)
+            .is_ok()
+        {
+            append(ranges, at, length, Some(whole), true);
+            return;
+        }
+        let mut done = 0;
+        while done < length {
+            let offset = start + done;
+            let span = (RETRY_SPAN - offset % RETRY_SPAN).min(length - done);
+            let part = Extent::new(offset, span);
+            let piece = &mut bytes[done as usize..(done + span) as usize];
+            let readable = self
+                .adapter
+                .read_extent(self.source, part, 0, piece)
+                .is_ok();
+            if !readable {
+                piece.fill(0);
+            }
+            append(ranges, at + done, span, Some(part), readable);
+            done += span;
+        }
+    }
 }

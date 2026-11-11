@@ -45,8 +45,9 @@
 
 use crate::salvage::{
     Candidate, CandidateState, Capabilities, ClusterLayout, Damage, DamageKind, DamageReport,
-    Extent, ExtentWalk, Feature, Integrity, MaterializeReport, Parent, Plan, PlanFault, PlanStep,
-    SalvageAdapter, SalvageError, ScanReport, Severity, Sink, Tree, WalkEnd,
+    Extent, ExtentWalk, Feature, Integrity, MaterializeReport, MaterializedRange, Parent, Plan,
+    PlanFault, PlanRead, PlanReader, PlanStep, SalvageAdapter, SalvageError, ScanReport, Severity,
+    Sink, Tree, WalkEnd,
 };
 use fs_core::BlockRead;
 use serde::de::DeserializeOwned;
@@ -68,6 +69,9 @@ const READ_BYTES: u64 = 64 * 1024;
 const PLAN_BYTES: u64 = 1024 * 1024;
 /// Walked extents a materialization plan copies.
 const PLAN_EXTENTS: usize = 8;
+/// Bytes per read when a plan's output is read back in pieces: odd, so reads
+/// straddle sector and step boundaries.
+const READ_PIECE: usize = 4093;
 /// The length of the probe extent every source is read and materialized at.
 const PROBE_BYTES: u64 = 4096;
 /// The granularity unreadable ranges fail at.
@@ -407,6 +411,11 @@ impl<D: Driver> Run<'_, D> {
         ) -> Result<MaterializeReport, SalvageError> = Adapter::<D>::materialize;
         let _: fn(&Adapter<D>) -> Result<ClusterLayout, SalvageError> =
             Adapter::<D>::cluster_layout;
+        let _: for<'a> fn(
+            &'a Adapter<D>,
+            &'a dyn BlockRead,
+            &'a Plan,
+        ) -> Result<PlanReader<'a, Adapter<D>>, SalvageError> = Adapter::<D>::plan_reader;
         let _: fn(&D, &dyn BlockRead) -> Adapter<D> = D::salvage;
         self.check(Rule::ReadOnly, "types", true, String::new);
 
@@ -418,6 +427,7 @@ impl<D: Driver> Run<'_, D> {
         plain_data::<DamageReport>();
         plain_data::<Plan>();
         plain_data::<MaterializeReport>();
+        plain_data::<PlanRead>();
         plain_data::<Capabilities>();
         self.check(Rule::Consistency, "types", true, String::new);
     }
@@ -1153,7 +1163,10 @@ impl<D: Driver> Run<'_, D> {
             return;
         }
         match result {
-            Ok(report) => self.provenance(subject, &plan, &report, &output),
+            Ok(report) => {
+                self.provenance(subject, &plan, &report, &output);
+                self.positioned(subject, &plan, &report, &output);
+            }
             Err(error) => self.failed(subject, "materialize", &error),
         }
 
@@ -1269,6 +1282,80 @@ impl<D: Driver> Run<'_, D> {
             }
             (Err(error), _) | (_, Err(error)) => self.failed(subject, "materialize", &error),
         }
+    }
+
+    /// Reading the plan's output in odd-sized pieces from its reader must give
+    /// the bytes and provenance that materializing it gave.
+    fn positioned(
+        &mut self,
+        subject: &Subject<'_, D::Adapter>,
+        plan: &Plan,
+        report: &MaterializeReport,
+        output: &[u8],
+    ) {
+        let case = subject.case;
+        let reader = match subject.adapter.plan_reader(subject.image, plan) {
+            Ok(reader) => reader,
+            Err(error) => return self.failed(subject, "plan_reader", &error),
+        };
+        let mut bytes = Vec::with_capacity(output.len());
+        let mut ranges: Vec<MaterializedRange> = Vec::new();
+        let mut buffer = vec![0; READ_PIECE];
+        let mut offset = 0;
+        let mut answered = true;
+        while offset < reader.len() {
+            let read = match reader.read_at(offset, &mut buffer) {
+                Ok(read) => read,
+                Err(error) => {
+                    answered = false;
+                    self.failed(subject, "read_at", &error);
+                    break;
+                }
+            };
+            bytes.extend_from_slice(&buffer[..read.length as usize]);
+            for range in read.ranges {
+                match ranges.last_mut() {
+                    Some(last)
+                        if last.readable == range.readable
+                            && last.output.end() == Some(range.output.offset)
+                            && match (last.source, range.source) {
+                                (Some(previous), Some(next)) => previous.end() == Some(next.offset),
+                                (None, None) => true,
+                                _ => false,
+                            } =>
+                    {
+                        last.output.length += range.output.length;
+                        if let (Some(previous), Some(next)) = (last.source.as_mut(), range.source) {
+                            previous.length += next.length;
+                        }
+                    }
+                    _ => ranges.push(range),
+                }
+            }
+            if read.length == 0 {
+                break;
+            }
+            offset += read.length;
+        }
+        if !answered {
+            return;
+        }
+        self.check(
+            Rule::Consistency,
+            case,
+            reader.len() == report.length && bytes == output && ranges == report.ranges,
+            || {
+                "reading the plan's output from its reader in pieces differs from materializing it"
+                    .into()
+            },
+        );
+        let past = reader.read_at(reader.len() + 1, &mut buffer);
+        self.check(
+            Rule::Consistency,
+            case,
+            matches!(past, Err(SalvageError::Bounds)),
+            || format!("a read past the plan's output was not refused as out of bounds: {past:?}"),
+        );
     }
 
     /// Checks a materialized output against its plan and its provenance
