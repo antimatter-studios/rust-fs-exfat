@@ -304,7 +304,7 @@ impl<'a> FatReader<'a> {
 /// Failed sectors and bytes past the source's end append zeros and are
 /// returned as ranges relative to the extent; only failed sectors on the
 /// source are added to `unreadable`.
-fn read_tolerant(
+pub(super) fn read_tolerant(
     source: &dyn BlockRead,
     extent: Extent,
     output: &mut Vec<u8>,
@@ -357,7 +357,7 @@ fn cluster_extents(geometry: &Geometry, links: &[(u32, u32)]) -> Vec<Extent> {
 }
 
 /// Sorts extents and joins those that touch or overlap.
-fn merged(mut extents: Vec<Extent>) -> Vec<Extent> {
+pub(super) fn merged(mut extents: Vec<Extent>) -> Vec<Extent> {
     extents.sort();
     let mut result: Vec<Extent> = Vec::new();
     for extent in extents {

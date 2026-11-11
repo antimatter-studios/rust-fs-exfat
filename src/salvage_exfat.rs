@@ -9,6 +9,7 @@
 //! | Read by extent | positioned source reads |
 //! | Materialize | the trait's provided method over read by extent |
 //! | Stale FAT chains (extension) | [`primitives::stale_chains`] over [`primitives::RawAllocationBitmap`] and active-FAT words |
+//! | Uninterpreted entries (extension) | [`primitives::uninterpreted_entries`] over the root and directory-candidate claims |
 //!
 //! Geometry comes from the first usable boot copy: a checksum-valid main copy,
 //! then a checksum-valid backup, then either copy with the exFAT name. No
@@ -36,6 +37,11 @@ use std::ops::ControlFlow;
 mod stale;
 
 pub use stale::{StaleChain, StaleChainReport, StaleEntry};
+
+#[path = "salvage_uninterpreted.rs"]
+mod uninterpreted;
+
+pub use uninterpreted::{HoldingSet, UninterpretedEntry, UninterpretedReport};
 
 const SECTOR: u64 = 512;
 /// A file entry set holds at most one primary and eighteen secondaries.

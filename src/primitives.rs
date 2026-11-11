@@ -19,6 +19,9 @@
 //! [`stale_chains`] groups the non-zero FAT entries of free clusters into the
 //! chains they link and classifies each chain's end, over caller-supplied
 //! [`ClusterRecord`] lookups rather than whole FAT or bitmap slices.
+//! [`uninterpreted_entries`] walks directory bytes for the entries this driver
+//! does not interpret, vendor entries and unknown types, with each one's InUse
+//! bit and the validity of the entry set it lies in.
 //!
 //! Chain, island and allocation-class names describe general concepts. FAT and
 //! cluster-heap geometry retain their exFAT-defined names. These helpers are not
@@ -57,6 +60,14 @@ mod streaming;
 mod stale;
 
 pub use stale::{stale_chains, ClusterRecord, StaleChainWalk, StaleEnd, StaleSummary};
+
+#[path = "primitive_uninterpreted.rs"]
+mod uninterpreted;
+
+pub use uninterpreted::{
+    uninterpreted_entries, DirectoryWalk, SetMembership, UninterpretedCounts, UninterpretedKind,
+    UninterpretedRecord,
+};
 
 pub use streaming::{
     bitmap_contains_all, bitmap_count, claim_bitmap_cluster, directory_record, walk_allocation,

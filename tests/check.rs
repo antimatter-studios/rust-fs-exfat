@@ -1,6 +1,8 @@
 mod interface_support;
 #[path = "check/scale.rs"]
 mod scale;
+#[path = "check/uninterpreted.rs"]
+mod uninterpreted;
 use interface_support::base as support;
 
 use fs_exfat::check::check;

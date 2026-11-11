@@ -51,6 +51,11 @@ evidence rather than trusted files. Plans materialize into a caller's
 `io::Write`, never into the source. As an exFAT extension outside the common
 trait, `ExfatSalvage::stale_chains` lists free clusters whose FAT entries are
 non-zero, which the specification allows, with the chains they still link.
+`ExfatSalvage::uninterpreted_entries`, another such extension, lists the
+directory entries the driver does not interpret, Vendor Extension and Vendor
+Allocation entries and unknown primary and secondary types, which the
+specification lets a reader skip, with each one's offset, type, InUse bit and
+whether it lies in a valid entry set.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).
@@ -94,7 +99,9 @@ Only the destination is written; the source always stays read-only.
 
 `fsck.exfat` is check-only, with no repair mode. It checks boot copies, metadata,
 entry sets, chain allocation, cross-links and unreferenced allocated clusters.
-Dirty/media-failure flags are reported without clearing them. The audit supports
+Dirty/media-failure flags are reported without clearing them. Vendor and unknown
+directory entries the audit does not interpret are counted by kind in
+`uninterpreted_entries`; they never change the verdict. The audit supports
 every valid exFAT cluster count, without a fixed cluster or entry cap. Allocation
 and ownership bitmaps use 1/4 byte per cluster together; FAT and directories are
 streamed in 64 KiB chunks. The total audit memory ceiling is 1,537 MiB, including

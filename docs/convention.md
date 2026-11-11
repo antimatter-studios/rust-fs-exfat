@@ -111,7 +111,10 @@ exFAT example: `ExfatSalvage::stale_chains` in
 nonzero FAT entries and the chains they link (#41). It is a method of the exFAT
 adapter, not of the common trait, and its format knowledge is
 `primitives::stale_chains` in [src/primitive_stale.rs](../src/primitive_stale.rs).
-It has no capability flag yet; see section 8.
+It has no capability flag yet; see section 8. `ExfatSalvage::uninterpreted_entries`
+in [src/salvage_uninterpreted.rs](../src/salvage_uninterpreted.rs) is a second
+such method (#43), over `primitives::uninterpreted_entries` in
+[src/primitive_uninterpreted.rs](../src/primitive_uninterpreted.rs).
 
 ## 3. Strict versus permissive
 
@@ -297,9 +300,15 @@ Existing exFAT work illustrates the boundary:
   [#49](https://github.com/antimatter-studios/rust-fs-exfat/issues/49), rather
   than inventing a common upcase verb.
 - [#43](https://github.com/antimatter-studios/rust-fs-exfat/issues/43) adds
-  evidence for uninterpreted entries. Current root parsing skips benign sets
-  and rejects unknown critical entries
-  ([src/metadata.rs](../src/metadata.rs)).
+  evidence for uninterpreted entries as the exFAT adapter's
+  `uninterpreted_entries` extension, not a common verb: vendor entries and
+  unknown types in the root and every directory candidate, each with its InUse
+  bit and the validity of its entry set. It is evidence, not damage: the
+  specification lets a reader skip them, so `report_damage` and the candidate
+  scan ignore them. The strict API still skips benign sets and rejects unknown
+  critical entries ([src/metadata.rs](../src/metadata.rs),
+  [src/directory.rs](../src/directory.rs)); `check` counts
+  the ones it skips by kind, apart from its verdict.
 - [#44](https://github.com/antimatter-studios/rust-fs-exfat/issues/44) adds
   deviations with byte offsets, specification sections and severity. The
   current `CheckReport` has counts, flags and boot differences, not that list
@@ -407,7 +416,7 @@ rules. The remaining design details belong to #52, with conformance in #53:
    flags; extension flags wait for the first extension. The first, exFAT's
    `stale_chains` (#41), is reached through the concrete adapter type, so it
    has no flag yet; a flag for it would not belong in the format-neutral
-   `Feature` set.
+   `Feature` set. The same holds for `uninterpreted_entries` (#43).
 4. What concrete types represent the shared damage fields, and how do #44's
    byte offsets and specification references map into the shared core and
    format-specific details without adding exFAT names to the trait?

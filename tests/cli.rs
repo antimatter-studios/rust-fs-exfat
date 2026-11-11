@@ -176,3 +176,45 @@ fn check_only_checker_reports_clean_and_dirty_without_changing_bytes() {
     assert_eq!(repair.status.code(), Some(16));
     assert_eq!(std::fs::read(&fixture.image).unwrap(), bytes);
 }
+
+#[test]
+fn fsck_counts_uninterpreted_entries_apart_from_its_verdict() {
+    let fixture = interface_support::Temp::new();
+    let mut bytes = std::fs::read(&fixture.image).unwrap();
+    // A Vendor Extension entry (specification section 7.8) after the name
+    // entry of Sub/Child.bin, which a reader may ignore.
+    let mut child = interface_support::base::file_set("Child.bin", 0x20, 9, 7, true);
+    child[1] += 1;
+    let mut vendor = vec![0u8; 32];
+    vendor[0] = 0xE0;
+    vendor[2..18].fill(0x5A);
+    child.extend_from_slice(&vendor);
+    interface_support::base::seal_set(&mut child);
+    let sub = 38 * 512;
+    bytes[sub..sub + child.len()].copy_from_slice(&child);
+    std::fs::write(&fixture.image, &bytes).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
+        .arg("fsck")
+        .arg(&fixture.image)
+        .arg("-n")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["healthy"], true);
+    let counts = &report["uninterpreted_entries"];
+    assert_eq!(counts["vendor_extension"], 1);
+    for kind in [
+        "vendor_allocation",
+        "unknown_benign_primary",
+        "unknown_critical_primary",
+        "unknown_critical_secondary",
+        "unknown_benign_secondary",
+    ] {
+        assert_eq!(counts[kind], 0, "{kind}");
+    }
+}

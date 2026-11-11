@@ -390,6 +390,7 @@ pub(super) fn check_reader<Device: BlockRead>(
     pending.push(root);
     let mut files = 0u64;
     let mut directories = 1u64;
+    let mut uninterpreted = primitives::UninterpretedCounts::default();
     while let Some(allocation) = pending.pop() {
         let mut cursor = Cursor::new(allocation);
         let mut names = Names {
@@ -397,6 +398,7 @@ pub(super) fn check_reader<Device: BlockRead>(
             records: Vec::new(),
         };
         while let Some(set) = cursor.set(&mut fat)? {
+            uninterpreted.tally(&set);
             let mut entries = directory::parse(&set, boot, &upcase, allocation.root)?;
             if let Some(entry) = entries.pop() {
                 names.add(entry.name_utf16(), &upcase, &mut budget)?;
@@ -423,5 +425,6 @@ pub(super) fn check_reader<Device: BlockRead>(
         dirty: state.dirty,
         media_failure: state.media_failure,
         boot_differences: regions.differences,
+        uninterpreted,
     })
 }
