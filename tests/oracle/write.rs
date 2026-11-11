@@ -7,10 +7,29 @@
 use fs_exfat::interface;
 use fs_exfat::timestamp::{Timestamp, Timestamps};
 use fs_exfat::volume::Volume;
-use fs_exfat::write::{self, Allocation, NewEntry};
+use fs_exfat::write::{self, Allocation, NewEntry, SetTimes};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
+
+/// How the macOS driver shows exFAT attributes in st_flags, as observed on
+/// an image made for the purpose: ReadOnly as UF_IMMUTABLE, Hidden as
+/// UF_HIDDEN, and a file's clear Archive bit as SF_ARCHIVED (a directory's
+/// Archive bit is not shown).
+fn macos_flags(attributes: u16) -> u32 {
+    let directory = attributes & 0x10 != 0;
+    let mut flags = 0;
+    if attributes & 0x01 != 0 {
+        flags |= 0x2;
+    }
+    if attributes & 0x02 != 0 {
+        flags |= 0x8000;
+    }
+    if attributes & 0x20 == 0 && !directory {
+        flags |= 0x10000;
+    }
+    flags
+}
 
 fn listing<Device: fs_core::BlockRead>(volume: &Volume<Device>) -> String {
     fn walk<Device: fs_core::BlockRead>(
@@ -22,7 +41,10 @@ fn listing<Device: fs_core::BlockRead>(volume: &Volume<Device>) -> String {
         for entry in entries {
             let path: String = format!("{prefix}{}", entry.name()).nfc().collect();
             if entry.is_directory() {
-                records.push(format!("d\t0\t-\t{path}\n"));
+                records.push(format!(
+                    "d\t0\t-\t{:x}\t{path}\n",
+                    macos_flags(entry.attributes())
+                ));
                 walk(
                     volume,
                     &format!("{path}/"),
@@ -49,9 +71,10 @@ fn listing<Device: fs_core::BlockRead>(volume: &Volume<Device>) -> String {
                     .expect("every file on the written image has a UTC offset")
             };
             records.push(format!(
-                "f\t{}\t{:x}\t{}\t{}\t{}\t{path}\n",
+                "f\t{}\t{:x}\t{:x}\t{}\t{}\t{}\t{path}\n",
                 file.len(),
                 hash.finalize(),
+                macos_flags(entry.attributes()),
                 milliseconds(&times.modified),
                 milliseconds(&times.accessed),
                 milliseconds(&times.created),
@@ -91,7 +114,10 @@ fn the_writer_changes_a_volume_macos_populated() {
     std::fs::copy(&source, &target).unwrap();
     allocations_leave_the_tree_alone(&target);
     files_and_directories(&target);
-    let tree = truncations_and_removals(&target);
+    truncations_and_removals(&target);
+    let label = "Écrit 2026";
+    let tree = renames_times_attributes_and_label(&target, label);
+    std::fs::write(directory.join(format!("written-label-{sector}.txt")), label).unwrap();
     std::fs::write(
         directory.join(format!("written-expected-{sector}.txt")),
         tree,
@@ -103,7 +129,7 @@ fn the_writer_changes_a_volume_macos_populated() {
 /// shrinking to an unaligned length, growing past an unaligned valid
 /// length, a fragmented file shrunk back to a run, and removed files and
 /// directories, named through the volume's case mapping.
-fn truncations_and_removals(target: &Path) -> String {
+fn truncations_and_removals(target: &Path) {
     let mut volume = write::open_path(target, 0).unwrap();
     let free = volume.free_clusters();
     volume.truncate("/contiguous.bin", 100_001).unwrap();
@@ -152,6 +178,63 @@ fn truncations_and_removals(target: &Path) -> String {
             "{path} reads zeros past its valid length"
         );
     }
+}
+
+/// Renames and moves between macOS's directories and this crate's, a case
+/// change in place, replacements, times with UTC offsets, attributes on files
+/// and a directory, and a non-ASCII label. Returns the tree as this crate's
+/// reader sees it after the unmount.
+fn renames_times_attributes_and_label(target: &Path, label: &str) -> String {
+    let mut volume = write::open_path(target, 0).unwrap();
+    volume.rename("/MixedCase.txt", "/MIXEDCASE.TXT").unwrap();
+    volume
+        .rename("/ascii.txt", "/Written/moved from macOS.txt")
+        .unwrap();
+    volume
+        .rename("/Written/Deep", "/Nested/Deep moved here")
+        .unwrap();
+    volume
+        .rename("/Written/ascii.txt", "/timestamp.bin")
+        .unwrap();
+    volume
+        .rename(
+            "/item-020.txt",
+            "/Written/Many/entry 000 with a name of some length.dat",
+        )
+        .unwrap();
+    volume
+        .rename("/Written/Ünïcödé 目录", "/Written/Ünïcödé 目录 renamed")
+        .unwrap();
+    let time =
+        |milliseconds, offset| Timestamp::from_unix_milliseconds(milliseconds, offset).unwrap();
+    volume
+        .set_times(
+            "/item-030.txt",
+            SetTimes {
+                created: Some(time(1_111_111_111_110, 600)),
+                modified: Some(time(1_222_222_222_220, -210)),
+                accessed: Some(time(1_333_333_334_000, 0)),
+            },
+        )
+        .unwrap();
+    volume
+        .set_times(
+            "/Written/dated.txt",
+            SetTimes {
+                modified: Some(time(1_444_444_444_440, 45)),
+                ..SetTimes::default()
+            },
+        )
+        .unwrap();
+    volume.set_attributes("/item-031.txt", 0x22).unwrap();
+    volume.set_attributes("/item-032.txt", 0x21).unwrap();
+    volume.set_attributes("/item-033.txt", 0).unwrap();
+    volume.set_attributes("/Written/empty", 0x03).unwrap();
+    volume.set_attributes("/Nested", 0x02).unwrap();
+    volume.set_label(label).unwrap();
+    volume.unmount().unwrap();
+    let volume = interface::open_path(target, 0).unwrap();
+    assert_eq!(volume.metadata().label.as_deref(), Some(label));
     listing(&volume)
 }
 

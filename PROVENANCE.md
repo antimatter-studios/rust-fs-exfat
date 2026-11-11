@@ -75,6 +75,19 @@ implementation was an input. Zeroing the rest of the cluster past
 ValidDataLength when a file grows follows the macOS driver's observed reads
 past an unaligned ValidDataLength, recorded in docs/TESTING.md.
 
+## Writing: renames, times, attributes and the label
+
+For #131, `rename`, `set_times`, `set_attributes` and `set_label` are new code
+written from Microsoft's public exFAT specification, sections 6.2 "Directory
+Entry Sets", 7.3 "Volume Label Directory Entry" (7.3.2 CharacterCount, 7.3.3
+VolumeLabel), 7.4.4 "FileAttributes Field", 7.4.5 to 7.4.10 (timestamps, 10ms
+increments and UTC offsets), 7.6.3 "NameLength Field", 7.6.4 "NameHash Field"
+and 7.7 "File Name Directory Entry", and from POSIX rename(2) for which
+targets may be replaced. No other exFAT implementation was an input. How the
+macOS driver shows attributes in st_flags, and that its formatter writes an
+empty label as a Volume Label entry with no characters, were observed by
+black-box use of the host's own tools on images made for the purpose.
+
 ## Cross-linked clusters
 
 For #89, the salvage `cross_links` extension is new code written from

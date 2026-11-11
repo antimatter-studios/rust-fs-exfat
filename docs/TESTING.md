@@ -29,7 +29,7 @@ tier has run.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | 2026-11-11 truncation and removal (#131) with #127's and #123's checks, local macOS: 512 lines, 30494 bytes, 371 tests, without the 60-second slow-test notices the scale audits may print, each about one line and 165 bytes | 515 lines, 30900 bytes, allowing both notices and timing digits | 150 |
+| unit | 2026-11-11 renames, times, attributes and the label (#131) with #127's and #123's checks, local macOS: 524 lines, 31002 bytes, 377 tests, without the 60-second slow-test notices the scale audits may print, each about one line and 165 bytes | 527 lines, 31400 bytes, allowing both notices and timing digits | 150 |
 | oracle | 2026-11-11 write oracle (#129): 302 lines, 12646 bytes, 44 tests including large-volume and million-entry comparisons; the written images add 41 lines, two checker reports and two producer runs (2026-11-10: 223 lines, 11070 bytes, 25 tests) | 310 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |

@@ -59,6 +59,8 @@ pub(crate) struct Target {
     pub(crate) parent: Dir,
     pub(crate) name: Vec<u16>,
     pub(crate) found: Option<(Set, DirectoryEntry)>,
+    /// The first cluster of every directory from the root to the parent.
+    pub(crate) ancestors: Vec<u32>,
 }
 
 /// Checks a path component as a new exFAT file name (Section 7.7.3): 1 to
@@ -186,6 +188,31 @@ pub(crate) fn new_set(
     }
     seal(&mut raw);
     Ok(raw)
+}
+
+/// The same set with a new name: its File Name entries replaced, its
+/// SecondaryCount, NameLength and NameHash updated, and every other
+/// secondary entry kept after the names.
+pub(crate) fn renamed(raw: &[u8], name: &[u16], hash: u16) -> Vec<u8> {
+    let old_names = usize::from(raw[ENTRY + 3]).div_ceil(NAME_UNITS_PER_ENTRY);
+    let others = &raw[(2 + old_names) * ENTRY..];
+    let names = name.len().div_ceil(NAME_UNITS_PER_ENTRY);
+    let mut set = Vec::with_capacity((2 + names) * ENTRY + others.len());
+    set.extend_from_slice(&raw[..2 * ENTRY]);
+    set[1] = (1 + names + others.len() / ENTRY) as u8;
+    set[ENTRY + 3] = name.len() as u8;
+    put16(&mut set, ENTRY + 4, hash);
+    for chunk in name.chunks(NAME_UNITS_PER_ENTRY) {
+        let mut entry = [0u8; ENTRY];
+        entry[0] = NAME;
+        for (position, unit) in chunk.iter().enumerate() {
+            put16(&mut entry, 2 + position * 2, *unit);
+        }
+        set.extend_from_slice(&entry);
+    }
+    set.extend_from_slice(others);
+    seal(&mut set);
+    set
 }
 
 /// The first run of `count` entries not in use (Section 6.2: InUse clear, or
@@ -324,12 +351,14 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             .split_last()
             .ok_or(Error::Invalid("the root directory has no entry set"))?;
         let mut dir = self.root_dir()?;
+        let mut ancestors = vec![self.volume.boot().root_cluster];
         for part in parents {
             let name: Vec<u16> = part.encode_utf16().collect();
             let (set, entry) = self.find(&dir, &name)?.ok_or(Error::NotFound)?;
             if !entry.is_directory() {
                 return Err(Error::NotDirectory);
             }
+            ancestors.push(entry.stream().first_cluster());
             dir = self.open_dir(set, &entry)?;
         }
         let name = file_name(last)?;
@@ -338,6 +367,7 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             parent: dir,
             name,
             found,
+            ancestors,
         })
     }
 

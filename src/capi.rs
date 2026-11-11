@@ -16,7 +16,7 @@ use crate::metadata::RootMetadata;
 use crate::path::Node;
 use crate::timestamp::Timestamp;
 use crate::volume::Volume;
-use crate::write::{self, WriteVolume};
+use crate::write::{self, SetTimes, WriteVolume};
 use crate::{Error, Result};
 use fs_core::ffi::{ffi_guard_cleanup, ffi_guard_or, fs_core_last_error_message, set_last_error};
 use fs_core::{BlockDevice, BlockRead, OwnedRwSlice, OwnedSlice};
@@ -771,6 +771,103 @@ pub unsafe extern "C" fn fs_exfat_unlink(handle: *const FsExfat, path: *const c_
 pub unsafe extern "C" fn fs_exfat_rmdir(handle: *const FsExfat, path: *const c_char) -> c_int {
     guard(-1, || {
         unsafe { write_call(handle, path, |volume, path| volume.rmdir(path)) }?;
+        Ok(0)
+    })
+}
+
+/// Renames or moves `from` to `to`, replacing a file with a file or an empty
+/// directory with a directory as rename(2) does. Returns 0, or -1 with a
+/// diagnostic and errno.
+///
+/// # Safety
+/// The mount must be live and both paths NUL-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_rename(
+    handle: *const FsExfat,
+    from: *const c_char,
+    to: *const c_char,
+) -> c_int {
+    guard(-1, || {
+        let to = unsafe { string(to)? };
+        unsafe { write_call(handle, from, |volume, from| volume.rename(from, to)) }?;
+        Ok(0)
+    })
+}
+
+/// # Safety
+/// `time` must be NULL or point to one readable timestamp record.
+unsafe fn time_change(time: *const FsExfatTimestamp) -> Result<Option<Timestamp>> {
+    let Some(time) = (unsafe { time.as_ref() }) else {
+        return Ok(None);
+    };
+    let offset = if time.offset_known != 0 {
+        time.utc_offset_minutes
+    } else {
+        0
+    };
+    Timestamp::from_unix_milliseconds(time.unix_milliseconds, offset).map(Some)
+}
+
+/// Sets a path's Create, LastModified and LastAccessed times from each
+/// record's `unix_milliseconds`, at its `utc_offset_minutes` when
+/// `offset_known` is set and in UTC otherwise. A NULL record leaves that
+/// time alone. Returns 0, or -1 with a diagnostic and errno.
+///
+/// # Safety
+/// The mount must be live, `path` a NUL-terminated UTF-8 string, and each
+/// record NULL or readable.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_utimens(
+    handle: *const FsExfat,
+    path: *const c_char,
+    created: *const FsExfatTimestamp,
+    modified: *const FsExfatTimestamp,
+    accessed: *const FsExfatTimestamp,
+) -> c_int {
+    guard(-1, || {
+        let times = SetTimes {
+            created: unsafe { time_change(created)? },
+            modified: unsafe { time_change(modified)? },
+            accessed: unsafe { time_change(accessed)? },
+        };
+        unsafe { write_call(handle, path, |volume, path| volume.set_times(path, times)) }?;
+        Ok(0)
+    })
+}
+
+/// Sets ReadOnly (0x01), Hidden (0x02), System (0x04) and Archive (0x20);
+/// other bits are refused and Directory is kept. Returns 0, or -1.
+///
+/// # Safety
+/// The mount must be live and `path` a NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_set_attributes(
+    handle: *const FsExfat,
+    path: *const c_char,
+    attributes: u16,
+) -> c_int {
+    guard(-1, || {
+        unsafe {
+            write_call(handle, path, |volume, path| {
+                volume.set_attributes(path, attributes)
+            })
+        }?;
+        Ok(0)
+    })
+}
+
+/// Sets the volume label: up to 11 UTF-16 units, empty for none. Returns 0,
+/// or -1 with a diagnostic and errno.
+///
+/// # Safety
+/// The mount must be live and `label` a NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_set_volume_label(
+    handle: *const FsExfat,
+    label: *const c_char,
+) -> c_int {
+    guard(-1, || {
+        unsafe { write_call(handle, label, |volume, label| volume.set_label(label)) }?;
         Ok(0)
     })
 }

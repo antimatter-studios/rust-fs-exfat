@@ -46,13 +46,18 @@ mod cache;
 mod dir;
 #[path = "write_file.rs"]
 mod file;
+#[path = "write_meta.rs"]
+mod meta;
 #[path = "write_remove.rs"]
 mod remove;
+#[path = "write_rename.rs"]
+mod rename;
 
 pub use alloc::Allocation;
 pub use cache::CacheView;
 pub use dir::{ATTRIBUTE_ARCHIVE, SETTABLE_ATTRIBUTES};
 pub use file::NewEntry;
+pub use meta::SetTimes;
 
 use crate::volume::{ReadLimits, Volume};
 use crate::{primitives, Error, Result};

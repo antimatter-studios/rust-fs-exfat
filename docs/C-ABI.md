@@ -37,8 +37,18 @@ LastAccessed and Archive. `fs_exfat_truncate(handle, path, length)` shrinks a
 file, freeing clusters past the end, or grows it with bytes that read as zeros.
 `fs_exfat_unlink(handle, path)` removes a file and `fs_exfat_rmdir(handle,
 path)` an empty directory; each clears InUse on the entry set before freeing
-its clusters. All three return 0 or -1. On a read-only mount every write call
-fails with EROFS.
+its clusters. All three return 0 or -1. `fs_exfat_rename(handle, from, to)`
+renames or moves an entry, within or across directories, replacing a file
+with a file or an empty directory with a directory as rename(2) does; a
+directory cannot move below itself. `fs_exfat_utimens(handle, path, created,
+modified, accessed)` sets the times from `fs_exfat_timestamp` records (the
+same record `fs_exfat_stat` fills): `unix_milliseconds`, at
+`utc_offset_minutes` when `offset_known` is set and in UTC otherwise, kept to
+hundredths; a NULL record leaves that time alone. LastAccessed has a
+two-second resolution. `fs_exfat_set_attributes(handle, path, attributes)`
+sets ReadOnly, Hidden, System and Archive, and `fs_exfat_set_volume_label`
+sets a label of up to 11 UTF-16 units, empty for none. All return 0 or -1. On
+a read-only mount every write call fails with EROFS.
 
 `fs_exfat_last_errno` returns the errno value of the last fallible call on the
 thread: 0 after success; ENOENT, ENOTDIR, EEXIST, EISDIR, ENOTEMPTY, ENOSPC,
