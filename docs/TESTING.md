@@ -12,12 +12,30 @@ the oracle's static-library link test.
 Each test tier uses rust-fs-core's tier.sh, refuses skipped and ignored tests,
 and checks a minimum executed count. Logs stay in tmp/logs/.
 
+## CI
+
+Every job in `.github/workflows/ci.yml` runs chore tasks, so a green local task is
+the same evidence as the job that runs it; the workflow's header names each job's
+tasks, and `ci-ok`, the one required check, fails when any job failed, was cancelled
+or was skipped. `unit` runs `chore test:unit` with no fixture images present, then
+`chore lint`; `test-arm64` runs both on aarch64; `oracle-macos` runs the unit and
+macOS oracle tiers; `package` runs `chore test:package`; `semver`, `msrv` and
+`provenance` run `chore check:semver`, `chore check:msrv` and
+`chore check:provenance`; `cli` runs `chore cli:install`, puts the staged tools first
+on PATH and runs `chore test:cli` against them as installed; `scripts` runs
+`chore test:scripts`, the shell tests in `tests/scripts/`, which hold the workflows to
+their headers. A job's tier logs are uploaded as `tier-logs-<job>` once its first
+tier has run.
+
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
 | unit | 2026-11-11 write mount and allocation (#129), local macOS: 466 lines, 28395 bytes, 347 tests, including the 60-second slow-test notice for the 512 MiB bitmap audit (before it the budget stood at 434 lines, 26559 bytes) | 468 lines, 28450 bytes, allowing timing digits | 150 |
 | oracle | 2026-11-11 write oracle (#129): 302 lines, 12646 bytes, 44 tests including large-volume and million-entry comparisons; the written images add 41 lines, two checker reports and two producer runs (2026-11-10: 223 lines, 11070 bytes, 25 tests) | 310 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
+| scripts | 2026-11-11, six files: 23 lines, 1305 bytes, mostly test-fuzz-all.sh's line per check | 30 lines, 1700 bytes, room for two more files | Each file fails itself; `set -e` stops at the first |
+| cli | 2026-11-11, three files: 15 lines, 666 bytes, three of them doctor's staged paths | 20 lines, 900 bytes, room for one more file | 60 of the 64 checks |
+| semver | 2026-11-11, passing against main: 14 lines, 631 bytes, fixed rather than per item | 40 lines, 4000 bytes; a failing run lists every broken item and is not held to it | cargo-semver-checks prints its own check count |
 
 Boot reports validate both copies and report every differing byte. The macOS
 oracle formats fresh 64 MiB images with 512-byte and 4096-byte sectors, checks
@@ -38,8 +56,9 @@ flush calls before checking the actual runner. This addresses #12.
 
 The unit tier and the macOS-only oracle tier are explicit, separate tasks.
 `chore test` requires both. Missing tools and non-macOS oracle invocation fail,
-naming `chore test:oracle`; Linux CI invokes only `chore test:unit`, while
-macOS CI also invokes `chore test:oracle`. No decoder test is ignored.
+naming `chore test:oracle`. CI's `unit` (x86_64) and `test-arm64` (aarch64)
+jobs run `chore test:unit` on Linux; `oracle-macos` runs it and then
+`chore test:oracle` on macOS. No decoder test is ignored.
 
 Directory sets spanning FAT-linked clusters and contiguous subdirectories are
 validated. Fresh images are populated through the macOS driver, then remounted
@@ -110,8 +129,8 @@ why `DirectoryEntry` and `Stream` need none of their own. `chore fuzz -- SECONDS
 the explorer: it runs on nightly, is not a required check, and fails on a crash, on
 a target with no corpus, on a run that failed to start and on a run that executed
 fewer inputs than it had seconds. `.github/workflows/fuzz.yml` runs it nightly and
-keeps reproducers. `scripts/test-fuzz-all.sh`, in `chore lint`, proves each of those
-verdicts against a stub.
+keeps reproducers. `tests/scripts/test-fuzz-all.sh`, in `chore test:scripts`, proves
+each of those verdicts against a stub on every pull request.
 
 `tests/fuzz_decoders.rs` is the gate, in the unit tier: the same harness on the
 pinned toolchain, deterministic, replaying and mutating the corpus. It fails when a
