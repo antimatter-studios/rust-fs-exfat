@@ -11,6 +11,7 @@ pub enum Error {
     NoSpace,
     Exists,
     IsDirectory,
+    NotEmpty,
 }
 
 impl fmt::Display for Error {
@@ -25,6 +26,7 @@ impl fmt::Display for Error {
             Self::NoSpace => formatter.write_str("exFAT volume has too few free clusters"),
             Self::Exists => formatter.write_str("exFAT path already exists"),
             Self::IsDirectory => formatter.write_str("exFAT path is a directory"),
+            Self::NotEmpty => formatter.write_str("exFAT directory is not empty"),
         }
     }
 }

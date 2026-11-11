@@ -65,6 +65,16 @@ files the macOS driver made on the reference volumes, and compares names,
 sizes, times and SHA-256s with the read-only mounted macOS driver after
 `fsck_exfat -n` accepts the volume.
 
+## Writing: truncation and removal
+
+For #131, truncation, `unlink` and `rmdir` are new code written from
+Microsoft's public exFAT specification, sections 6.2 "Directory Entry Sets"
+(InUse), 7.6.2.2 "NoFatChain Field", 7.6.5 "ValidDataLength Field" and 7.6.6
+"DataLength Field", and from this crate's write layer. No other exFAT
+implementation was an input. Zeroing the rest of the cluster past
+ValidDataLength when a file grows follows the macOS driver's observed reads
+past an unaligned ValidDataLength, recorded in docs/TESTING.md.
+
 ## Cross-linked clusters
 
 For #89, the salvage `cross_links` extension is new code written from

@@ -8,9 +8,9 @@ directory iteration, file reads, timestamps, volume-upcase path lookup, a
 C ABI and command-line tools are implemented, which completes
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
 Writing is being built ([#135](https://github.com/antimatter-studios/rust-fs-exfat/issues/135)):
-a volume can be mounted for writing, and files and directories created and
-written. Truncation, removal, renaming and changing times, attributes or the
-label are not implemented yet, and there is no formatter or repair operation.
+a volume can be mounted for writing, files and directories created, written,
+truncated and removed. Renaming and changing times, attributes or the label are
+not implemented yet, and there is no formatter or repair operation.
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
@@ -63,6 +63,18 @@ volumes, a tree written beside macOS's own files (large, fragmented and
 non-ASCII-named files, directories grown past a cluster, gaps and given times)
 passes `fsck_exfat -n`, and the read-only macOS driver lists the same names,
 sizes, times and SHA-256s.
+
+`truncate` shrinks a file, recording the new length before it frees the
+clusters past it, or grows it with bytes that read as zeros: ValidDataLength
+stays where it was and the rest of its cluster is zeroed on the device, since
+some readers return what a cluster holds past it. A shrunk FAT chain whose
+remaining clusters are consecutive is recorded as NoFatChain. `unlink` and
+`rmdir` clear InUse on every entry of the set before they free its clusters;
+`rmdir` refuses a directory holding any entry in use, and `unlink` a
+directory. On the macOS reference volumes, files macOS made and files this
+crate made are truncated both ways and removed, named through the volume's
+case mapping, and the result passes `fsck_exfat -n` and reads back through the
+read-only macOS driver as this crate records it.
 See [features](docs/features.md) and [provenance](PROVENANCE.md).
 Directory entry types, primary/stream/name fields, UTF-16 names, entry-set
 checksums and name hashes are decoded by `fs_exfat::primitives`. Its
@@ -144,6 +156,9 @@ target/release/rust-fs-exfat fs image.dmg cat /file.txt
 target/release/rust-fs-exfat fs image.dmg export /file.txt output.txt --verify
 target/release/rust-fs-exfat fs image.dmg mkdir -p /backup/2026
 target/release/rust-fs-exfat fs image.dmg write /backup/2026/notes.txt < notes.txt
+target/release/rust-fs-exfat fs image.dmg truncate --size 0 /backup/2026/notes.txt
+target/release/rust-fs-exfat fs image.dmg rm /backup/2026/notes.txt
+target/release/rust-fs-exfat fs image.dmg rmdir /backup/2026
 target/release/rust-fs-exfat fsck image.dmg -n
 ```
 
@@ -153,8 +168,9 @@ for people; `cat` writes raw bytes. `--offset BYTES` selects a filesystem within
 an image and must be 512-byte aligned. Export uses `fs_core::cli::transfer`:
 it stages locally, refuses source aliases and existing destinations by default,
 and verifies staged length and SHA-256 before publication when `--verify` is set.
-Only the destination is written; the source always stays read-only. `mkdir`
-and `write` are the only verbs that open the image for writing: the volume is
+Only the destination is written; the source always stays read-only. `mkdir`,
+`write`, `truncate`, `rm` and `rmdir` are the only verbs that open the image
+for writing: the volume is
 marked dirty while they run and clean when they finish, and one already marked
 dirty is refused.
 
