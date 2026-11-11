@@ -25,6 +25,21 @@ writable mount was flushed and marked clean, or -1 when it could not be; a
 mount on which a write failed partway is left marked dirty. `fs_exfat_umount`
 does the same and discards the result.
 
+On a writable mount, `fs_exfat_create(handle, path)` makes an empty file with
+Archive set and `fs_exfat_mkdir(handle, path)` an empty directory; both return
+0 or -1. Names are checked as Section 7.7.3 requires and compared with existing
+ones through the volume's Up-case Table. `fs_exfat_pwrite(handle, path, offset,
+data, length)` writes into an existing file, growing it, with any gap past the
+old valid length reading as zeros; `fs_exfat_write_file(handle, path, data,
+length)` creates the file or replaces its contents. Both return the byte count
+or -1. New entries take the current time in UTC; writes set LastModified,
+LastAccessed and Archive. On a read-only mount every write call fails with
+EROFS.
+
+`fs_exfat_last_errno` returns the errno value of the last fallible call on the
+thread: 0 after success; ENOENT, ENOTDIR, EEXIST, EISDIR, ENOSPC, EROFS,
+ENOTSUP or EINVAL for the matching failure; EIO for device errors and panics.
+
 Mount constructors return NULL on failure. `fs_exfat_stat` returns 0 on success
 and -1 on error. `fs_exfat_read_file` returns a byte count, 0 at EOF, or -1 on
 error; a zero-length read may pass a NULL buffer. Reads beyond ValidDataLength

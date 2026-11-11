@@ -78,7 +78,12 @@ fs_exfat_dir_t *fs_exfat_dir_open(const fs_exfat_t *, const char *path);
 int fs_exfat_dir_next(fs_exfat_dir_t *, fs_exfat_dir_entry *);
 void fs_exfat_dir_close(fs_exfat_dir_t *);
 int64_t fs_exfat_read_file(const fs_exfat_t *, const char *path, uint64_t offset, uint8_t *, size_t);
+int fs_exfat_create(const fs_exfat_t *, const char *path);
+int fs_exfat_mkdir(const fs_exfat_t *, const char *path);
+int64_t fs_exfat_pwrite(const fs_exfat_t *, const char *path, uint64_t offset, const uint8_t *, size_t);
+int64_t fs_exfat_write_file(const fs_exfat_t *, const char *path, const uint8_t *, size_t);
 const char *fs_exfat_last_error(void);
+int fs_exfat_last_errno(void);
 
 #ifdef __cplusplus
 }

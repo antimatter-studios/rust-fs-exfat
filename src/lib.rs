@@ -23,7 +23,7 @@
 //!
 //! ```toml
 //! [dev-dependencies]
-//! fs_exfat = { package = "rust-fs-exfat", version = "0.2.0", features = ["test-support"] }
+//! fs_exfat = { package = "rust-fs-exfat", version = "0.3.0", features = ["test-support"] }
 //! ```
 //!
 //! ```
