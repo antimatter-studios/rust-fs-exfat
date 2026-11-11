@@ -56,10 +56,12 @@ and may declare a final length, a valid length past which output is zeros, and
 the file's name and times. `plan_reader` executes a plan as a positioned reader,
 so any offset of the output can be read on demand. `Plan::digest` is a stable
 SHA-256 of a plan's documented canonical encoding, so a caller knows when a file
-must be materialized again. As an exFAT extension outside the common trait,
-`ExfatSalvage::stale_chains` lists free clusters whose FAT entries are
-non-zero, which the specification allows, with the chains they still link.
-`ExfatSalvage::uninterpreted_entries`, another such extension, lists the
+must be materialized again. On the macOS reference images, every verb agrees
+with the read-only macOS driver's listing, hierarchy and file contents. As an
+exFAT extension outside the common trait, `ExfatSalvage::stale_chains` lists
+free clusters whose FAT entries are non-zero, which the specification allows,
+with the chains they still link. `ExfatSalvage::uninterpreted_entries`, another
+such extension, lists the
 directory entries the driver does not interpret, Vendor Extension and Vendor
 Allocation entries and unknown primary and secondary types, which the
 specification lets a reader skip, with each one's offset, type, InUse bit and
