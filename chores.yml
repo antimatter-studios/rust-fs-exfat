@@ -32,10 +32,55 @@ chore_min_version: 0.19.0
 #   chore test         everything: natively on Linux (test:native); on a Mac,
 #                      test:vm, then test:oracle-macos, package and scripts
 #   chore vm:*         the harness's tasks: boot, provision (scripts/vm-setup.sh:
-#                      exfatprogs and the kernel's exfat module), tear down
+#                      exfatprogs, the kernel's exfat module and relan/exfat),
+#                      tear down
+#
+# WHICH TIER NEEDS WHAT, AND WHERE IT RUNS.
+#
+#   tier             needs            runs where                  CI job
+#   unit             nothing          the host                    unit, test-arm64,
+#                                                                 oracle-macos
+#   images           the fixtures     the host, any architecture  images, test-arm64,
+#                                                                 oracle-macos
+#   oracle           fixtures, VM     tests on the host, every    test (x86_64 KVM)
+#                                     exfatprogs call in the guest
+#   kernel           fixtures, VM     tests on the host, every    test
+#                                     mount in the guest
+#   third            fixtures, VM     tests on the host, relan/   test
+#                                     exfat built and run in the guest
+#   oracle-macos     a Mac            the host: macOS's own tools oracle-macos
+#   vm               fixtures, VM     everything, in the guest    suite-in-vm
+#   fixtures         the VM           the guest                   fixtures
+#
+# WHERE THINGS RUN, and why.
+#
+#   THE LINUX ORACLES RUN IN THE GUEST, ALWAYS. exfatprogs on a workstation
+#   is whatever that machine has, a different version per developer, and a
+#   Mac has none. One Debian guest, one version, the same answers
+#   everywhere. tests/guest_support is the one way in, and
+#   tests/test_contract.rs fails the suite if a test runs a Linux exFAT
+#   tool, a mount or the harness itself any other way.
+#
+#   THE KERNEL AND relan/exfat MOUNT IN THE GUEST, ALWAYS. A loop mount and
+#   a FUSE mount need root and Linux; the host has neither to spare, and a
+#   Mac has the user's own disks attached.
+#
+#   macOS's TOOLS RUN ON A MAC HOST, ALWAYS. newfs_exfat, fsck_exfat and the
+#   read-only macOS driver are a different oracle from the Linux ones, and
+#   exist only there.
+#
+#   THE LINUX TESTS RUN ON LINUX. On a Linux host that is this host. On a
+#   Mac, `chore test` runs `test:vm`, which builds and runs the same sources
+#   in the guest.
 #
 # NOTHING SKIPS: a missing tool, fixture or VM fails the test that needed
 # it, naming the task that provides it.
+#
+# QUIET BY DEFAULT, AND THE BUDGET IS A NUMBER. Every tier runs through
+# rust-fs-core's tier.sh: the whole run goes to tmp/logs/<tier>.log, a pass
+# prints one verdict, and a run that prints more than its measured budget
+# fails with exit 65. Each tier's budget and floor are measured; the
+# comments beside them say where, and docs/TESTING.md tabulates them.
 
 vars:
   # The sibling pins. One place, read by `chore siblings`. URL as well as

@@ -18,8 +18,13 @@ Every job in `.github/workflows/ci.yml` runs chore tasks, so a green local task 
 the same evidence as the job that runs it; the workflow's header names each job's
 tasks, and `ci-ok`, the one required check, fails when any job failed, was cancelled
 or was skipped. `unit` runs `chore test:unit` with no fixture images present, then
-`chore lint`; `test-arm64` runs both on aarch64; `oracle-macos` runs the unit and
-macOS oracle tiers; `package` runs `chore test:package`; `semver`, `msrv` and
+`chore lint`; `fixtures` builds the kernel-made images in the harness VM on x86_64
+KVM and hands them on as an artifact; `images` runs `chore test:images` from that
+artifact; `test` runs `chore test:oracle`, `chore test:kernel` and
+`chore test:third` with every Linux tool in the guest and the runner's own
+exfatprogs made unusable; `suite-in-vm` runs `chore test:vm`; `test-arm64` runs
+lint, the unit tier and `chore test:images` on aarch64, which has no KVM;
+`oracle-macos` runs the unit, images and macOS oracle tiers; `package` runs `chore test:package`; `semver`, `msrv` and
 `provenance` run `chore check:semver`, `chore check:msrv` and
 `chore check:provenance`; `cli` runs `chore cli:install`, puts the staged tools first
 on PATH and runs `chore test:cli` against them as installed; `scripts` runs
@@ -30,7 +35,12 @@ tier has run.
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
 | unit | 2026-11-11 renames, times, attributes and the label (#131) with #127's and #123's checks, local macOS: 524 lines, 31002 bytes, 377 tests, without the 60-second slow-test notices the scale audits may print, each about one line and 165 bytes | 527 lines, 31400 bytes, allowing both notices and timing digits | 150 |
-| oracle | 2026-11-11 write oracle (#129): 302 lines, 12646 bytes, 44 tests including large-volume and million-entry comparisons; the written images add 41 lines, two checker reports and two producer runs (2026-11-10: 223 lines, 11070 bytes, 25 tests) | 310 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
+| images | 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 70 lines, 2800 bytes | 7 |
+| oracle | 2026-11-11 exfatprogs in the guest (#123), local macOS, cold build: 107 lines, 5718 bytes, 2 tests and one `[oracle vm]` line per fixture | 140 lines, 7500 bytes | 2 |
+| kernel | 2026-11-11 (#124), local macOS HVF guest, cold build: 104 lines, 5590 bytes, 3 tests | 135 lines, 7300 bytes | 3 |
+| third | 2026-11-11 relan/exfat (#125), local macOS HVF guest, warm: 95 lines, 7084 bytes, 3 tests; a cold build adds about 38 lines, 1165 bytes | 175 lines, 10700 bytes | 3 |
+| vm | 2026-11-11 the whole suite in the guest (#126), local macOS HVF guest, warm: 625 lines, 38742 bytes, 411 tests; CI's fresh guest adds the toolchain install and a whole build, about 60 lines, 3.5 KB | 860 lines, 51000 bytes | 388 |
+| oracle-macos | 2026-11-11 write oracle (#129): 302 lines, 12646 bytes, 44 tests including large-volume and million-entry comparisons; the written images add 41 lines, two checker reports and two producer runs (2026-11-10: 223 lines, 11070 bytes, 25 tests) | 310 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
 | scripts | 2026-11-11, six files: 23 lines, 1305 bytes, mostly test-fuzz-all.sh's line per check | 30 lines, 1700 bytes, room for two more files | Each file fails itself; `set -e` stops at the first |
@@ -55,10 +65,11 @@ The lint gate tests both accepted file-scoped flushing and rejected global
 flush calls before checking the actual runner. This addresses #12.
 
 The unit tier and the macOS-only oracle tier are explicit, separate tasks.
-`chore test` requires both. Missing tools and non-macOS oracle invocation fail,
-naming `chore test:oracle-macos`. CI's `unit` (x86_64) and `test-arm64` (aarch64)
-jobs run `chore test:unit` on Linux; `oracle-macos` runs it and then
-`chore test:oracle-macos` on macOS. No decoder test is ignored.
+`chore test` requires both; on a Mac it runs the Linux tiers in the guest
+(`chore test:vm`) and the macOS oracle on the host. Missing tools and non-macOS
+oracle invocation fail, naming `chore test:oracle-macos`. CI's `unit` (x86_64) and
+`test-arm64` (aarch64) jobs run `chore test:unit` on Linux; `oracle-macos` runs it
+and then `chore test:oracle-macos` on macOS. No decoder test is ignored.
 
 Directory sets spanning FAT-linked clusters and contiguous subdirectories are
 validated. Fresh images are populated through the macOS driver, then remounted
@@ -133,9 +144,40 @@ linked the packaged library and tested old code. `chore test:package` edits a co
 of the tree after `chore package` and fails unless a test links the edited library.
 A bare `cargo package` still shares the directory, so use the task.
 
-The Linux harness configuration used by other filesystem drivers is not copied:
-there is no Linux guest oracle in the current milestone. Windows formatting is
-additional evidence only if the Windows harness can provide it.
+## The Linux oracles
+
+rust-fs-ext4's test contract is the template, and fs-linux-test-harness the
+guest: `chore siblings`, `chore tools` and `chore vm:*` set it up, and
+`scripts/vm-setup.sh` provisions a Debian 12 guest with exfatprogs, the kernel's
+exfat module and relan/exfat, built at the commit `tests/walk_support` pins.
+
+`chore fixtures` formats fourteen images with `mkfs.exfat` and writes them through
+the kernel's driver on a loop mount: an empty volume, the same tree at three
+geometries, 32 MiB clusters on 4096-byte sectors, fragmented files and
+directories, 30,000 entries in one directory, deleted files, a full volume, and
+damaged copies of the tree and the fragmented image. Each image has a manifest
+saying how it was made and the kernel's listing, every path, size, mode, time and
+SHA-256, captured from a read-only mount in the guest; a damaged copy also has a
+record of every byte range its damage changed, located by `dump.exfat` and the
+kernel, never by this crate.
+
+`chore test:images` reads them with no VM. `chore test:oracle` asks exfatprogs;
+`fsck.exfat -n` cannot see file content, so the overwritten-data copy passes it and
+shows in one file's hash instead. `chore test:kernel` mounts each image read-only
+and compares the kernel's walk with the strict reader and with salvage, and
+proves a dropped last cluster would be caught. `chore test:third` reads each image
+three ways; relan/exfat's own departures from the specification (whole-second
+times, a day late from 2100-03-01, no read-only attribute in its FUSE modes, no
+up-case checksum in its checker) are listed exactly in `tests/third.rs`, and
+anything else fails naming the path, the field and all three values.
+
+Two deviation-report findings are expected on every kernel-made image and
+allowed by rule, severity and offset only: mkfs.exfat 1.2.0 fills the OEM
+Parameters sector's reserved bytes with FFh, and the kernel never updates
+PercentInUse.
+
+Windows formatting is additional evidence only if the Windows harness can
+provide it.
 
 ## Fuzzing
 

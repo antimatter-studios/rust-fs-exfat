@@ -229,11 +229,13 @@ already on the target are kept, as the specification requires.
 
 ## Building and testing
 
-Rust 1.95.0 is pinned. Install `chore` 0.19.0 and check out rust-fs-core v0.4.3
-beside this checkout for the shared development scripts. The library dependency
-itself comes from crates.io.
+Rust 1.95.0 is pinned. Install `chore` 0.19.0, then let it check out the
+siblings and the host tools:
 
 ```sh
+chore siblings   # ../rust-fs-core and ../fs-linux-test-harness at their pinned refs
+chore tools      # ripgrep, python3 with PyYAML, and the VM (Vagrant, QEMU, KVM or HVF)
+chore fixtures   # the kernel-made test-disks/*.img, built in the harness VM
 chore build
 chore lint
 chore test
@@ -243,14 +245,36 @@ chore artifact
 chore fuzz -- 30
 ```
 
-`chore test` runs unit, documentation and macOS image-oracle tests, and the check
-that package verification leaves nothing a later test links. `chore fuzz -- 30` runs
-every decoder's [fuzz target](fuzz/README.md) for 30 seconds and needs nightly Rust
-and cargo-fuzz. Linux CI runs
-the explicitly host-independent `chore test:unit` tier; the oracle tier fails on
-a non-macOS host rather than skipping.
-Tests never silently skip missing prerequisites. Test output is retained in
-`tmp/logs/`, through rust-fs-core's shared budgeted runner.
+The library's rust-fs-core dependency comes from crates.io; the checkout beside
+this one provides the shared development scripts. exfatprogs is never installed
+on the host: it, the Linux kernel's exfat driver and relan/exfat run in the
+[fs-linux-test-harness](https://github.com/antimatter-studios/fs-linux-test-harness)
+guest, a Debian 12 VM that `scripts/vm-setup.sh` provisions.
+
+### Tiers and oracles
+
+| Tier | Needs | What it checks |
+|---|---|---|
+| `chore test:unit` | nothing | the library, synthetic images, the C ABI and CLI, and `tests/test_contract.rs`, which fails the suite if a test runs a Linux tool on the host |
+| `chore test:images` | the fixtures | the strict reader, the allocation audit and salvage on every kernel-made image, against the kernel's own listing captured when it was built |
+| `chore test:oracle` | the VM | exfatprogs in the guest: `fsck.exfat -n` accepts every undamaged fixture and refuses structural damage, and `dump.exfat` agrees with this crate field for field |
+| `chore test:kernel` | the VM | the Linux kernel loop-mounts every fixture read-only, and its walk agrees with the strict reader on every path, size, attribute, time and SHA-256; salvage rebuilds every file it reads |
+| `chore test:third` | the VM | relan/exfat, a third implementation built in the guest at a pinned commit, reads every fixture as the kernel and this crate do |
+| `chore test:oracle-macos` | a Mac | macOS `newfs_exfat`, `fsck_exfat -n` and the read-only macOS driver on newly created images |
+| `chore test:vm` | the VM | every Linux tier above, compiled and run inside the guest |
+| `chore test:package`, `chore test:scripts` | nothing | the packaged crate, and the repository's own shell scripts |
+
+`chore test` runs everything: on Linux natively (`test:native`), with each
+exfatprogs, kernel and relan/exfat call made in the guest; on a Mac, `test:vm` for
+the Linux tiers, then the macOS oracle and the host-only tiers. CI runs the same
+tasks, one job each: the fixtures are built once on x86_64 KVM and handed on as
+an artifact, `test:images` also runs on aarch64 Linux and macOS runners, and
+`suite-in-vm` keeps the Mac's path working.
+
+Tests never silently skip: a missing fixture, tool or VM fails, naming the task
+that provides it. Test output is retained in `tmp/logs/`, through rust-fs-core's
+shared budgeted runner. `chore fuzz -- 30` runs every decoder's
+[fuzz target](fuzz/README.md) for 30 seconds and needs nightly Rust and cargo-fuzz.
 
 ## Validation contract
 
@@ -267,8 +291,18 @@ by Windows, at both sector sizes against the read-only macOS driver and checker.
 Volumes the formatter creates, from 1 MiB to 40 GiB at both platform sector sizes,
 must pass `fsck_exfat -n`, mount under the macOS driver, take its writes and pass
 again; at `newfs_exfat`'s 64 KiB alignment a 64 MiB volume must equal its bytes.
-No Linux VM is needed
-for the macOS oracle contract.
+That macOS contract needs no Linux VM.
+
+The Linux side needs the harness VM. Fixtures are formatted by exfatprogs and
+written by the Linux kernel's exfat driver in the guest, at 512- and 4096-byte
+sectors and 4 KiB to 32 MiB clusters, with damaged copies whose every changed byte
+is recorded. `fsck.exfat -n` must accept every undamaged fixture and `dump.exfat`
+must agree with this crate's boot and metadata parse. The kernel must read every
+fixture as the strict reader does: every path, size, attribute, time and file
+SHA-256. relan/exfat, built in the guest at a pinned commit, must read them the
+same way. Where relan departs from the specification, as `tests/third.rs` lists,
+the kernel and this crate agree.
 
 Only Microsoft's public specification and black-box reference tools are format
-sources. Never use Linux exFAT or exfatprogs source code.
+sources. Never use the source code of Linux exFAT, exfatprogs or relan/exfat: they
+run as oracles in the guest, never linked or read.

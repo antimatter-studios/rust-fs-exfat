@@ -1,6 +1,6 @@
 ## Reading
 
-| Strict filesystem reader | Experimental; boot regions, system metadata, directories, file reads, timestamps and paths compared with the macOS driver on images macOS formatted; raw devices with 4096-byte sectors unreadable (#20) | Unreleased | #1 | `tests/oracle/directory.rs`, `tests/oracle/file.rs`, `tests/oracle/path.rs` |
+| Strict filesystem reader | Experimental; boot regions, system metadata, directories, file reads, timestamps and paths compared with the macOS driver on images macOS formatted, and with the Linux kernel and relan/exfat, path, size, attribute, time and SHA-256, on images the kernel wrote at 512- and 4096-byte sectors; raw devices with 4096-byte sectors unreadable (#20) | Unreleased | #1 | `tests/oracle/directory.rs`, `tests/oracle/file.rs`, `tests/oracle/path.rs`, `tests/images.rs`, `tests/kernel.rs`, `tests/third.rs` |
 
 ## Validation
 
