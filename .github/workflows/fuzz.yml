@@ -1,10 +1,27 @@
 name: fuzz
 
-# The explorer half of the fuzzing setup. The gate half, tests/fuzz_decoders.rs,
-# runs in ci.yml on every pull request because it is deterministic. This one is
-# not: how long a fuzzer ran decides what it found, so a fresh finding would fail
-# whichever unrelated change happened to be open. It runs nightly and on demand,
-# is not a required check, and keeps its reproducers.
+# The explorer half of the fuzzing setup. The gate half --
+# tests/fuzz_decoders.rs, which replays and mutates every seed in
+# fuzz/corpus/ on the pinned stable toolchain -- runs in ci.yml's unit,
+# test-arm64 and oracle-macos jobs on every pull request, because it is
+# deterministic. And tests/scripts/test-fuzz-all.sh, in ci.yml's scripts
+# job, proves on every pull request that scripts/fuzz-all.sh tells a clean
+# run from a crash, a broken build, a missing corpus and an idle target.
+# This one is neither deterministic nor quick, and that is why it is here.
+#
+# A fuzzer's result depends on how long it ran. Putting it in the pull
+# request gate would mean a fresh finding fails whichever unrelated change
+# happened to be open, and a green result would only ever mean "nothing
+# found in the seconds we could spare".
+#
+# So it runs nightly and on demand, is not a required check, and when it
+# finds something the reproducer is uploaded. That reproducer belongs in
+# fuzz/corpus/<target>/, where the gate replays it on every pull request
+# from then on.
+#
+# exFAT is read from cards, sticks and images this reader did not write, and
+# every structure on it is read from an offset the structure before it
+# supplied, which is exactly the threat model a fuzzer is for.
 on:
   workflow_dispatch:
     inputs:
@@ -14,64 +31,101 @@ on:
         default: "120"
   schedule:
     - cron: "0 3 * * *"
+
+# Declared, so the job does not inherit whatever the repository's default
+# token grants.
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: rust-fs-exfat
+
 env:
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: 0
+  CHORE_VERSION: "0.19.0"
+  CARGO_FUZZ_VERSION: "0.13.2"
+
 jobs:
   fuzz:
+    name: fuzz every decoder and salvage target
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      # rust-fs-core at the version Cargo.toml pins, for the tier runner;
+      # `chore siblings` (#120) takes this over, as in ci.yml.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
           ref: v0.4.3
           persist-credentials: false
           path: rust-fs-core
-      # Nightly, not the pin: cargo-fuzz needs -Z sanitizer. The +nightly in
-      # scripts/fuzz-all.sh overrides rust-toolchain.toml for those calls alone.
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+
+      # Nightly, not the pin in rust-toolchain.toml. cargo-fuzz needs
+      # `-Z sanitizer`, which stable does not have. The explicit `+nightly`
+      # in scripts/fuzz-all.sh overrides the pin for those calls alone.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
         with:
           toolchain: nightly
-      - run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
-      - name: install chore
-        env:
-          GH_TOKEN: ${{ github.token }}
+
+      # Building cargo-fuzz takes several minutes and changes about as often
+      # as its pinned version does, so it is cached on that version rather
+      # than on this repository's lockfile.
+      - name: Cache cargo-fuzz
+        id: cache-cargo-fuzz
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Install cargo-fuzz
+        if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
+        run: cargo +nightly install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+
+      - name: Show what the corpus holds
         run: |
-          mkdir -p "$RUNNER_TEMP/chore"
-          archive=chore-0.19.0-linux-x86_64.tar.gz
-          gh release download v0.19.0 -R antimatter-studios/chore -p "$archive" -p checksums.txt -D "$RUNNER_TEMP/chore"
-          cd "$RUNNER_TEMP/chore"
-          grep " $archive\$" checksums.txt | shasum -a 256 -c -
-          tar -xzf "$archive"
-          echo "$RUNNER_TEMP/chore" >> "$GITHUB_PATH"
-      # The input arrives through env, never pasted into the script: an expression
-      # in run: is substituted before the shell parses it. fuzz-all.sh then refuses
-      # anything but a whole number of seconds that fits the job's timeout.
-      - name: fuzz
-        working-directory: rust-fs-exfat
+          set -euo pipefail
+          for dir in fuzz/corpus/*/; do
+            echo "$(basename "$dir"): $(find "$dir" -type f | wc -l | tr -d ' ') seeds"
+          done
+          echo "total: $(find fuzz/corpus -type f | wc -l | tr -d ' ') seeds"
+
+      # The input arrives through env:, never pasted into the script: an
+      # expression in `run:` is substituted before the shell parses it, so
+      # `1; curl ... | sh` would be commands. scripts/fuzz-all.sh then
+      # refuses anything but a whole number of seconds that fits the job's
+      # timeout, before anything is fuzzed.
+      - name: chore fuzz
+        id: tier
         env:
           SECONDS_PER_TARGET: ${{ inputs.seconds || '120' }}
         run: chore fuzz -- "$SECONDS_PER_TARGET"
-      # Without this the finding is lost: the reproducer lives on the runner, and
-      # the runner is thrown away. cancelled() too, since a run stopped at its
-      # timeout still holds whatever the earlier targets found.
-      - name: keep the reproducers
+
+      # WITHOUT THIS THE FINDING IS LOST. A crash reproducer lives in
+      # fuzz/artifacts/<target>/ on the runner, and the runner is thrown
+      # away. `cancelled()` too: a run stopped at its timeout still holds
+      # every crash the earlier targets found.
+      - name: Keep the reproducers
         if: failure() || cancelled()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fuzz-artifacts
           path: rust-fs-exfat/fuzz/artifacts/
           if-no-files-found: ignore
           retention-days: 90
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+      # Each target's whole libFuzzer output, tmp/logs/fuzz-<target>.log, and
+      # the tier's own. Not before the tier ran: there is no log then, and
+      # this step's red would hide the real one (rust-fs-ext4 #306).
+      - name: Keep the fuzz logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: fuzz-logs
-          path: rust-fs-exfat/tmp/logs/
+          name: tier-logs-fuzz
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error

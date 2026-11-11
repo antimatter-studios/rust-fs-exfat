@@ -1,105 +1,312 @@
 name: ci
+
+# EVERY JOB RUNS CHORE TASKS, so a green local `chore <task>` is the same
+# evidence as the job that runs it here. rust-fs-ext4's ci.yml is the
+# template; the jobs it has and this file does not yet are the VM half
+# (#120-#126), and each has a marked place below.
+#
+#   changes       which profile this event runs (scripts/ci-plan.sh: quick
+#                 for a pull request, full for a "red:" one and for
+#                 everything else) and whether the change is more than
+#                 documentation (rust-fs-core's code-changed.sh). Every job
+#                 here runs in both profiles today; the VM jobs will be
+#                 gated on the plan, and ci-ok accepts their skip only where
+#                 it made one.
+#   unit          `chore test:unit` on a runner with NO fixtures: the tests
+#                 that need no tool, no fixture image and no VM, in the
+#                 debug profile that traps an arithmetic overflow. That the
+#                 job passes with test-disks/ empty is what proves the
+#                 split. Then `chore lint`. (`chore build` goes first in
+#                 every job that runs the unit tier, so its log holds no
+#                 cold build.)
+#   fixtures      (#121) `chore fixtures`: the kernel-made images, built in
+#                 the harness VM under KVM on x86_64 after `chore siblings`
+#                 and `chore tools`, handed to the other jobs as an
+#                 artifact.
+#   images        (#121) the fixtures artifact read back with no VM;
+#                 `chore test:images` (#122) takes it over.
+#   test          (#120-#125) x86_64, where GitHub gives us KVM: `chore
+#                 lint` and `chore test`, with every exfatprogs call, every
+#                 kernel mount and every relan/exfat call inside the VM.
+#   test-arm64    aarch64 matters on its own (c_char is unsigned there, and
+#                 Apple Silicon hosts run on it) but GitHub's arm64 runners
+#                 have NO KVM, so no VM can run: this job runs the tiers
+#                 that need none -- lint and the unit tier, and
+#                 `chore test:images` once the fixtures exist (#122).
+#   suite-in-vm   (#126) `chore test:vm`: the whole suite compiled and run
+#                 inside the guest, the way a macOS host runs the Linux one.
+#   oracle-macos  `chore test:unit` on macOS, then `chore test:oracle`:
+#                 macOS's own newfs_exfat, fsck_exfat -n and read-only
+#                 driver, the independent oracle that needs no VM -- only a
+#                 Mac. #123 renames the task test:oracle-macos when the
+#                 exfatprogs oracle takes test:oracle.
+#   package       `chore test:package`: `cargo package` verifies the crate
+#                 as published, and a copy proves packaging leaves nothing a
+#                 later test build links (#5).
+#   semver        `chore check:semver`: the public API against the newest
+#                 crates.io release -- or main, until there is one -- refusing
+#                 a break Cargo.toml's version does not declare.
+#   msrv          `chore check:msrv`: the library and the binary built on
+#                 the toolchain Cargo.toml's `rust-version` names, so the
+#                 declared minimum stays the true one.
+#   cli           `chore cli:install` then `chore test:cli`: the
+#                 command-line tools built in release mode, staged under
+#                 every name first on PATH, and tested AS INSTALLED --
+#                 `rust-fs-exfat doctor` first, then tests/cli/*.sh. A change
+#                 that breaks a tool fails the pull request, not the release.
+#   provenance    `chore check:provenance`: no tracked file names a copyleft
+#                 exFAT implementation's source or licence (AGENTS.md). No
+#                 toolchain: it reads the tree, so it answers in seconds.
+#   scripts       `chore test:scripts`: the shell tests, tests/scripts/*.sh,
+#                 which hold this file, its verdict and the repository's own
+#                 scripts to what they say. No toolchain.
+#   ci-ok         the one required check: green only when every job above
+#                 ran and succeeded (failed, cancelled OR skipped fails it).
+#
+# THE OUTPUT BUDGET IS IN THE TASKS, so it is in this workflow too. Each
+# tier writes its full output to tmp/logs/<tier>.log and prints a verdict; a
+# tier that prints more than its measured budget FAILS (exit 65). Nothing
+# extra is needed in this file: every job runs chore tasks.
+#
+# The logs are uploaded as artifacts (tier-logs-<job>), `if: always()`
+# because the run worth reading is the one that failed -- AND only once the
+# job's first tier step has run (`steps.tier.outcome != 'skipped'`). A job
+# that dies in setup or in lint has written no tmp/logs/*.log, and an upload
+# refusing an empty path would add a second red step hiding the real cause
+# (rust-fs-ext4 #306). tests/scripts/test-ci-profile.sh holds every upload
+# to that.
+#
+# THE LAYOUT. Each job checks this repository out into rust-fs-exfat/ and
+# rust-fs-core into rust-fs-core/ beside it, at the version Cargo.toml pins,
+# because chores.yml runs rust-fs-core's scripts in place from
+# ../rust-fs-core. `chore siblings` (#120) replaces that second checkout.
+# Every `run:` runs in rust-fs-exfat/ (`defaults` below).
+
 on:
   push:
     branches: [main]
+  # NO BRANCH FILTER ON PULL REQUESTS. Every pull request here is a layer of
+  # one stack, based on the layer below it, not on main; with `branches:
+  # [main]` every layer but the bottom one would run nothing.
   pull_request:
+  # The merge queue's run: main plus the queued pull requests, the run that
+  # decides whether they land. The queue reads ci-ok only from a workflow
+  # that triggers here.
   merge_group:
   workflow_dispatch:
+
+# A newer push to a pull request cancels the run still going on the older one,
+# except while the pull request's title starts "red:". Such a pull request
+# holds only its failing test, and its run is the red evidence: it gets a
+# group of its own commit and is never cancelled, so the push that adds the
+# fix, made after the title loses "red:", cannot cancel it either. Keyed by
+# the commit because GitHub keeps one pending run per group even with
+# cancelling off: a second push sharing the group would replace the red run
+# while it waits. tests/scripts/test-red-runs-uncancelled.sh fails if that
+# stops being so.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}${{ startsWith(github.event.pull_request.title, 'red:') && format('-red-{0}', github.event.pull_request.head.sha) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:') }}
+
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: rust-fs-exfat
+
 env:
   RUSTUP_TOOLCHAIN: 1.95.0
   CARGO_TERM_COLOR: never
+  CHORE_VERSION: "0.19.0"
+
 jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-26]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+  changes:
+    name: changes (which profile, and does it need the full pipeline?)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      code: ${{ steps.c.outputs.code }}
+      profile: ${{ steps.plan.outputs.profile }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+          fetch-depth: 0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
           ref: v0.4.3
           persist-credentials: false
           path: rust-fs-core
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - name: Plan the profile
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          profile="$(bash scripts/ci-plan.sh "$EVENT" "$TITLE")"
+          echo "profile=$profile ($EVENT)"
+          echo "profile=$profile" >> "$GITHUB_OUTPUT"
+      - name: Classify the change
+        id: c
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PULL_BASE: ${{ github.event.pull_request.base.sha }}
+          PULL_HEAD: ${{ github.event.pull_request.head.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          range=
+          case "$EVENT" in
+            pull_request) range="$PULL_BASE...$PULL_HEAD" ;;
+            merge_group) range="$MQ_BASE...$MQ_HEAD" ;;
+            push)
+              case "$REF" in
+                refs/heads/*)
+                  if [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ] &&
+                    git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+                    range="$PUSH_BEFORE...$PUSH_AFTER"
+                  fi ;;
+              esac ;;
+          esac
+          if [ -n "$range" ]; then
+            git diff --name-only "$range" | tee "$RUNNER_TEMP/changed.txt"
+            code="$(bash ../rust-fs-core/scripts/code-changed.sh < "$RUNNER_TEMP/changed.txt")"
+          else
+            code=true
+          fi
+          echo "code=$code ($EVENT${range:+ $range})"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  unit:
+    name: unit (no tools, no fixtures)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        # Pinned (CHORE_VERSION) and checked against the release's checksums.
+        run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
         with:
           toolchain: 1.95.0
           components: clippy, rustfmt
-      - name: install chore
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: rust-fs-exfat/scripts/ci-install-chore.sh
-      - run: python3 -m venv "$RUNNER_TEMP/python" && "$RUNNER_TEMP/python/bin/pip" install PyYAML==6.0.3
-      - run: echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
-      - run: chore build && chore lint && chore test:unit && chore package && chore test:package
-        working-directory: rust-fs-exfat
-      - run: chore test:oracle
-        if: runner.os == 'macOS'
-        working-directory: rust-fs-exfat
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+      - name: Host tools for lint
+        # PyYAML for rust-fs-core's ci-gate.sh, ripgrep for check-read-only.sh
+        # and check-provenance.sh. `chore tools` (#120) takes this over.
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends ripgrep >/dev/null
+          python3 -m venv "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/python/bin/pip" install --quiet PyYAML==6.0.3
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          name: logs-${{ matrix.os }}
-          path: rust-fs-exfat/tmp/logs/
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-fs-exfat/target
+          key: ${{ runner.os }}-unit-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-unit-cargo-
+      - name: No fixtures are present
+        run: |
+          set -euo pipefail
+          if ls test-disks/*.img >/dev/null 2>&1; then
+            echo "::error::test-disks/ has images; this job must prove the unit tier needs none"
+            exit 1
+          fi
+      # Everything test:unit links, built first, so the tier's log holds the
+      # tests and not a cold build's hundred `Compiling` lines, which its
+      # measured budget does not allow for.
+      - name: chore build
+        run: chore build
+      - name: chore test:unit
+        id: tier
+        run: chore test:unit
+      - name: chore lint
+        run: chore lint
+      - name: Keep the tier logs
+        # A quiet tier writes its detail to tmp/logs/<tier>.log and prints a
+        # verdict; without this the detail dies with the runner. Not before
+        # the tier ran, though, or there is no log and this step's red hides
+        # the real one (rust-fs-ext4 #306).
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-unit
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+
   fixtures:
     # The harness guest boots on x86_64 KVM; scripts/vm-setup.sh fails
     # unless exfatprogs and the kernel's exfat module are there; and every
     # fixture is formatted by mkfs.exfat and written by the kernel in it.
     # The images, manifests and kernel listings go on as one artifact, so
-    # each later job reads the same build.
+    # each later job reads the same build (#121).
     name: fixtures (harness VM, x86_64 KVM)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
-      - name: install chore
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: rust-fs-exfat/scripts/ci-install-chore.sh
-      - run: python3 -m venv "$RUNNER_TEMP/python" && "$RUNNER_TEMP/python/bin/pip" install PyYAML==6.0.3
-      - run: echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
-      - run: chore siblings
-        working-directory: rust-fs-exfat
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - name: PyYAML
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/python/bin/pip" install --quiet PyYAML==6.0.3
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - name: chore siblings
+        run: chore siblings
       - name: KVM, QEMU and Vagrant
         id: vm-host
         run: ../fs-linux-test-harness/scripts/ci-setup-linux.sh
-        working-directory: rust-fs-exfat
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.vagrant.d/boxes
           key: ${{ steps.vm-host.outputs.box-cache-key }}
-      - run: chore tools
-        working-directory: rust-fs-exfat
-      - run: chore fixtures
-        working-directory: rust-fs-exfat
+      - name: chore tools
+        run: chore tools
+      - name: chore fixtures
+        run: chore fixtures
       - name: chore vm:status (the VM is down again)
         run: '! chore vm:status'
-        working-directory: rust-fs-exfat
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fixtures
           path: rust-fs-exfat/test-disks/exfat-*
           if-no-files-found: error
           retention-days: 7
+
   images:
-    # A job after the fixtures job reads what it built, from the artifact.
+    # A job after the fixtures job reads what it built, from the artifact
+    # (#121; `chore test:images` takes it over in #122).
     name: images (fixtures artifact, no VM)
     needs: fixtures
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
@@ -108,13 +315,359 @@ jobs:
           name: fixtures
           path: rust-fs-exfat/test-disks
       - run: test-disks/build-fixtures.sh --check
-        working-directory: rust-fs-exfat
-  ci-ok:
-    runs-on: ubuntu-latest
-    needs: [test, fixtures, images]
-    if: always()
+
+  # ---------------------------------------------------------------------
+  # THE REST OF THE VM HALF GOES HERE (#122-#126): `test` (x86_64, KVM:
+  # `chore lint` and `chore test` with the oracles in the guest) and
+  # `suite-in-vm` (#126), as rust-fs-ext4's ci.yml has them. Each joins
+  # ci-ok's `needs:` below and the lists in scripts/ci-ok.sh, and
+  # tests/scripts/test-ci-profile.sh holds the two equal.
+  # ---------------------------------------------------------------------
+
+  test-arm64:
+    name: test (aarch64, no KVM on this runner)
+    # (#122) `needs: fixtures`, the fixtures artifact downloaded into
+    # test-disks/, and `chore test:images` after the unit tier.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     steps:
-      - env:
-          RESULTS: ${{ toJSON(needs) }}
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+          components: clippy, rustfmt
+      - name: Host tools for lint
         run: |
-          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends ripgrep >/dev/null
+          python3 -m venv "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/python/bin/pip" install --quiet PyYAML==6.0.3
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-fs-exfat/target
+          key: ${{ runner.os }}-aarch64-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-aarch64-cargo-
+      - name: chore lint
+        run: chore lint
+      # Everything test:unit links, built first, so the tier's log holds the
+      # tests and not a cold build's hundred `Compiling` lines, which its
+      # measured budget does not allow for.
+      - name: chore build
+        run: chore build
+      - name: chore test:unit
+        id: tier
+        run: chore test:unit
+      - name: Keep the tier logs
+        # Not before the tier ran: there is no log then (rust-fs-ext4 #306).
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-test-arm64
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+
+  oracle-macos:
+    name: oracle-macos (macOS newfs_exfat, fsck_exfat and driver)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-fs-exfat/target
+          key: ${{ runner.os }}-oracle-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-oracle-cargo-
+      # Everything test:unit links, built first, so the tier's log holds the
+      # tests and not a cold build's hundred `Compiling` lines, which its
+      # measured budget does not allow for.
+      - name: chore build
+        run: chore build
+      # The unit tier on the host the library's main consumers run, before
+      # the oracle reads what the macOS tools made.
+      - name: chore test:unit
+        id: tier
+        run: chore test:unit
+      - name: chore test:oracle
+        run: chore test:oracle
+      - name: Keep the tier logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-oracle-macos
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+
+  package:
+    name: package (the crate as published)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-package-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-package-cargo-
+      - name: chore test:package
+        id: tier
+        run: chore test:package
+      - name: Keep the tier logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-package
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+
+  semver:
+    name: semver (public API against its baseline)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # The version rust-fs-core's semver-check.sh expects. A prebuilt binary,
+      # checksum-verified by the action, rather than a ten-minute build.
+      CARGO_SEMVER_CHECKS_VERSION: "0.50.0"
+      # A failing tier prints only its verdict by default. Here the tail IS
+      # the answer -- which items broke -- so it is printed in full.
+      OUTPUT_BUDGET_FAIL_TAIL: "200"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+          # Until the crate is on crates.io the baseline is main's tree, read
+          # from the history (scripts/check-semver.sh).
+          fetch-depth: 0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-semver-checks@${{ env.CARGO_SEMVER_CHECKS_VERSION }}
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-fs-exfat/target
+          key: ${{ runner.os }}-semver-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-semver-cargo-
+      - name: chore check:semver
+        id: tier
+        run: chore check:semver
+      - name: Keep the tier logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-semver
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+
+  msrv:
+    name: msrv (Cargo.toml rust-version)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-fs-exfat/target/msrv
+          key: ${{ runner.os }}-msrv-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock', 'rust-fs-exfat/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-msrv-cargo-
+      - name: chore check:msrv
+        # The script installs the toolchain rust-version names; the runner's
+        # rustup is all it needs.
+        run: chore check:msrv
+
+  cli:
+    name: cli (the installed tools, on PATH)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-fs-exfat/target
+          key: ${{ runner.os }}-cli-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cli-cargo-
+      - name: chore cli:install
+        run: chore cli:install
+      # FIRST on PATH, ahead of any fsck.exfat the runner has -- which doctor
+      # then reports as present and not run.
+      - name: The staged tools first on PATH
+        run: scripts/cli-install.sh --print-bin-dir >> "$GITHUB_PATH"
+      - name: chore test:cli
+        id: tier
+        run: chore test:cli
+      - name: Keep the tier logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-cli
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+
+  provenance:
+    name: provenance (no copyleft exFAT source named)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - name: Host tools
+        # ripgrep, which check-provenance.sh searches with. `chore tools`
+        # (#120) takes this over.
+        run: sudo apt-get install -y --no-install-recommends ripgrep >/dev/null
+      - name: chore check:provenance
+        run: chore check:provenance
+
+  scripts:
+    name: scripts (the shell tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: antimatter-studios/rust-fs-core
+          ref: v0.4.3
+          persist-credentials: false
+          path: rust-fs-core
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - name: PyYAML
+        # The workflow guards parse ci.yml and fuzz.yml as YAML.
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/python/bin/pip" install --quiet PyYAML==6.0.3
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - name: chore test:scripts
+        id: tier
+        run: chore test:scripts
+      - name: Keep the tier logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-scripts
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+
+  ci-ok:
+    name: ci-ok
+    if: always()
+    # (#122-#126) test and suite-in-vm join this list.
+    needs: [changes, unit, fixtures, images, test-arm64, oracle-macos, package, semver, msrv, cli, provenance, scripts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - name: Every job ran and succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          # The plan the changes job made: quick or full, and false only for
+          # a change to documentation alone. scripts/ci-ok.sh accepts a skip
+          # only where that plan made one, and refuses a missing plan.
+          PROFILE: ${{ needs.changes.outputs.profile }}
+          CODE: ${{ needs.changes.outputs.code }}
+        run: |
+          set -euo pipefail
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key) \(.value.result)"' | bash scripts/ci-ok.sh

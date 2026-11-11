@@ -270,3 +270,25 @@ fn fsck_lists_spec_deviations_apart_from_its_verdict() {
     assert_eq!(deviations["skipped"], serde_json::json!([]));
     assert_eq!(deviations["skipped_omitted"], 0);
 }
+
+/// The `cli` tier (tests/cli/*.sh) runs the installed tools on
+/// tests/cli/sample.img.gz, and checks the decompressed bytes against
+/// tests/cli/sample.img.sha256. This holds that digest to the volume this
+/// file's tests build, so both suites test the same bytes and a change to
+/// the builder that leaves the shell suite's copy stale fails here.
+#[test]
+fn the_cli_tiers_sample_volume_is_the_one_these_tests_build() {
+    use sha2::{Digest, Sha256};
+    let digest: String = Sha256::digest(interface_support::image())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cli/sample.img.sha256");
+    let recorded = std::fs::read_to_string(path).unwrap();
+    assert_eq!(
+        recorded.trim(),
+        digest,
+        "tests/cli/sample.img.gz and its .sha256 are stale: regenerate them from \
+         tests/interface_support::image()"
+    );
+}

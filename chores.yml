@@ -149,7 +149,6 @@ tasks:
   lint:
     cmds:
       - bash scripts/test-image-safety.sh
-      - bash scripts/test-fuzz-all.sh
       - bash ../rust-fs-core/scripts/agents-core-check.sh
       - bash ../rust-fs-core/scripts/changelog-check.sh
       - bash ../rust-fs-core/scripts/features-check.sh
@@ -163,15 +162,18 @@ tasks:
       - cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - cargo clippy --locked --all-targets --all-features -- -D warnings
   test:unit:
+    # BUDGET: 468 / 28,450 plus one 69-byte line for tests/cli.rs's check that
+    # the cli tier's sample volume is the one the cargo tests build (#127).
+    # CI runs `chore build` first, so the log holds no cold build.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 468 28450 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 469 28519 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:oracle:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 310 16000 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 25
   test:
-    cmds: ['chore test:unit', 'chore test:oracle', 'chore test:package']
+    cmds: ['chore test:unit', 'chore test:oracle', 'chore test:package', 'chore test:scripts']
   fuzz:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'
@@ -182,7 +184,85 @@ tasks:
       - 'cargo package --locked --all-features --allow-dirty --target-dir "${CARGO_TARGET_DIR:-target}/package-verify"'
   test:package:
     cmds:
+      # The real tree packages, then a copy proves packaging leaves nothing a
+      # later test build links. CI's `package` job runs this task alone.
+      - task: package
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored package package 20 1000 -- bash scripts/test-package-isolation.sh'
+  test:scripts:
+    desc: The shell tests (tests/scripts/*.sh), every one by glob
+    # By glob, so a test added later needs no edit here -- a guard that has to
+    # be registered somewhere else is a guard that gets silently skipped.
+    # BUDGET: measured at 23 lines / 1,305 bytes with six files, most of it
+    # test-fuzz-all.sh's line per check. A new file adds its `== name` line
+    # and a verdict, so 30 / 1,700 leaves room for two.
+    cmds:
+      - |
+        set -eu
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 30 1700 -- bash -c '
+          set -eu
+          for t in tests/scripts/*.sh; do
+            echo "== $t"
+            bash "$t"
+          done
+        '
+
+  check:semver:
+    desc: Refuse a public-API break the version in Cargo.toml does not declare
+    # Against the newest crates.io release once there is one, and against main
+    # until then: scripts/check-semver.sh says why. No `sources:` on purpose --
+    # the baseline moves without this tree changing, so a fingerprint would
+    # call a stale answer up to date. A failing run prints every broken item
+    # and is not held to the budget.
+    #
+    # BUDGET: a passing run measured 14 lines / 631 bytes against main; the
+    # lines are fixed, not per item, so 40 / 4,000 leaves room for a warning
+    # block without masking a flood.
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh semver semver 40 4000 -- bash scripts/check-semver.sh'
+
+  check:msrv:
+    desc: Build the library and binary on the toolchain Cargo.toml's rust-version names
+    # The declared minimum is a claim a consumer acts on. This is what keeps
+    # it true: a newer std API used in library code turns it red here, not in
+    # someone else's build. The script reads the version out of Cargo.toml.
+    cmds: ['bash scripts/msrv.sh']
+
+  cli:install:
+    desc: 'Build the command-line tools (release, --features cli) and stage them as an install prefix: tmp/cli/bin under every name, tmp/cli/share the man pages and completions'
+    # The layout an install has: the multi-call binary as rust-fs-exfat and
+    # each dotted name a relative symlink to it. It prints the PATH line;
+    # `test:cli` tests whatever PATH finds, so that directory goes first.
+    cmds: ['bash scripts/cli-install.sh']
+
+  test:cli:
+    desc: 'The command-line tools AS INSTALLED, found on PATH: doctor first, then every tests/cli/test-*.sh'
+    # Tests the installed artifact, not a cargo target. `rust-fs-exfat doctor`
+    # runs before any tool is tested and fails the tier if a name is missing
+    # or shadowed, naming the fix. See scripts/test-cli.sh.
+    #
+    # FLOOR: each file prints a `test result: ok. N passed` line, which
+    # test-floor.sh sums as it does cargo's. 64 checks ran when the tier was
+    # added; the floor is about 95% of that.
+    #
+    # BUDGET: three files printed 15 lines and 666 bytes, three of them
+    # doctor's lines naming the staged paths. A passing file adds three lines
+    # and about 70 bytes, so 20 / 900 leaves room for one more.
+    cmds:
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips cli cli 20 900 -- bash scripts/test-cli.sh'
+      - bash ../rust-fs-core/scripts/test-floor.sh cli 60
+
+  check:provenance:
+    desc: No tracked file names exFAT implementations' copyleft sources or licences
+    # A chore task naming a script, and nothing else. CI runs it as its own
+    # job, `provenance`, and `lint` runs it too, so a local `chore lint`
+    # reproduces that job.
+    cmds: ['bash scripts/check-provenance.sh']
+
+  check:ci-gate:
+    desc: The one required check stands for every job in ci.yml
+    # `lint` runs it too; this is the same check alone.
+    cmds: ['bash ../rust-fs-core/scripts/ci-gate.sh']
+
   staticlib:
     cmds:
       - cargo build --locked --release --lib
