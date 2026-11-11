@@ -76,8 +76,11 @@ const MAX_CLUSTER_COUNT: u32 = 0xFFFF_FFF5;
 const MAX_CLUSTER_SHIFT: u8 = 25;
 /// The specification's largest directory.
 const DIRECTORY_LIMIT: u64 = 256 << 20;
-/// The specification's largest upcase table.
-const UPCASE_LIMIT: u64 = 128 << 10;
+/// The most of an Up-case Table salvage reads into memory. No rule caps the
+/// table's DataLength (sections 7.2.4, 7.2.5 and 7.2.5.1; #91), and a
+/// compressed table may be longer than an uncompressed one's 128 KiB, so this
+/// bounds memory as `DIRECTORY_LIMIT` does a directory's: it is not damage.
+const UPCASE_READ_LIMIT: u64 = DIRECTORY_LIMIT;
 const BOOT_VOLUME_FLAGS: u64 = 106;
 const BOOT_ROOT_CLUSTER: u64 = 96;
 
@@ -1106,26 +1109,25 @@ fn audit_upcase(
     out: &mut Findings<'_>,
 ) -> ControlFlow<()> {
     let structure = "upcase table";
-    if stream.length == 0 || stream.length > UPCASE_LIMIT {
+    if stream.length == 0 {
         return out.add(
             DamageKind::Malformed,
             Severity::Error,
             entry,
             structure,
-            format!(
-                "declares {} bytes; a table holds 1 to {UPCASE_LIMIT}",
-                stream.length
-            ),
+            "declares 0 bytes; a table maps 0000h to FFFFh".into(),
         );
     }
     let geometry = mapper.geometry;
-    let chain = mapper.chain(
-        stream.first_cluster,
-        stream.length.div_ceil(geometry.cluster),
-        false,
-    );
+    let read = stream.length.min(UPCASE_READ_LIMIT);
+    let chain = mapper.chain(stream.first_cluster, read.div_ceil(geometry.cluster), false);
     if chain.end != ChainEnd::Covered {
         return chain_damage(geometry, &chain, entry, structure, out);
+    }
+    if stream.length > UPCASE_READ_LIMIT {
+        // Longer than salvage holds in memory: its chain is checked as far as
+        // the limit, and its content is not read.
+        return ControlFlow::Continue(());
     }
     let location = geometry.extents(&chain.runs, stream.length)[0];
     let bytes = read_runs(geometry, mapper.source, &chain.runs, structure, out)?;

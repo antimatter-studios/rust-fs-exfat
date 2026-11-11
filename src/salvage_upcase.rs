@@ -12,7 +12,7 @@
 //! table is [`SalvageAdapter::report_damage`](super::SalvageAdapter)'s.
 
 use super::stale::{merged, read_tolerant};
-use super::{ExfatSalvage, Mapper, DIRECTORY_LIMIT, UPCASE_LIMIT};
+use super::{ExfatSalvage, Mapper, DIRECTORY_LIMIT, UPCASE_READ_LIMIT};
 use crate::primitives::{self, RawRootMetadata, RawUpcaseTable, RootEntryKind};
 use crate::salvage::adapter::{Extent, SalvageError};
 use fs_core::BlockRead;
@@ -77,8 +77,10 @@ impl ExfatSalvage {
     /// This is an exFAT extension, not a verb of the common trait. Nothing is
     /// rejected: a missing entry, a broken chain, unreadable bytes or a table
     /// that fails its own checks leave [`UpcaseReport::usable`] false, and the
-    /// report's lookups then up-case by Table 24 alone. A table longer than
-    /// 128 KiB, an uncompressed table's size, is not read.
+    /// report's lookups then up-case by Table 24 alone. No rule caps the
+    /// table's length, and a compressed table may be longer than an
+    /// uncompressed one's 128 KiB; one longer than 256 MiB, the most salvage
+    /// holds of a directory, is not read.
     ///
     /// Fails only with [`SalvageError::NoGeometry`], when no boot copy gave
     /// geometry.
@@ -115,7 +117,7 @@ impl ExfatSalvage {
             geometry.cluster_offset(cluster) + position as u64 % geometry.cluster,
             primitives::ENTRY_SIZE as u64,
         ));
-        if stream.length == 0 || stream.length > UPCASE_LIMIT {
+        if stream.length == 0 || stream.length > UPCASE_READ_LIMIT {
             return Ok(report);
         }
         let claim = mapper.chain(
