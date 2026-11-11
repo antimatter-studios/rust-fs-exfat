@@ -1,4 +1,4 @@
-# Read-only C ABI
+# C ABI
 
 Include `include/fs_exfat.h` and link `libfs_exfat.a`. `chore staticlib` builds
 the default library without optional CLI dependencies. The C header is checked
@@ -6,10 +6,24 @@ by a C compiler, and the macOS oracle also links and executes a C caller.
 
 `fs_exfat_mount(path, offset)` opens a UTF-8 image/device path read-only.
 `fs_exfat_mount_with_callbacks(config, offset)` accepts only a positioned read
-callback and a fixed source size; there are no write, resize or flush callbacks.
+callback and a fixed source size, and the mount it makes never writes.
 The callback must fill the entire requested buffer and return zero on success,
 or return a nonzero error. Reads reaching callbacks are 512-byte aligned. A
 partition offset must also be a multiple of 512 and lie inside the source.
+
+`fs_exfat_mount_rw(path, offset)` opens the path read-write and mounts the
+volume for writing; `fs_exfat_mount_rw_with_callbacks(config, offset)` does the
+same through read, write and optional flush callbacks, each returning zero on
+success. Writes reaching callbacks are whole volume sectors at sector-aligned
+offsets. A writable mount refuses a volume already marked dirty or reporting
+media failures, sets VolumeDirty in the Main Boot Sector until it is unmounted,
+and serializes its calls with a lock. Every read call works on either kind of
+mount and sees the writes made so far. `fs_exfat_flush` writes pending changes
+and flushes the source; it returns 0, or -1 on error and on a read-only mount.
+`fs_exfat_umount_checked` closes either kind of mount and returns 0 when a
+writable mount was flushed and marked clean, or -1 when it could not be; a
+mount on which a write failed partway is left marked dirty. `fs_exfat_umount`
+does the same and discards the result.
 
 Mount constructors return NULL on failure. `fs_exfat_stat` returns 0 on success
 and -1 on error. `fs_exfat_read_file` returns a byte count, 0 at EOF, or -1 on

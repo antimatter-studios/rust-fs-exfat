@@ -1,12 +1,16 @@
 # rust-fs-exfat
 
-A strict, read-only exFAT reader with safe Rust decoders, licensed under MIT.
+An exFAT filesystem driver that reads and writes, with safe Rust decoders and a
+read-only salvage adapter, licensed under MIT.
 
 **Status: experimental and unreleased.** Boot-region reports, system metadata,
-directory iteration, file reads, timestamps, volume-upcase path lookup, a read-only
+directory iteration, file reads, timestamps, volume-upcase path lookup, a
 C ABI and command-line tools are implemented, which completes
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
-There is no formatter, repair operation or write feature.
+Writing is being built ([#135](https://github.com/antimatter-studios/rust-fs-exfat/issues/135)):
+a volume can be mounted for writing and clusters allocated and freed. Files and
+directories cannot be created or changed yet, and there is no formatter or
+repair operation.
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
@@ -26,6 +30,26 @@ real disk. Known limits:
 The library is `fs_exfat`. Strict entry points accept `fs_core::BlockRead` only;
 devices are held behind `ReadOnlyDevice`, never a writable device trait or a
 runtime writable flag. Reads passed to a device are aligned to 512 bytes.
+
+Writing is a separate API, `fs_exfat::write`, over rust-fs-core's `BlockDevice`.
+The salvage adapter and the strict reader cannot reach it: they take
+`BlockRead`, and `scripts/check-read-only.sh` keeps every writable device type
+out of every module but the writer and the C ABI. `WriteVolume::mount` checks
+the volume with the strict reader, refuses one already marked dirty or
+reporting media failures, and sets VolumeDirty in the Main Boot Sector before
+it writes anything else; `unmount` clears it last. The Backup Boot region is
+left alone, as Section 3.2 of the specification asks and the macOS driver does.
+PercentInUse is kept current, and the boot checksum is recomputed when either
+field changes. Metadata writes are held in a sector cache and written at
+barriers, so each operation updates the Allocation Bitmap and FAT before the
+directory entry that refers to new clusters, and the directory entry before
+the clusters it released. `WriteVolume::reader` is the strict reader over the
+mount, seeing the writes made so far. Allocation keeps a stream contiguous
+(NoFatChain) when it can, converts it to a FAT chain when it cannot grow in
+place, never takes a cluster the FAT marks bad, and writes both FATs and both
+Allocation Bitmaps of a two-FAT volume. A volume the writer changed passes
+macOS `fsck_exfat -n` and reads back through the read-only macOS driver
+unchanged.
 See [features](docs/features.md) and [provenance](PROVENANCE.md).
 Directory entry types, primary/stream/name fields, UTF-16 names, entry-set
 checksums and name hashes are decoded by `fs_exfat::primitives`. Its
