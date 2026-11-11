@@ -103,6 +103,14 @@ fn seeds_cut_from_reference_images_reach_past_each_decoders_first_check() {
             &seed,
             shared::directory,
         );
+        // The carver's limits are the largest the specification allows, so a
+        // seed's sets are judged by their checksums alone.
+        emit(
+            "entry_sets",
+            &format!("root-{name}"),
+            &prefixed(&[0x77], root),
+            shared::entry_sets,
+        );
 
         let entries = volume.root_directory().unwrap();
         let nested = entries
@@ -121,6 +129,12 @@ fn seeds_cut_from_reference_images_reach_past_each_decoders_first_check() {
             &seed,
             shared::directory,
         );
+        emit(
+            "entry_sets",
+            &format!("nested-{name}"),
+            &prefixed(&[0x77], whole_sets(children, 4096)),
+            shared::entry_sets,
+        );
 
         let file = entries
             .iter()
@@ -132,7 +146,15 @@ fn seeds_cut_from_reference_images_reach_past_each_decoders_first_check() {
         emit("timestamp", &name, &seed, shared::timestamp);
     }
     // Damage on purpose, so a seed here may rightly be refused.
-    for (name, seed) in shared::image_seeds() {
-        write("image", &format!("{name}.bin"), &seed);
+    for (target, seeds) in [
+        ("image", shared::image_seeds()),
+        ("entry_sets", shared::entry_set_seeds()),
+        ("chain_islands", shared::chain_island_seeds()),
+        ("salvage", shared::salvage_seeds()),
+        ("plan", shared::plan_seeds()),
+    ] {
+        for (name, seed) in seeds {
+            write(target, &format!("{name}.bin"), &seed);
+        }
     }
 }
