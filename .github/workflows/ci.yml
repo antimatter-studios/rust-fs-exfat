@@ -49,13 +49,15 @@ jobs:
         with:
           name: logs-${{ matrix.os }}
           path: rust-fs-exfat/tmp/logs/
-  harness-vm:
-    # The harness guest boots on x86_64 KVM, and scripts/vm-setup.sh, which
-    # runs in it, fails unless exfatprogs and the kernel's exfat module are
-    # there. `chore tools` runs the harness's own host check.
-    name: harness VM (x86_64 KVM)
+  fixtures:
+    # The harness guest boots on x86_64 KVM; scripts/vm-setup.sh fails
+    # unless exfatprogs and the kernel's exfat module are there; and every
+    # fixture is formatted by mkfs.exfat and written by the kernel in it.
+    # The images, manifests and kernel listings go on as one artifact, so
+    # each later job reads the same build.
+    name: fixtures (harness VM, x86_64 KVM)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -79,13 +81,37 @@ jobs:
           key: ${{ steps.vm-host.outputs.box-cache-key }}
       - run: chore tools
         working-directory: rust-fs-exfat
-      - run: chore vm:up
+      - run: chore fixtures
         working-directory: rust-fs-exfat
-      - run: chore vm:down
+      - name: chore vm:status (the VM is down again)
+        run: '! chore vm:status'
+        working-directory: rust-fs-exfat
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fixtures
+          path: rust-fs-exfat/test-disks/exfat-*
+          if-no-files-found: error
+          retention-days: 7
+  images:
+    # A job after the fixtures job reads what it built, from the artifact.
+    name: images (fixtures artifact, no VM)
+    needs: fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fixtures
+          path: rust-fs-exfat/test-disks
+      - run: test-disks/build-fixtures.sh --check
         working-directory: rust-fs-exfat
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [test, harness-vm]
+    needs: [test, fixtures, images]
     if: always()
     steps:
       - env:

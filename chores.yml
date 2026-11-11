@@ -10,6 +10,9 @@ chore_min_version: 0.19.0
 #   chore tools        install and verify what the HOST needs: ripgrep,
 #                      python3, and the VM (Vagrant, QEMU, KVM/HVF). NOT
 #                      exfatprogs
+#   chore fixtures     build test-disks/*.img: formatted by mkfs.exfat and
+#                      populated by the kernel's exfat driver in the harness
+#                      VM, each with a manifest and the kernel's listing
 #   chore vm:*         the harness's tasks: boot, provision (scripts/vm-setup.sh:
 #                      exfatprogs and the kernel's exfat module), tear down
 #
@@ -105,6 +108,39 @@ tasks:
   tools:
     desc: "Install and verify what the HOST needs: ripgrep, python3, and the VM the Linux oracles live in"
     cmds: ['scripts/tools.sh']
+
+  fixtures:
+    desc: Build every test-disks/*.img fixture with its manifest and kernel listing (kernel-made, in the harness VM)
+    # Up to date while the recipe is unchanged and every image exists;
+    # --force rebuilds. The VM comes down when the build ends, however it
+    # ends (build-fixtures.sh sources the harness's vm-session.sh).
+    #
+    # THIS LIST AND IMAGES IN build-fixtures.sh MUST AGREE.
+    sources:
+      - test-disks/build-fixtures.sh
+      - test-disks/guest-build-images.sh
+      - test-disks/fixture-tool.py
+      - scripts/vm-setup.sh
+    generates:
+      - test-disks/exfat-empty-s512-c4k.img
+      - test-disks/exfat-tree-s512-c4k.img
+      - test-disks/exfat-tree-s512-c64k.img
+      - test-disks/exfat-tree-s4096-c128k.img
+      - test-disks/exfat-small-s4096-c32m.img
+      - test-disks/exfat-fragmented-s512-c4k.img
+      - test-disks/exfat-largedir-s512-c32k.img
+      - test-disks/exfat-deleted-s512-c4k.img
+      - test-disks/exfat-full-s512-c4k.img
+      - test-disks/exfat-tree-s512-c4k-boot.img
+      - test-disks/exfat-tree-s512-c4k-bitmap.img
+      - test-disks/exfat-tree-s512-c4k-upcase.img
+      - test-disks/exfat-tree-s512-c4k-data.img
+      - test-disks/exfat-fragmented-s512-c4k-boot.img
+    # A hung boot must not hold the VM and the machine-wide slot for ever.
+    timeout: 60m
+    on_timeout:
+      - cmd: '../fs-linux-test-harness/scripts/vm.sh down || ../fs-linux-test-harness/scripts/vm.sh destroy'
+    cmds: ['test-disks/build-fixtures.sh']
 
   build:
     cmds: ['cargo build --locked --all-targets --all-features']
