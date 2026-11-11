@@ -102,7 +102,7 @@ covers them.
 | `upcase-checksum` | 7.2.2 | error | TableChecksum is the checksum of the table as stored. | Rejects | Reports |
 | `upcase-mandatory` | 7.2.5 (Table 24) | error | The first 128 mappings are those of Table 24. | Rejects | Not run |
 | `upcase-coverage` | 7.2.5, 7.2.5.1 | error | The table, compressed or not, maps exactly the characters 0000h to FFFFh. | Rejects | Not run |
-| `upcase-run` | 7.2.5 | error | In a compressed table, an FFFFh that starts an identity run is followed by the number of identity mappings it stands for: at least one, and no more than the characters left up to FFFFh. At the last character, FFFFh is that character's own mapping unless a count of 1 follows it. | Rejects | Reports a count past FFFFh and a missing count; accepts a count of 0 |
+| `upcase-run` | 7.2.5 | error | In a compressed table, an FFFFh that starts an identity run is followed by the number of identity mappings it stands for: no more than the characters left up to FFFFh. A count of 0 stands for no mappings and is accepted: section 7.2.5 does not require at least one, and macOS accepts it (#75). At the last character, FFFFh is that character's own mapping unless a count of 1 follows it. | Rejects | Reports a count past FFFFh and a missing count; accepts a count of 0 |
 
 The Up-case Table is read in either form section 7.2.5 allows (#42): each word
 maps the next character, except FFFFh, which with the count after it stands
@@ -113,9 +113,9 @@ reported at its FFFFh, as `upcase-run`; coverage past it is unknown and is not
 reported as well. Words after the mapping of FFFFh are reported at the first of
 them. A table that ends early is reported at its first byte, and so is one
 whose first 128 mappings break Table 24, over the words that encode those 128
-mappings. A count of zero is read as a fault: section 7.2.5 calls the count
-"the number of identity mappings" in "a series", and the strict reader has
-always refused it. macOS accepts it (see below).
+mappings. A count of zero is accepted and stands for no mappings (#75):
+section 7.2.5 calls the count "the number of identity mappings" and does not
+require at least one, and macOS accepts it (see below).
 
 ## Root directory entries
 
@@ -246,8 +246,8 @@ bytes. Only images made for the run were attached.
   DataLength and TableChecksum resealed. A count past FFFFh and a missing
   final count each reported `upcase-run` at the run's FFFFh; `fsck_exfat -n`
   exited 203 on both ("Upper case translation table is too large" and "too
-  small"). A count of 0 reported `upcase-run` and the strict check refused
-  it, while `fsck_exfat -n` exited 0. FFFFh's own mapping written as a run of
+  small"). A count of 0 then reported `upcase-run` and the strict check
+  refused it, while `fsck_exfat -n` exited 0; since #75 both accept it. FFFFh's own mapping written as a run of
   one passed all three.
 - Outside the deviation report, `check` exits 4 where macOS exits 0 on a
   Vendor Allocation that owns an allocated cluster (#71) and on an allocated

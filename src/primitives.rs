@@ -795,7 +795,9 @@ impl<'a> RawUpcaseTable<'a> {
                     issue_at = Some(index * 2);
                     break;
                 };
-                if count == 0 || count > left {
+                // Section 7.2.5 does not require a count of at least one, and
+                // macOS accepts a count of 0: it stands for no mappings (#75).
+                if count > left {
                     issue = Some(UpcaseIssue::RunOutsideRange);
                     issue_at = Some(index * 2);
                     break;

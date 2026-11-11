@@ -667,7 +667,8 @@ fn damage_reports_cover_the_root_directory() {
 
     let mut builder = volume();
     let upcase = position(4) as usize;
-    builder.image[upcase..upcase + 4].copy_from_slice(&[0xFF, 0xFF, 0, 0]);
+    // A run of 0 is read as no mappings (#75); this run passes FFFFh.
+    builder.image[upcase..upcase + 8].copy_from_slice(&[0x41, 0, 0x42, 0, 0xFF, 0xFF, 0xFF, 0xFF]);
     let checksum = fs_exfat::primitives::checksum32(&builder.image[upcase..upcase + 100]);
     builder.image[root as usize + 36..root as usize + 40].copy_from_slice(&checksum.to_le_bytes());
     let found = damage(&Bytes(builder.image));
@@ -1148,7 +1149,8 @@ fn damage_reports_stop_cleanly_after_any_finding() {
     builder.image[root + 1] = 0x04;
     builder.image[root + 24] = 24;
     let upcase = position(4) as usize;
-    builder.image[upcase..upcase + 4].copy_from_slice(&[0xFF, 0xFF, 0, 0]);
+    // A run of 0 is read as no mappings (#75); this run passes FFFFh.
+    builder.image[upcase..upcase + 8].copy_from_slice(&[0x41, 0, 0x42, 0, 0xFF, 0xFF, 0xFF, 0xFF]);
     let source = Bytes(builder.image);
     assert!(stops_after_every_finding(&ExfatSalvage::probe(&source), &source) >= 8);
 
