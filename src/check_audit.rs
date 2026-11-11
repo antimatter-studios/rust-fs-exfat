@@ -114,11 +114,38 @@ impl Allocation {
             root: false,
         }
     }
+
+    /// Cluster allocations of a File set's benign secondaries after its
+    /// File Name entries.
+    ///
+    /// exFAT specification section 7.9 (Vendor Allocation Directory Entry,
+    /// EntryType E1h): the entry has a cluster allocation of its own, with
+    /// AllocationPossible 1 and FirstCluster and DataLength as defined in
+    /// sections 6.4.3 and 6.4.4. Section 8.2: implementations keep the
+    /// cluster allocations of unrecognized benign secondaries. Any benign
+    /// secondary whose GeneralSecondaryFlags (section 6.4.2) set
+    /// AllocationPossible therefore owns its clusters. A Vendor Extension
+    /// (E0h, section 7.8) has no allocation, so its fields are not read as
+    /// one even when it sets the flag.
+    fn benign_secondaries(set: &[u8]) -> impl Iterator<Item = Self> + '_ {
+        let names = primitives::RawEntrySet::parse(set).map_or(0, |raw| raw.names.len());
+        set.chunks_exact(primitives::ENTRY_SIZE)
+            .skip(2 + names)
+            .filter(|entry| entry[0] & 0x20 != 0 && entry[0] != 0xe0 && entry[1] & 1 != 0)
+            .map(|entry| Self {
+                first: primitives::u32_at(entry, 20),
+                length: primitives::u64_at(entry, 24),
+                contiguous: entry[1] & 2 != 0,
+                root: false,
+            })
+    }
 }
 
 struct Ownership {
     bytes: Vec<u8>,
     count: u64,
+    /// Set while [`Self::claim_if_clean`] walks: claims are checked, not made.
+    trial: bool,
 }
 
 impl Ownership {
@@ -127,11 +154,39 @@ impl Ownership {
         if bitmap.is_some_and(|bytes| !primitives::checked_bitmap_bit(bytes, cluster)) {
             return Err(Error::Invalid("stream uses a free cluster"));
         }
+        if self.trial {
+            if primitives::checked_bitmap_bit(&self.bytes, cluster) {
+                return Err(Error::Invalid("cross-linked allocation or FAT chain cycle"));
+            }
+            return Ok(());
+        }
         if primitives::claim_bitmap_cluster(&mut self.bytes, cluster).ok_or(Error::Bounds)? {
             return Err(Error::Invalid("cross-linked allocation or FAT chain cycle"));
         }
         self.count += 1;
         Ok(())
+    }
+
+    /// Claims an allocation only when the whole of it is valid and unowned.
+    ///
+    /// The strict layer does not interpret benign secondaries (see the
+    /// Vendor Allocation cases in `tests/check/deviations.rs`), so one that
+    /// is out of range, free, cross-linked or the wrong length is left
+    /// unclaimed rather than rejected, as before #71.
+    fn claim_if_clean(
+        &mut self,
+        fat: &mut Fat<'_, impl BlockRead>,
+        bitmap: &[u8],
+        mut allocation: Allocation,
+    ) -> Result<()> {
+        self.trial = true;
+        let trial = self.walk(fat, Some(bitmap), &mut allocation);
+        self.trial = false;
+        match trial {
+            Ok(()) => self.walk(fat, Some(bitmap), &mut allocation),
+            Err(Error::Device(error)) => Err(Error::Device(error)),
+            Err(_) => Ok(()),
+        }
     }
 
     fn walk(
@@ -338,6 +393,7 @@ pub(super) fn check_reader<Device: BlockRead>(
             "allocation audit ownership bitmap exceeds memory budget",
         )?,
         count: 0,
+        trial: false,
     };
     let mut fat = Fat::new(reader, boot);
     let mut root = Allocation {
@@ -391,6 +447,9 @@ pub(super) fn check_reader<Device: BlockRead>(
     let mut files = 0u64;
     let mut directories = 1u64;
     let mut uninterpreted = primitives::UninterpretedCounts::default();
+    // Claimed after every stream, so a benign secondary never turns a later
+    // stream's claim into a cross-link.
+    let mut secondaries = Vec::new();
     while let Some(allocation) = pending.pop() {
         let mut cursor = Cursor::new(allocation);
         let mut names = Names {
@@ -404,6 +463,10 @@ pub(super) fn check_reader<Device: BlockRead>(
                 names.add(entry.name_utf16(), &upcase, &mut budget)?;
                 let mut stream = Allocation::stream(entry.stream());
                 ownership.walk(&mut fat, Some(&bitmap), &mut stream)?;
+                for secondary in Allocation::benign_secondaries(&set) {
+                    budget.grow(&mut secondaries, 1)?;
+                    secondaries.push(secondary);
+                }
                 if entry.is_directory() {
                     directories += 1;
                     budget.grow(&mut pending, 1)?;
@@ -415,11 +478,14 @@ pub(super) fn check_reader<Device: BlockRead>(
         }
         names.finish(&mut budget)?;
     }
+    for secondary in secondaries.drain(..) {
+        ownership.claim_if_clean(&mut fat, &bitmap, secondary)?;
+    }
     let allocated_clusters = primitives::bitmap_count(&bitmap, boot.cluster_count);
     let referenced_clusters = ownership.count;
     let bad_clusters = unowned_bad_clusters(&mut fat, &bitmap, &ownership.bytes)?;
     // The audit's buffers go before the deviation scan takes its own.
-    drop((bitmap, ownership, pending, upcase));
+    drop((bitmap, ownership, pending, secondaries, upcase));
     Ok(CheckReport {
         files,
         directories,

@@ -152,6 +152,34 @@ fn macos_agrees_that_an_allocated_cluster_the_fat_marks_bad_is_not_lost() {
 }
 
 #[test]
+fn macos_agrees_that_a_vendor_allocations_cluster_is_not_lost() {
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    let image = Image::sparse(65536, 0);
+    let first = image.allocated as u32 + 7;
+    let owned = first + 1;
+    let mut set = base::file_set("vendor", 0x20, first, 512, true);
+    set[1] += 1;
+    let mut vendor = [0u8; 32];
+    vendor[0] = 0xe1;
+    vendor[1] = 1;
+    vendor[2..18].fill(0x5a);
+    base::put32(&mut vendor, 20, owned);
+    base::put64(&mut vendor, 24, 512);
+    set.extend_from_slice(&vendor);
+    base::seal_set(&mut set);
+    image.allocate(first);
+    image.allocate(owned);
+    image
+        .file
+        .write_all_at(&u32::MAX.to_le_bytes(), 24 * 512 + u64::from(owned) * 4)
+        .unwrap();
+    image.file.write_all_at(&set, image.heap + 64).unwrap();
+    native_check(&image, true);
+    let report = clean(image.check());
+    assert_eq!(report["unreferenced_clusters"], 0);
+}
+
+#[test]
 fn macos_agrees_on_a_directory_with_more_than_a_million_entries() {
     std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
     let image = Image::sparse(OLD_CAP + 65536, OLD_CAP + 1);

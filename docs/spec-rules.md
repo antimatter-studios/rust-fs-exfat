@@ -198,6 +198,11 @@ These are states or strict-layer checks, not rules the bytes break:
   that no allocation consumes and the active FAT marks bad (FFFFFFF7h,
   section 4.1.3) is counted as `bad_clusters` instead: section 7.1.5.1 names
   that as a reason for a set bit, and macOS `fsck_exfat -n` accepts it.
+  Since #71 the cluster allocation of a File set's benign secondary with
+  AllocationPossible set (a Vendor Allocation, section 7.9, or an unknown
+  benign secondary, section 8.2) counts as referenced when it is valid and
+  owned by nothing else; one that is not is left unclaimed, as before, and
+  never rejected.
 - The strict layer also rejects, with no rule of the specification behind it:
   names and labels that are not well-formed UTF-16; two allocations sharing a
   cluster; a FAT chain whose length is not DataLength / cluster size, rounded
@@ -252,7 +257,7 @@ bytes. Only images made for the run were attached.
   small"). A count of 0 then reported `upcase-run` and the strict check
   refused it, while `fsck_exfat -n` exited 0; since #75 both accept it. FFFFh's own mapping written as a run of
   one passed all three.
-- Outside the deviation report, `check` exits 4 where macOS exits 0 on a
-  Vendor Allocation that owns an allocated cluster (#71): it is counted as
-  unreferenced. An allocated cluster the FAT marks bad (#72) is counted as
-  `bad_clusters` and no longer makes `check` exit 4.
+- Outside the deviation report, a Vendor Allocation that owns an allocated
+  cluster (#71) is counted as referenced, and an allocated cluster the FAT
+  marks bad (#72) is counted as `bad_clusters`; neither makes `check` exit 4,
+  and macOS exits 0 on both.

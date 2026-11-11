@@ -66,6 +66,36 @@ fn allocated_clusters_the_fat_marks_bad_are_not_unreferenced() {
 }
 
 #[test]
+fn clusters_a_vendor_allocation_owns_are_not_unreferenced() {
+    // Section 7.9: a Vendor Allocation (E1h) secondary has a cluster
+    // allocation of its own, which section 8.2 says implementations keep.
+    // macOS fsck_exfat accepts such a volume.
+    let mut bytes = interface_support::image();
+    let mut file = support::file_set("Example.txt", 0x20, 5, 1030, true);
+    support::put64(&mut file, 40, 513);
+    file[1] += 1;
+    let mut vendor = [0u8; 32];
+    vendor[0] = 0xe1;
+    vendor[1] = 1;
+    support::put32(&mut vendor, 20, 10);
+    support::put64(&mut vendor, 24, 512);
+    file.extend_from_slice(&vendor);
+    support::seal_set(&mut file);
+    let empty = support::file_set("Empty.bin", 0x20, 0, 0, false);
+    let directory = support::file_set("Sub", 0x10, 8, 512, true);
+    let root = 32 * 512 + 96;
+    let entries = [file, empty, directory].concat();
+    bytes[root..root + entries.len()].copy_from_slice(&entries);
+    bytes[33 * 512 + 1] |= 1;
+    support::put32(&mut bytes, 24 * 512 + 10 * 4, 0xffff_ffff);
+    let volume = Volume::open(support::Bytes(bytes)).unwrap();
+    let report = check(&volume).unwrap();
+    assert_eq!(report.unreferenced_clusters, 0);
+    assert_eq!(report.referenced_clusters, 9);
+    assert!(report.healthy());
+}
+
+#[test]
 fn media_failure_alone_is_not_reported_clean() {
     let mut bytes = interface_support::image();
     support::put16(&mut bytes, 106, 4);
