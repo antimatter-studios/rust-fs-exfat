@@ -348,6 +348,11 @@ pub fn decode_timestamp_with_offset(value: u32, offset: u8) -> Option<String> {
 }
 
 /// Limits that a candidate entry set must respect when its checksum fails.
+///
+/// Every value is accepted, including ones outside the specification's range:
+/// the heap holds clusters 2 to `cluster_count + 1` and `cluster_count *
+/// cluster_size` bytes, worked out without overflow even where neither bound
+/// fits its type.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub cluster_count: u32,
@@ -356,7 +361,14 @@ pub struct Limits {
 
 impl Limits {
     fn valid_cluster(&self, cluster: u32) -> bool {
-        (FIRST_CLUSTER..self.cluster_count + FIRST_CLUSTER).contains(&cluster)
+        cluster >= FIRST_CLUSTER
+            && u64::from(cluster) < u64::from(self.cluster_count) + u64::from(FIRST_CLUSTER)
+    }
+
+    /// The heap's size in bytes. A product past `u64::MAX` saturates, which
+    /// refuses no length a `u64` can hold, just as the true product would not.
+    fn capacity(&self) -> u64 {
+        u64::from(self.cluster_count).saturating_mul(self.cluster_size)
     }
 }
 
@@ -613,7 +625,7 @@ pub fn parse_set(data: &[u8], position: usize, limits: Limits) -> Option<EntrySe
     let length = stream.data_length;
     if !checksum_ok {
         // Without a checksum, accept only values that could plausibly be real.
-        let capacity = u64::from(limits.cluster_count) * limits.cluster_size;
+        let capacity = limits.capacity();
         let name_ok = name.utf16.iter().all(|&unit| unit >= 0x20);
         if attributes & !ATTRIBUTE_VALID_MASK != 0
             || length > capacity
