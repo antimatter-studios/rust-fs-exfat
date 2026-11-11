@@ -6,7 +6,7 @@
 use super::support::Bytes;
 use super::{damage, has, named, position, scan, volume, Failing};
 use fs_exfat::fixtures::{upcase_entry, upcase_table, Builder, ROOT_CLUSTER};
-use fs_exfat::primitives::FAT_END;
+use fs_exfat::primitives::{self, FAT_END};
 use fs_exfat::salvage::{DamageKind, ExfatSalvage, Extent, UpcaseReport};
 
 /// Clusters 100 to 131 hold an uncompressed table, 32 clusters of 4 KiB.
@@ -156,4 +156,32 @@ fn a_checksum_valid_table_that_is_incomplete_or_breaks_table_24_is_reported() {
             "{words:04x?}: {found:?}"
         );
     }
+}
+
+#[test]
+fn a_compressed_table_longer_than_128_kib_is_read_and_not_reported() {
+    // Table 24's 128 mappings, then an identity run of one for each character
+    // from 0080h to FFFFh: a valid compressed table of 261888 bytes. Sections
+    // 7.2.4 (through 6.3.6 and 6.2.3), 7.2.5 and 7.2.5.1 set no maximum
+    // DataLength; they only require mappings for exactly 0000h to FFFFh (#91).
+    let mut words: Vec<u16> = (0..0x80).map(primitives::mandatory_upcase).collect();
+    for _ in 0x80..=0xFFFF {
+        words.extend([0xFFFF, 1]);
+    }
+    let length = 2 * words.len() as u64;
+    assert!(length > 128 << 10);
+    let builder = with_table(&words);
+    let found = damage(&Bytes(builder.image.clone()));
+    assert!(
+        !found
+            .iter()
+            .any(|damage| damage.structure == "upcase table"),
+        "{found:?}"
+    );
+    let long = report(&builder);
+    assert!(long.compressed && long.usable, "{long:?}");
+    assert_eq!(long.extents, [Extent::new(position(PLAIN), length)]);
+    assert_eq!(long.mappings.len(), 0x10000);
+    assert_eq!(long.upcase(u16::from(b'a')), u16::from(b'A'));
+    assert_eq!(long.upcase(0xE9), 0xE9);
 }
