@@ -14,7 +14,7 @@ and checks a minimum executed count. Logs stay in tmp/logs/.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | 2026-11-11 compressed Up-case Table, cached target: 384 lines, 22750 bytes, 280 tests (before it: 378 lines, 22328 bytes, 274 tests) | 384 lines, 22822 bytes, allowing timing digits | 150 |
+| unit | 2026-11-11 TexFAT second FAT and bitmap, cached target: 387 lines, 23010 bytes, 283 tests (before it: 384 lines, 22750 bytes, 280 tests) | 387 lines, 23082 bytes, allowing timing digits | 150 |
 | oracle | 2026-11-10: 223 lines, 11070 bytes, 25 tests including large-volume and million-entry comparisons | 270 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |

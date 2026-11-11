@@ -11,7 +11,7 @@
 use super::{read_source, ExfatSalvage, Geometry, Mapper, DIRECTORY_LIMIT, SECTOR};
 use crate::primitives::{
     self, ClusterRecord, RawAllocationBitmap, RawRootMetadata, RootEntryKind, StaleEnd,
-    SystemStream, VolumeState, FIRST_CLUSTER,
+    SystemStream, FIRST_CLUSTER,
 };
 use crate::salvage::adapter::{Extent, SalvageError, Sink};
 use fs_core::BlockRead;
@@ -27,7 +27,7 @@ pub struct StaleEntry {
     pub cluster: u32,
     /// The raw FAT entry: the next cluster, or a marker.
     pub value: u32,
-    /// The entry's four bytes in the active FAT.
+    /// The entry's four bytes in the FAT the listing read.
     pub location: Extent,
 }
 
@@ -76,11 +76,13 @@ impl ExfatSalvage {
     /// end-of-chain marker; a break at a free, bad or out-of-heap target; or a
     /// join with an allocated cluster or an earlier chain.
     ///
-    /// This is an exFAT extension, not a verb of the common trait. Allocation
-    /// comes from the root directory's in-use bitmap entry for the active FAT;
-    /// links come from the active FAT. Unreadable or missing bitmap and FAT
-    /// bytes leave their clusters unclassified and are counted in the report,
-    /// so an empty listing with nothing unclassified means nothing was found.
+    /// This is an exFAT extension, not a verb of the common trait. Links come
+    /// from the FAT the adapter maps claims through, the active one unless
+    /// [`ExfatSalvage::with_fat`] chose the other, and allocation from the
+    /// root directory's in-use entry for the Allocation Bitmap paired with
+    /// that FAT. Unreadable or missing bitmap and FAT bytes leave their
+    /// clusters unclassified and are counted in the report, so an empty
+    /// listing with nothing unclassified means nothing was found.
     ///
     /// Fails only with [`SalvageError::NoGeometry`], when no boot copy gave
     /// geometry.
@@ -138,22 +140,36 @@ impl ExfatSalvage {
     }
 }
 
-/// The active allocation bitmap's bytes, with the cluster ranges whose bits
-/// could not be read.
-struct Bitmap {
-    bytes: Vec<u8>,
+/// The bytes of the allocation bitmap paired with the geometry's FAT, with
+/// the cluster ranges whose bits could not be read.
+pub(super) struct Bitmap {
+    pub(super) bytes: Vec<u8>,
     /// Sorted, disjoint cluster ranges.
     unknown: Vec<(u32, u32)>,
+    /// The root holds an in-use entry for this bitmap.
+    pub(super) entry: bool,
+    /// The source bytes behind `bytes`, in stream order.
+    pub(super) extents: Vec<Extent>,
+    /// Byte ranges of `bytes`, start and end, that zeros stand in for.
+    pub(super) lost: Vec<(u64, u64)>,
 }
 
 impl Bitmap {
-    /// Finds the in-use bitmap entry for the active FAT in the root directory
-    /// and reads as much of its claim as maps onto the source. A missing
-    /// entry or claim leaves no bytes, so every cluster is unclassified.
-    fn read(geometry: &Geometry, source: &dyn BlockRead, unreadable: &mut Vec<Extent>) -> Self {
+    /// Finds the in-use bitmap entry paired with the geometry's FAT in the
+    /// root directory, as that FAT chains the root, and reads as much of its
+    /// claim as maps onto the source. A missing entry or claim leaves no
+    /// bytes, so every cluster is unclassified.
+    pub(super) fn read(
+        geometry: &Geometry,
+        source: &dyn BlockRead,
+        unreadable: &mut Vec<Extent>,
+    ) -> Self {
         let mut bitmap = Self {
             bytes: Vec::new(),
             unknown: Vec::new(),
+            entry: false,
+            extents: Vec::new(),
+            lost: Vec::new(),
         };
         let mut mapper = Mapper::new(geometry, source);
         let root = mapper.chain(
@@ -165,9 +181,10 @@ impl Bitmap {
         for extent in geometry.extents(&root.runs, u64::MAX) {
             read_tolerant(source, extent, &mut root_bytes, &mut Vec::new());
         }
-        let Some(stream) = active_bitmap_stream(geometry, &root_bytes) else {
+        let Some(stream) = paired_bitmap_stream(geometry, &root_bytes) else {
             return bitmap;
         };
+        bitmap.entry = true;
         // Bits only for clusters the source holds: the rest have no bytes to
         // salvage, and a damaged count cannot make the bitmap outgrow the source.
         let on_source = source.size_bytes().saturating_sub(geometry.heap) / geometry.cluster;
@@ -183,6 +200,7 @@ impl Bitmap {
         );
         for extent in geometry.extents(&claim.runs, length) {
             let start = bitmap.bytes.len() as u64;
+            bitmap.extents.push(extent);
             for (offset, length) in read_tolerant(source, extent, &mut bitmap.bytes, unreadable) {
                 let first = start + offset;
                 let cluster = |byte: u64| {
@@ -191,6 +209,7 @@ impl Bitmap {
                 bitmap
                     .unknown
                     .push((cluster(first), cluster(first + length)));
+                bitmap.lost.push((first, first + length));
             }
         }
         bitmap
@@ -204,20 +223,18 @@ impl Bitmap {
     }
 }
 
-/// The in-use allocation bitmap entry for the active FAT: the second bitmap
-/// belongs to the second FAT, which only a two-FAT volume can make active.
-fn active_bitmap_stream(geometry: &Geometry, root: &[u8]) -> Option<SystemStream> {
-    let active = if geometry.boot.number_of_fats >= 2 {
-        VolumeState::from_flags(geometry.boot.volume_flags).active_fat
-    } else {
-        0
-    };
+/// The in-use allocation bitmap entry paired with the geometry's FAT: section
+/// 7.1.2.1 "BitmapIdentifier Field" uses the First Allocation Bitmap with the
+/// First FAT and the Second with the Second, and only a two-FAT volume has a
+/// Second.
+fn paired_bitmap_stream(geometry: &Geometry, root: &[u8]) -> Option<SystemStream> {
+    let paired = geometry.copy.index();
     RawRootMetadata::parse(root)
         .entries
         .iter()
         .filter(|entry| entry.in_use)
         .find_map(|entry| match entry.kind {
-            RootEntryKind::Bitmap { id, stream, .. } if id == active => Some(stream),
+            RootEntryKind::Bitmap { id, stream, .. } if id == paired => Some(stream),
             _ => None,
         })
 }

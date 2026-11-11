@@ -116,7 +116,10 @@ in [src/salvage_uninterpreted.rs](../src/salvage_uninterpreted.rs) is a second
 such method (#43), over `primitives::uninterpreted_entries` in
 [src/primitive_uninterpreted.rs](../src/primitive_uninterpreted.rs).
 `ExfatSalvage::upcase_table` in [src/salvage_upcase.rs](../src/salvage_upcase.rs)
-is a third (#42), over `primitives::RawUpcaseTable`.
+is a third (#42), over `primitives::RawUpcaseTable`. `ExfatSalvage::fat_copies`
+and `ExfatSalvage::with_fat` in [src/salvage_copies.rs](../src/salvage_copies.rs)
+are a fourth (#40), over `primitives::FatLayout`, `fat_differences` and
+`bitmap_differences` in [src/primitive_copies.rs](../src/primitive_copies.rs).
 
 ## 3. Strict versus permissive
 
@@ -284,9 +287,14 @@ gate on moving an abstraction to rust-fs-core; it does not enlarge the trait.
 Existing exFAT work illustrates the boundary:
 
 - [#40](https://github.com/antimatter-studios/rust-fs-exfat/issues/40) adds
-  evidence from both TexFAT FATs and bitmaps. Current `fat_entry` selects the
-  active FAT, and opening loads the active bitmap
-  ([src/volume.rs](../src/volume.rs)). There is no both-copy comparison there.
+  evidence from both TexFAT FATs and bitmaps as the exFAT adapter's
+  `fat_copies` and `with_fat` extensions, not common verbs: every heap cluster
+  the two FATs or the two Allocation Bitmaps record differently, with its
+  byte offset in each copy, and the adapter's verbs over the inactive pair.
+  It is evidence, not damage: section 3.1.13.1 makes the inactive pair stale,
+  not invalid, so `report_damage` and the strict API ignore it. The strict
+  `fat_entry` still selects the active FAT, and opening still loads the
+  active bitmap ([src/volume.rs](../src/volume.rs)).
 - [#41](https://github.com/antimatter-studios/rust-fs-exfat/issues/41) adds a
   report of stale FAT chains on free clusters as the exFAT adapter's
   `stale_chains` extension, not a common verb. It is evidence, not damage: the
@@ -430,7 +438,8 @@ rules. The remaining design details belong to #52, with conformance in #53:
    flags; extension flags wait for the first extension. The first, exFAT's
    `stale_chains` (#41), is reached through the concrete adapter type, so it
    has no flag yet; a flag for it would not belong in the format-neutral
-   `Feature` set. The same holds for `uninterpreted_entries` (#43).
+   `Feature` set. The same holds for `uninterpreted_entries` (#43) and
+   `fat_copies` (#40).
 4. What concrete types represent the shared damage fields, and how do #44's
    byte offsets and specification references map into the shared core and
    format-specific details without adding exFAT names to the trait? #44
