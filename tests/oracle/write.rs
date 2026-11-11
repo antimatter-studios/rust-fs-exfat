@@ -88,12 +88,69 @@ fn the_writer_changes_a_volume_macos_populated() {
     let target = directory.join(format!("written-{sector}.dmg"));
     std::fs::copy(&source, &target).unwrap();
     allocations_leave_the_tree_alone(&target);
-    let tree = files_and_directories(&target);
+    files_and_directories(&target);
+    let tree = truncations_and_removals(&target);
     std::fs::write(
         directory.join(format!("written-expected-{sector}.txt")),
         tree,
     )
     .unwrap();
+}
+
+/// Truncation and removal of files macOS made and files this crate made:
+/// shrinking to an unaligned length, growing past an unaligned valid
+/// length, a fragmented file shrunk back to a run, and removed files and
+/// directories, named through the volume's case mapping.
+fn truncations_and_removals(target: &Path) -> String {
+    let mut volume = write::open_path(target, 0).unwrap();
+    let free = volume.free_clusters();
+    volume.truncate("/contiguous.bin", 100_001).unwrap();
+    volume.truncate("/item-005.txt", 50_000).unwrap();
+    volume.truncate("/valid-tail.bin", 20_000).unwrap();
+    volume.truncate("/Written/fragment-a.bin", 7000).unwrap();
+    volume.truncate("/Written/gap.bin", 0).unwrap();
+    let entry = volume
+        .reader()
+        .lookup("/Written/fragment-a.bin")
+        .unwrap()
+        .entry()
+        .unwrap()
+        .clone();
+    assert!(
+        entry.stream().no_fat_chain(),
+        "the first two clusters are a run"
+    );
+    for index in 10..20 {
+        volume.unlink(&format!("/ITEM-{index:03}.TXT")).unwrap();
+    }
+    volume.unlink("/blocker.bin").unwrap();
+    volume.unlink("/GRÜßE-😀.TXT").unwrap();
+    volume.unlink("/Written/replaced.bin").unwrap();
+    assert!(matches!(
+        volume.rmdir("/Written/Deep/Er"),
+        Err(fs_exfat::Error::NotEmpty)
+    ));
+    volume.unlink("/Written/Deep/Er/large.bin").unwrap();
+    volume.rmdir("/Written/Deep/Er").unwrap();
+    volume.rmdir("/Empty").unwrap();
+    assert!(volume.free_clusters() > free);
+    volume.unmount().unwrap();
+    let volume = interface::open_path(target, 0).unwrap();
+    for (path, length) in [("/item-005.txt", 50_000), ("/valid-tail.bin", 20_000)] {
+        let entry = volume.lookup(path).unwrap().entry().unwrap().clone();
+        let valid = entry.stream().valid_data_length() as usize;
+        let mut bytes = vec![0xa5; length];
+        volume
+            .open_file(&entry)
+            .unwrap()
+            .read_at(0, &mut bytes)
+            .unwrap();
+        assert!(
+            bytes[valid..].iter().all(|byte| *byte == 0),
+            "{path} reads zeros past its valid length"
+        );
+    }
+    listing(&volume)
 }
 
 fn pattern(seed: u32, length: usize) -> Vec<u8> {
@@ -111,9 +168,8 @@ fn pattern(seed: u32, length: usize) -> Vec<u8> {
 /// Files and directories of every shape #130 names, written beside macOS's
 /// own: large, fragmented, non-ASCII and long names, directories grown past
 /// a cluster, a gap that must read as zeros, a replaced file, and times
-/// given with hundredths and UTC offsets. Returns the tree as this crate's
-/// reader sees it after the unmount.
-fn files_and_directories(target: &Path) -> String {
+/// given with hundredths and UTC offsets.
+fn files_and_directories(target: &Path) {
     let mut volume = write::open_path(target, 0).unwrap();
     volume.mkdir("/Written").unwrap();
     volume.mkdir("/Written/Deep").unwrap();
@@ -216,7 +272,6 @@ fn files_and_directories(target: &Path) -> String {
         .unwrap();
     assert_eq!(&bytes[..4], b"head");
     assert!(bytes[4..300_000].iter().all(|byte| *byte == 0));
-    listing(&volume)
 }
 
 /// Allocations of many shapes on a volume macOS populated: single clusters,

@@ -1,0 +1,3 @@
+## Writing
+
+| Truncation and removal | Experimental; files shrunk (clusters freed after the entry set changes, chains that become consecutive recorded as NoFatChain) and grown (ValidDataLength kept, the rest of its cluster zeroed), files and empty directories removed by clearing InUse before their clusters are freed; on the macOS reference volumes, files macOS made and files this crate made are truncated and removed, `fsck_exfat -n` accepts the result and the read-only macOS driver lists the same tree at 512 and 4096 bytes per sector; the Linux kernel and exfatprogs are not checked yet (#133) | Unreleased (#131) | #131 | `tests/write_remove.rs`, `tests/capi_write.rs`, `tests/cli_write.rs`, `tests/oracle/write.rs` |

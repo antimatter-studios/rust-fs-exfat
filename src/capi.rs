@@ -36,6 +36,10 @@ const EINVAL: c_int = 22;
 const ENOSPC: c_int = 28;
 const EROFS: c_int = 30;
 #[cfg(target_os = "linux")]
+const ENOTEMPTY: c_int = 39;
+#[cfg(not(target_os = "linux"))]
+const ENOTEMPTY: c_int = 66;
+#[cfg(target_os = "linux")]
 const ENOTSUP: c_int = 95;
 #[cfg(not(target_os = "linux"))]
 const ENOTSUP: c_int = 45;
@@ -52,6 +56,7 @@ fn errno_of(error: &Error) -> c_int {
         Error::NotDirectory => ENOTDIR,
         Error::Exists => EEXIST,
         Error::IsDirectory => EISDIR,
+        Error::NotEmpty => ENOTEMPTY,
         Error::NoSpace => ENOSPC,
         Error::Device(fs_core::Error::ReadOnly) => EROFS,
         Error::Device(_) => EIO,
@@ -646,8 +651,9 @@ pub extern "C" fn fs_exfat_last_error() -> *const c_char {
 }
 
 /// The errno value for the last fallible call on this thread: 0 after
-/// success, ENOENT, ENOTDIR, EEXIST, EISDIR, ENOSPC, EROFS, ENOTSUP or
-/// EINVAL for the matching failure, and EIO for device errors and panics.
+/// success, ENOENT, ENOTDIR, EEXIST, EISDIR, ENOTEMPTY, ENOSPC, EROFS,
+/// ENOTSUP or EINVAL for the matching failure, and EIO for device errors and
+/// panics.
 #[no_mangle]
 pub extern "C" fn fs_exfat_last_errno() -> c_int {
     LAST_ERRNO.with(Cell::get)
@@ -726,6 +732,49 @@ pub unsafe extern "C" fn fs_exfat_pwrite(
             })
         }?;
         Ok(length as i64)
+    })
+}
+
+/// Sets a file's length: shrinking frees clusters past the end, growing
+/// reads as zeros. Returns 0, or -1 with a diagnostic and errno.
+///
+/// # Safety
+/// The mount must be live and `path` a NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_truncate(
+    handle: *const FsExfat,
+    path: *const c_char,
+    length: u64,
+) -> c_int {
+    guard(-1, || {
+        unsafe { write_call(handle, path, |volume, path| volume.truncate(path, length)) }?;
+        Ok(0)
+    })
+}
+
+/// Removes a file. Returns 0, or -1 with a diagnostic and errno (EISDIR for
+/// a directory).
+///
+/// # Safety
+/// The mount must be live and `path` a NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_unlink(handle: *const FsExfat, path: *const c_char) -> c_int {
+    guard(-1, || {
+        unsafe { write_call(handle, path, |volume, path| volume.unlink(path)) }?;
+        Ok(0)
+    })
+}
+
+/// Removes an empty directory. Returns 0, or -1 with a diagnostic and errno
+/// (ENOTEMPTY when it holds anything, ENOTDIR for a file).
+///
+/// # Safety
+/// The mount must be live and `path` a NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_rmdir(handle: *const FsExfat, path: *const c_char) -> c_int {
+    guard(-1, || {
+        unsafe { write_call(handle, path, |volume, path| volume.rmdir(path)) }?;
+        Ok(0)
     })
 }
 

@@ -33,12 +33,16 @@ data, length)` writes into an existing file, growing it, with any gap past the
 old valid length reading as zeros; `fs_exfat_write_file(handle, path, data,
 length)` creates the file or replaces its contents. Both return the byte count
 or -1. New entries take the current time in UTC; writes set LastModified,
-LastAccessed and Archive. On a read-only mount every write call fails with
-EROFS.
+LastAccessed and Archive. `fs_exfat_truncate(handle, path, length)` shrinks a
+file, freeing clusters past the end, or grows it with bytes that read as zeros.
+`fs_exfat_unlink(handle, path)` removes a file and `fs_exfat_rmdir(handle,
+path)` an empty directory; each clears InUse on the entry set before freeing
+its clusters. All three return 0 or -1. On a read-only mount every write call
+fails with EROFS.
 
 `fs_exfat_last_errno` returns the errno value of the last fallible call on the
-thread: 0 after success; ENOENT, ENOTDIR, EEXIST, EISDIR, ENOSPC, EROFS,
-ENOTSUP or EINVAL for the matching failure; EIO for device errors and panics.
+thread: 0 after success; ENOENT, ENOTDIR, EEXIST, EISDIR, ENOTEMPTY, ENOSPC,
+EROFS, ENOTSUP or EINVAL for the matching failure; EIO for device errors and panics.
 
 Mount constructors return NULL on failure. `fs_exfat_stat` returns 0 on success
 and -1 on error. `fs_exfat_read_file` returns a byte count, 0 at EOF, or -1 on

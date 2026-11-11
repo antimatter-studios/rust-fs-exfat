@@ -46,6 +46,8 @@ mod cache;
 mod dir;
 #[path = "write_file.rs"]
 mod file;
+#[path = "write_remove.rs"]
+mod remove;
 
 pub use alloc::Allocation;
 pub use cache::CacheView;

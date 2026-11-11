@@ -92,6 +92,20 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         })
     }
 
+    /// Sets a file's length. Shrinking frees the clusters past the new end,
+    /// after the entry set records it; growing allocates clusters and keeps
+    /// ValidDataLength, so the new bytes read as zeros (Section 7.6.5).
+    /// LastModified and LastAccessed become the current time, and Archive is
+    /// set.
+    pub fn truncate(&mut self, path: &str, length: u64) -> Result<()> {
+        let now = Timestamp::now()?;
+        self.operation(|volume| {
+            let target = volume.resolve(path)?;
+            let mut file = volume.open_for_write(target)?;
+            volume.set_length(&mut file, length, &now)
+        })
+    }
+
     /// Makes `path` a file holding exactly `data`, creating it if it is
     /// missing and replacing its contents if it is a file.
     pub fn write_file(&mut self, path: &str, data: &[u8]) -> Result<()> {
@@ -216,6 +230,57 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             file.length = length;
             file.valid = file.valid.max(end);
         }
+        self.record(file, now)
+    }
+
+    fn set_length(&mut self, file: &mut OpenFile, length: u64, now: &Timestamp) -> Result<()> {
+        let cluster_size = self.volume.boot().cluster_size();
+        let needed = u32::try_from(length.div_ceil(cluster_size)).map_err(|_| Error::NoSpace)?;
+        if length < file.length {
+            let old = file.allocation;
+            let kept = &file.clusters[..needed as usize];
+            let allocation = match kept {
+                [] => Allocation::EMPTY,
+                [first, ..] => {
+                    let last = *kept.last().expect("not empty");
+                    let contiguous =
+                        old.no_fat_chain() || kept.windows(2).all(|pair| pair[1] == pair[0] + 1);
+                    Allocation::from_parts(*first, last, needed, contiguous)
+                }
+            };
+            file.length = length;
+            file.valid = file.valid.min(length);
+            file.allocation = allocation;
+            file.clusters.truncate(needed as usize);
+            // The entry set stops referring to the clusters before they are
+            // freed.
+            self.record(file, now)?;
+            self.barrier()?;
+            let mut freed = old;
+            return self.shrink_clusters(&mut freed, needed);
+        }
+        if length > file.length {
+            if needed > file.allocation.count() {
+                let more = needed - file.allocation.count();
+                self.extend_clusters(&mut file.allocation, more)?;
+                self.barrier()?;
+                file.clusters = self.clusters(&file.allocation)?;
+            }
+            // Bytes past ValidDataLength read as zeros by the specification,
+            // but some readers return what the rest of its cluster holds, so
+            // that is zeroed on the device too.
+            let cluster_end = file.valid.div_ceil(cluster_size) * cluster_size;
+            if file.valid < cluster_end {
+                self.zero_range(&file.clusters, file.valid, cluster_end.min(length))?;
+            }
+            file.length = length;
+        }
+        self.record(file, now)
+    }
+
+    /// Writes the file's stream, LastModified, LastAccessed and Archive into
+    /// its entry set.
+    fn record(&mut self, file: &mut OpenFile, now: &Timestamp) -> Result<()> {
         let raw = &mut file.set.raw;
         set_stream(raw, &file.allocation, file.valid, file.length);
         set_time(raw, Stamp::Modified, now)?;

@@ -91,6 +91,17 @@ fn mkdir_and_write_change_the_image_and_leave_it_clean() {
     let missing = run(&image, &["write", "--at", "0", "/absent"], b"x");
     let error: Value = serde_json::from_slice(&missing.stderr).unwrap();
     assert_eq!(error["kind"], "not_found");
+    json(&run(
+        &image,
+        &["truncate", "--size", "2", "/a/b/c/data.bin"],
+        b"",
+    ));
+    assert_eq!(run(&image, &["cat", "/a/b/c/data.bin"], b"").stdout, b"sh");
+    assert!(!run(&image, &["rmdir", "/a/b/c"], b"").status.success());
+    json(&run(&image, &["rm", "/a/b/c/data.bin"], b""));
+    let removed = json(&run(&image, &["rmdir", "/a/b/c"], b""));
+    assert_eq!(removed["removed"], "/a/b/c");
+    json(&run(&image, &["write", "/kept.txt"], b"kept"));
     let bytes = std::fs::read(&image).unwrap();
     assert_eq!(bytes[106] & 2, 0, "the volume is left clean");
     let check = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
