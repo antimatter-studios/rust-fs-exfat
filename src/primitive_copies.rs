@@ -82,13 +82,14 @@ pub struct FatLayout {
 
 impl FatLayout {
     /// The layout `boot` describes. Only the Main Boot Sector's VolumeFlags
-    /// is current (section 4); a backup's ActiveFat may be stale.
+    /// is current (section 4); a backup's ActiveFat may be stale. An offset or
+    /// length past `u64::MAX` saturates there, past any device.
     pub fn from_boot(boot: &BootSector) -> Self {
         let sector = boot.bytes_per_sector();
         let second = boot.number_of_fats >= 2;
         Self {
-            first: u64::from(boot.fat_offset) * sector,
-            length: u64::from(boot.fat_length) * sector,
+            first: u64::from(boot.fat_offset).saturating_mul(sector),
+            length: u64::from(boot.fat_length).saturating_mul(sector),
             second,
             active: if second && boot.volume_flags & 1 != 0 {
                 FatCopy::Second
@@ -103,7 +104,7 @@ impl FatLayout {
     pub fn offset(&self, copy: FatCopy) -> Option<u64> {
         match copy {
             FatCopy::First => Some(self.first),
-            FatCopy::Second => self.second.then(|| self.first + self.length),
+            FatCopy::Second => self.second.then(|| self.first.saturating_add(self.length)),
         }
     }
 
