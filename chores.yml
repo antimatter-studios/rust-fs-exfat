@@ -28,6 +28,9 @@ chore_min_version: 0.19.0
 #   chore test:oracle-macos
 #                      macOS's newfs_exfat, fsck_exfat -n and read-only
 #                      driver, on a Mac host
+#   chore test:vm      every Linux tier compiled and run INSIDE the guest
+#   chore test         everything: natively on Linux (test:native); on a Mac,
+#                      test:vm, then test:oracle-macos, package and scripts
 #   chore vm:*         the harness's tasks: boot, provision (scripts/vm-setup.sh:
 #                      exfatprogs and the kernel's exfat module), tear down
 #
@@ -266,8 +269,81 @@ tasks:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 310 16000 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle-macos 25
+  test:vm:
+    desc: 'Every Linux tier, compiled and run INSIDE the harness VM: how a Mac runs the Linux suite'
+    # scripts/guest-suite.sh, through the harness's [test] guest_command:
+    # the library, every tests/*.rs and the doctests, with exfatprogs, the
+    # kernel and relan/exfat called in place (FLTH_GUEST=1). The toolchain
+    # and the build directory live on the guest's own disk, so the first
+    # run pays a full build and later ones are incremental.
+    #
+    # The core sibling is staged on the share first, from its checkout's
+    # HEAD: the guest is given this repository, not the directory that
+    # holds it, and guest-suite.sh installs the toolchain with core's
+    # script.
+    #
+    # BUDGET: 625 lines / 38,742 bytes on a macOS host's HVF guest with a warm
+    # build (#126), 411 tests executed, three of them the red layer #153's
+    # failures, whose report is 27 lines / 2,954 bytes of that. CI's guest is
+    # fresh every run, so its log also holds the toolchain install and a
+    # whole release build, about 60 lines / 3.5 KB on the first run here:
+    # about 660 / 39,300 for a passing cold run. 860 / 51,000 is about 30%
+    # over it. FLOOR: 388, 95% of the 408 that passed.
+    timeout: 120m
+    on_timeout:
+      - cmd: '../fs-linux-test-harness/scripts/vm.sh down || ../fs-linux-test-harness/scripts/vm.sh destroy'
+    cmds:
+      - test-disks/build-fixtures.sh --check
+      - |
+        set -eu
+        [ -x ../fs-linux-test-harness/scripts/vm.sh ] || {
+          echo "test:vm needs the harness sibling -- run 'chore siblings'." >&2
+          exit 1
+        }
+        [ -e ../rust-fs-core/.git ] || {
+          echo "test:vm: ../rust-fs-core is not checked out -- run 'chore siblings'." >&2
+          exit 1
+        }
+        share="$(../fs-linux-test-harness/scripts/vm.sh share)"
+        dest="$share/siblings/rust-fs-core"
+        rm -rf "$dest"
+        mkdir -p "$dest"
+        git -C ../rust-fs-core archive --format=tar HEAD | tar -x -C "$dest"
+        # --verbose is tier.sh's, not cargo's.
+        guest_args=""
+        for arg in ${CLI_ARGS:-}; do
+          case "$arg" in --verbose|-v) continue ;; esac
+          guest_args="$guest_args $arg"
+        done
+        # shellcheck disable=SC2086  # the words are the point
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored test:vm vm 860 51000 -- \
+          ../fs-linux-test-harness/scripts/vm.sh guest-test $guest_args
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored vm 388
   test:
-    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:kernel', 'chore test:third', 'chore test:oracle-macos', 'chore test:package', 'chore test:scripts']
+    desc: 'Everything, as CI runs it: natively on Linux; on a Mac, the Linux tiers in the VM and the macOS oracle here'
+    # WE RUN THE LINUX TESTS ON LINUX. On a Linux host that is this host. On
+    # a Mac there is no exfat kernel driver, no loop mount and no exfatprogs,
+    # so `test:vm` builds and runs the same sources in the guest, and the
+    # macOS oracle, which needs a Mac, runs here.
+    cmds:
+      - |
+        set -eu
+        case " ${CLI_ARGS:-} " in
+          *" --verbose "*|*" -v "*) export OUTPUT_BUDGET_VERBOSE=1 ;;
+        esac
+        if [ "$(uname -s)" = Linux ]; then
+          exec "{{.CHORE_EXE}}" test:native
+        fi
+        echo "test: this host is $(uname -s) -- the Linux tiers run in the harness VM."
+        "{{.CHORE_EXE}}" test:vm
+        if [ "$(uname -s)" = Darwin ]; then
+          "{{.CHORE_EXE}}" test:oracle-macos
+        fi
+        "{{.CHORE_EXE}}" test:package
+        "{{.CHORE_EXE}}" test:scripts
+  test:native:
+    desc: 'The suite on this (Linux) host: unit, images, and the exfatprogs, kernel and relan/exfat oracles in the guest, then package and scripts'
+    cmds: ['chore test:unit', 'chore test:images', 'chore test:oracle', 'chore test:kernel', 'chore test:third', 'chore test:package', 'chore test:scripts']
   fuzz:
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh fuzz fuzz 40 4000 -- bash scripts/fuzz-all.sh $CLI_ARGS'

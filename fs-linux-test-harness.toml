@@ -18,6 +18,11 @@ name = "rust-fs-exfat"
 # module, and installs what a Rust build needs in the guest.
 script = "scripts/vm-setup.sh"
 
+[test]
+# Runs INSIDE the guest, from /repo (this repository, mounted there): every
+# Linux tier, for a host that is not Linux (`chore test:vm`).
+guest_command = "scripts/guest-suite.sh"
+
 [share]
 dir = ".vm-share"
 

@@ -2,8 +2,8 @@ name: ci
 
 # EVERY JOB RUNS CHORE TASKS, so a green local `chore <task>` is the same
 # evidence as the job that runs it here. rust-fs-ext4's ci.yml is the
-# template; the jobs it has and this file does not yet are the VM half
-# (#120-#126), and each has a marked place below.
+# template, the VM half included: fixtures built in the harness guest, the
+# Linux oracles called in it, and the whole suite run inside it.
 #
 #   changes       which profile this event runs (scripts/ci-plan.sh: quick
 #                 for a pull request, full for a "red:" one and for
@@ -26,15 +26,15 @@ name: ci
 #   images        (#122) `chore test:images`: the fixtures artifact read
 #                 with no VM, against the kernel's listing of each image.
 #   test          x86_64, where GitHub gives us KVM: the Linux oracles,
-#                 every exfatprogs call (`chore test:oracle`, #123), and
-#                 then every kernel mount and every relan/exfat call
-#                 (#124, #125), inside the VM.
+#                 every exfatprogs call (`chore test:oracle`), every kernel
+#                 mount (`chore test:kernel`) and every relan/exfat call
+#                 (`chore test:third`), inside the VM.
 #   test-arm64    aarch64 matters on its own (c_char is unsigned there, and
 #                 Apple Silicon hosts run on it) but GitHub's arm64 runners
 #                 have NO KVM, so no VM can run: this job runs the tiers
-#                 that need none -- lint and the unit tier, and
-#                 `chore test:images` once the fixtures exist (#122).
-#   suite-in-vm   (#126) `chore test:vm`: the whole suite compiled and run
+#                 that need none -- lint, the unit tier and
+#                 `chore test:images`.
+#   suite-in-vm   `chore test:vm`: every Linux tier compiled and run
 #                 inside the guest, the way a macOS host runs the Linux one.
 #   oracle-macos  `chore test:unit` and `chore test:images` on macOS, then
 #                 `chore test:oracle-macos`: macOS's own newfs_exfat,
@@ -436,13 +436,53 @@ jobs:
       - name: chore vm:status (the VM is down again)
         run: '! chore vm:status'
 
-  # ---------------------------------------------------------------------
-  # THE REST OF THE VM HALF GOES HERE (#122-#126): `test` (x86_64, KVM:
-  # `chore lint` and `chore test` with the oracles in the guest) and
-  # `suite-in-vm` (#126), as rust-fs-ext4's ci.yml has them. Each joins
-  # ci-ok's `needs:` below and the lists in scripts/ci-ok.sh, and
-  # tests/scripts/test-ci-profile.sh holds the two equal.
-  # ---------------------------------------------------------------------
+  suite-in-vm:
+    # `chore test:vm` (#126): every Linux tier compiled and run inside the
+    # guest, the way a macOS host runs the Linux suite. Run on every pull
+    # request so that path cannot rot.
+    name: suite in the guest (the macOS path)
+    needs: fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: rust-fs-exfat
+      - name: Install chore
+        run: scripts/ci-install-chore.sh
+      - name: PyYAML
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/python/bin/pip" install --quiet PyYAML==6.0.3
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - name: chore siblings
+        run: chore siblings
+      - name: KVM, QEMU and Vagrant
+        id: vm-host
+        run: ../fs-linux-test-harness/scripts/ci-setup-linux.sh
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.vagrant.d/boxes
+          key: ${{ steps.vm-host.outputs.box-cache-key }}
+      - name: The fixtures, from the fixtures job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fixtures
+          path: rust-fs-exfat/test-disks
+      - name: chore test:vm
+        id: tier
+        run: chore test:vm
+      - name: Keep the tier logs
+        if: always() && steps.tier.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier-logs-suite-in-vm
+          path: rust-fs-exfat/tmp/logs/*.log
+          if-no-files-found: error
+      - name: chore vm:status (the VM is down again)
+        run: '! chore vm:status'
 
   test-arm64:
     name: test (aarch64, no KVM on this runner)
@@ -788,8 +828,9 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    # (#122-#126) test and suite-in-vm join this list.
-    needs: [changes, unit, fixtures, images, test, test-arm64, oracle-macos, package, semver, msrv, cli, provenance, scripts]
+    # Every job above. scripts/ci-ok.sh judges the same list, and
+    # tests/scripts/test-ci-profile.sh holds the two equal.
+    needs: [changes, unit, fixtures, images, test, suite-in-vm, test-arm64, oracle-macos, package, semver, msrv, cli, provenance, scripts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
