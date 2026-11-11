@@ -1088,6 +1088,41 @@ fn audit_upcase(
             structure,
             format!("{detail} at byte {at} of the table"),
         )?;
+    } else if !table.complete {
+        // Section 7.2.5.1: the table maps every character from 0000h to
+        // FFFFh. A table whose checksum matches and whose encoding is sound
+        // can still end early. A faulty run is reported above instead: the
+        // coverage past it is unknown.
+        out.add(
+            DamageKind::Malformed,
+            Severity::Error,
+            location,
+            structure,
+            format!(
+                "the {}-byte table maps {} characters, not 65536",
+                stream.length,
+                table.mappings.len()
+            ),
+        )?;
+    }
+    // Section 7.2.5 and Table 24: the first 128 mappings are fixed. A decoded
+    // mapping that differs breaks Table 24, as does a table that ends before
+    // all 128. A faulty run before them leaves the rest unknown, not wrong.
+    let stopped = matches!(
+        table.issue,
+        Some(UpcaseIssue::TruncatedRun | UpcaseIssue::RunOutsideRange)
+    );
+    let differs = (0u16..128)
+        .zip(&table.mappings)
+        .any(|(unit, mapped)| *mapped != primitives::mandatory_upcase(unit));
+    if differs || (!table.ascii_ok && !stopped) {
+        out.add(
+            DamageKind::Malformed,
+            Severity::Error,
+            location,
+            structure,
+            "a mapping of the first 128 characters differs from Table 24".into(),
+        )?;
     }
     ControlFlow::Continue(())
 }
