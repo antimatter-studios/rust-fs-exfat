@@ -29,7 +29,7 @@ tier has run.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | 2026-11-11 write mount and allocation (#129), local macOS: 466 lines, 28395 bytes, 347 tests, including the 60-second slow-test notice for the 512 MiB bitmap audit (before it the budget stood at 434 lines, 26559 bytes) | 468 lines, 28450 bytes, allowing timing digits | 150 |
+| unit | 2026-11-11 files, directories and data (#130), local macOS: 488 lines, 29403 bytes, 359 tests, with the 60-second slow-test notice for the 512 MiB bitmap audit; 489 lines, 29565 bytes when the million-entry audit also prints one (#129: 466 lines, 28395 bytes, 347 tests); #127 adds one 69-byte line | 493 lines, 29770 bytes, allowing both notices and timing digits | 150 |
 | oracle | 2026-11-11 write oracle (#129): 302 lines, 12646 bytes, 44 tests including large-volume and million-entry comparisons; the written images add 41 lines, two checker reports and two producer runs (2026-11-10: 223 lines, 11070 bytes, 25 tests) | 310 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |

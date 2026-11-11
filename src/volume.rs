@@ -236,6 +236,30 @@ impl<Device: BlockRead> Volume<Device> {
         self.system_clusters.contains(&cluster)
     }
 
+    /// Reads the root directory again after a writer changed it, and checks
+    /// it as strictly as the open did.
+    pub(crate) fn reload_root(&mut self) -> Result<()> {
+        let root_chain = self.cluster_chain(self.boot.root_cluster)?;
+        let length = (root_chain.len() as u64)
+            .checked_mul(self.boot.cluster_size())
+            .ok_or(Error::Bounds)?;
+        let root = read_chain(
+            &self.reader,
+            &self.boot,
+            root_chain.iter().copied(),
+            length,
+            self.limits,
+        )?;
+        let metadata = RootMetadata::parse(&root, self.boot.number_of_fats)?;
+        if metadata.bitmaps != self.metadata.bitmaps || metadata.upcase != self.metadata.upcase {
+            return Err(Error::Invalid("system streams moved under a writer"));
+        }
+        self.root = root;
+        self.metadata = metadata;
+        self.root_directory()?;
+        Ok(())
+    }
+
     pub fn cluster_chain(&self, first: u32) -> Result<Vec<u32>> {
         let clusters = chain(&self.reader, &self.boot, first, self.limits)?;
         for cluster in &clusters {

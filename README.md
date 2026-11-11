@@ -8,9 +8,9 @@ directory iteration, file reads, timestamps, volume-upcase path lookup, a
 C ABI and command-line tools are implemented, which completes
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
 Writing is being built ([#135](https://github.com/antimatter-studios/rust-fs-exfat/issues/135)):
-a volume can be mounted for writing and clusters allocated and freed. Files and
-directories cannot be created or changed yet, and there is no formatter or
-repair operation.
+a volume can be mounted for writing, and files and directories created and
+written. Truncation, removal, renaming and changing times, attributes or the
+label are not implemented yet, and there is no formatter or repair operation.
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
@@ -47,9 +47,22 @@ the clusters it released. `WriteVolume::reader` is the strict reader over the
 mount, seeing the writes made so far. Allocation keeps a stream contiguous
 (NoFatChain) when it can, converts it to a FAT chain when it cannot grow in
 place, never takes a cluster the FAT marks bad, and writes both FATs and both
-Allocation Bitmaps of a two-FAT volume. A volume the writer changed passes
-macOS `fsck_exfat -n` and reads back through the read-only macOS driver
-unchanged.
+Allocation Bitmaps of a two-FAT volume.
+
+`create`, `mkdir`, `pwrite` and `write_file` make files and directories and
+write their data. New names are checked as Section 7.7.3 requires and compared
+with existing ones through the volume's Up-case Table; each entry set carries
+its SetChecksum and a NameHash over the up-cased name. A directory that runs
+out of entries grows by a zeroed cluster, and its parent records the new
+length. Writes allocate as a file grows, keep it contiguous (NoFatChain) while
+they can, and zero any gap between the old ValidDataLength and the write, so
+DataLength and ValidDataLength stay equal. New entries take the current time
+in UTC unless `create_with` and `mkdir_with` give times, with hundredths and
+UTC offsets, and ReadOnly, Hidden, System or Archive. On the macOS reference
+volumes, a tree written beside macOS's own files (large, fragmented and
+non-ASCII-named files, directories grown past a cluster, gaps and given times)
+passes `fsck_exfat -n`, and the read-only macOS driver lists the same names,
+sizes, times and SHA-256s.
 See [features](docs/features.md) and [provenance](PROVENANCE.md).
 Directory entry types, primary/stream/name fields, UTF-16 names, entry-set
 checksums and name hashes are decoded by `fs_exfat::primitives`. Its
@@ -129,6 +142,8 @@ target/release/rust-fs-exfat fs image.dmg ls /
 target/release/rust-fs-exfat fs image.dmg stat /file.txt
 target/release/rust-fs-exfat fs image.dmg cat /file.txt
 target/release/rust-fs-exfat fs image.dmg export /file.txt output.txt --verify
+target/release/rust-fs-exfat fs image.dmg mkdir -p /backup/2026
+target/release/rust-fs-exfat fs image.dmg write /backup/2026/notes.txt < notes.txt
 target/release/rust-fs-exfat fsck image.dmg -n
 ```
 
@@ -138,7 +153,10 @@ for people; `cat` writes raw bytes. `--offset BYTES` selects a filesystem within
 an image and must be 512-byte aligned. Export uses `fs_core::cli::transfer`:
 it stages locally, refuses source aliases and existing destinations by default,
 and verifies staged length and SHA-256 before publication when `--verify` is set.
-Only the destination is written; the source always stays read-only.
+Only the destination is written; the source always stays read-only. `mkdir`
+and `write` are the only verbs that open the image for writing: the volume is
+marked dirty while they run and clean when they finish, and one already marked
+dirty is refused.
 
 `fsck.exfat` is check-only, with no repair mode. It checks boot copies, metadata,
 entry sets, chain allocation, cross-links and unreferenced allocated clusters.

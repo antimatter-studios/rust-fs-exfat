@@ -175,6 +175,26 @@ pub fn parse(
     upcase: &UpcaseTable,
     root: bool,
 ) -> Result<Vec<DirectoryEntry>> {
+    Ok(parse_located(data, boot, upcase, root)?
+        .into_iter()
+        .map(|located| located.entry)
+        .collect())
+}
+
+/// A file entry set and where it lies in its directory's stream.
+pub(crate) struct Located {
+    pub(crate) offset: usize,
+    pub(crate) length: usize,
+    pub(crate) entry: DirectoryEntry,
+}
+
+/// The same strict parse as [`parse`], keeping each set's position.
+pub(crate) fn parse_located(
+    data: &[u8],
+    boot: &BootSector,
+    upcase: &UpcaseTable,
+    root: bool,
+) -> Result<Vec<Located>> {
     if !data.len().is_multiple_of(ENTRY_SIZE) {
         return Err(Error::Invalid("directory is not entry aligned"));
     }
@@ -203,7 +223,11 @@ pub fn parse(
             if !names.insert(folded) {
                 return Err(Error::Invalid("duplicate case-insensitive directory name"));
             }
-            entries.push(entry);
+            entries.push(Located {
+                offset: position,
+                length: set.bytes.len(),
+                entry,
+            });
             position += set.bytes.len();
         } else if root && matches!(kind, 0x81..=0x83) {
             position += ENTRY_SIZE;

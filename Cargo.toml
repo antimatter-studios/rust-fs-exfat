@@ -86,6 +86,11 @@ path = "tests/cli.rs"
 required-features = ["cli"]
 
 [[test]]
+name = "cli_write"
+path = "tests/cli_write.rs"
+required-features = ["cli"]
+
+[[test]]
 name = "macos_interfaces"
 path = "tests/oracle/interfaces.rs"
 required-features = ["cli"]

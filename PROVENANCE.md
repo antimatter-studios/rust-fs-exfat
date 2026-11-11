@@ -47,6 +47,24 @@ read-only mounted macOS driver. Observing that the macOS driver marks only the
 Main Boot Sector dirty was black-box use of the host's own driver on an image
 created for the purpose.
 
+## Writing: files, directories and data
+
+For #130, the entry-set encoder, directory growth, name checks and the data
+writer in `fs_exfat::write` are new code written from Microsoft's public exFAT
+specification, sections 6.2 "Directory Entry Sets" (6.2.1 to 6.2.3, InUse and
+end of directory), 6.3.3 "SetChecksum Field", 7.4 "File Directory Entry"
+(7.4.4 FileAttributes, 7.4.5 to 7.4.10 timestamps, 10ms increments and UTC
+offsets), 7.6 "Stream Extension Directory Entry" (7.6.2 GeneralSecondaryFlags,
+7.6.3 NameLength, 7.6.4 NameHash, 7.6.5 ValidDataLength, 7.6.6 DataLength)
+and 7.7 "File Name Directory Entry" (7.7.3 invalid FileName characters), and
+from this crate's own strict parser, which checks every directory before the
+writer changes it. The conversion from days since 1970 to a calendar date is
+the standard proleptic Gregorian arithmetic, not filesystem code. No other
+exFAT implementation was an input. The macOS oracle writes a tree beside the
+files the macOS driver made on the reference volumes, and compares names,
+sizes, times and SHA-256s with the read-only mounted macOS driver after
+`fsck_exfat -n` accepts the volume.
+
 ## Cross-linked clusters
 
 For #89, the salvage `cross_links` extension is new code written from

@@ -166,11 +166,13 @@ tasks:
       - cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - cargo clippy --locked --all-targets --all-features -- -D warnings
   test:unit:
-    # BUDGET: 468 / 28,450 plus one 69-byte line for tests/cli.rs's check that
-    # the cli tier's sample volume is the one the cargo tests build (#127).
-    # CI runs `chore build` first, so the log holds no cold build.
+    # BUDGET: 492 / 29,700 for files, directories and data (#130; measured
+    # 488 / 29,403 with one slow-test notice and 489 / 29,565 with two), plus
+    # one 69-byte line for tests/cli.rs's check that the cli tier's sample
+    # volume is the one the cargo tests build (#127). CI runs `chore build`
+    # first, so the log holds no cold build.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 469 28519 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 493 29770 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test write --test capi_write --test write_files --test cli_write && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:images:
     desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'

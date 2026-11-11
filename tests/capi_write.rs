@@ -204,3 +204,68 @@ fn callback_mounts_write_whole_sectors_and_flush_through_the_callbacks() {
     }
     assert_eq!(*source.bytes.lock().unwrap(), bytes);
 }
+
+fn read_back(handle: *const FsExfat, path: &str, length: usize) -> Vec<u8> {
+    let path = CString::new(path).unwrap();
+    let mut output = vec![0xa5; length + 8];
+    let count =
+        unsafe { fs_exfat_read_file(handle, path.as_ptr(), 0, output.as_mut_ptr(), output.len()) };
+    assert_eq!(count, length as i64, "{}", last_error());
+    output.truncate(length);
+    output
+}
+
+#[test]
+fn create_mkdir_pwrite_and_write_file_set_errno_and_persist() {
+    let (image, _) = format(&Layout::default());
+    let scratch = Scratch::new(&image);
+    let path = CString::new(scratch.image.to_str().unwrap()).unwrap();
+    let directory = CString::new("/Docs").unwrap();
+    let file = CString::new("/Docs/report.txt").unwrap();
+    let whole = CString::new("/Docs/whole.bin").unwrap();
+    let missing = CString::new("/absent/x").unwrap();
+    unsafe {
+        let handle = fs_exfat_mount_rw(path.as_ptr(), 0);
+        assert!(!handle.is_null(), "{}", last_error());
+        assert_eq!(
+            fs_exfat_mkdir(handle, directory.as_ptr()),
+            0,
+            "{}",
+            last_error()
+        );
+        assert_eq!(fs_exfat_last_errno(), 0);
+        assert_eq!(fs_exfat_mkdir(handle, directory.as_ptr()), -1);
+        assert_eq!(fs_exfat_last_errno(), 17, "EEXIST");
+        assert_eq!(fs_exfat_create(handle, missing.as_ptr()), -1);
+        assert_eq!(fs_exfat_last_errno(), 2, "ENOENT");
+        assert_eq!(fs_exfat_create(handle, file.as_ptr()), 0);
+        assert_eq!(
+            fs_exfat_pwrite(handle, file.as_ptr(), 3, b"abc".as_ptr(), 3),
+            3
+        );
+        assert_eq!(fs_exfat_pwrite(handle, file.as_ptr(), 0, ptr::null(), 0), 0);
+        assert_eq!(
+            fs_exfat_pwrite(handle, file.as_ptr(), 0, ptr::null(), 1),
+            -1
+        );
+        assert_eq!(fs_exfat_last_errno(), 22, "EINVAL");
+        assert_eq!(
+            fs_exfat_pwrite(handle, directory.as_ptr(), 0, b"x".as_ptr(), 1),
+            -1
+        );
+        assert_eq!(fs_exfat_last_errno(), 21, "EISDIR");
+        let body = vec![7u8; 70_000];
+        assert_eq!(
+            fs_exfat_write_file(handle, whole.as_ptr(), body.as_ptr(), body.len()),
+            70_000
+        );
+        assert_eq!(read_back(handle, "/Docs/report.txt", 6), b"\0\0\0abc");
+        assert_eq!(read_back(handle, "/docs/WHOLE.bin", 70_000), body);
+        assert_eq!(fs_exfat_umount_checked(handle), 0, "{}", last_error());
+        let handle = fs_exfat_mount(path.as_ptr(), 0);
+        assert_eq!(read_back(handle, "/Docs/whole.bin", 70_000), body);
+        assert_eq!(fs_exfat_create(handle, file.as_ptr()), -1);
+        assert_eq!(fs_exfat_last_errno(), 30, "EROFS");
+        fs_exfat_umount(handle);
+    }
+}

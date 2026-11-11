@@ -317,8 +317,10 @@ for current, directories, files in os.walk(root):
         if item.is_dir():
             records.append(f'd\t0\t-\t{path}\n')
         else:
+            metadata = item.stat()
             digest = hashlib.sha256(item.read_bytes()).hexdigest()
-            records.append(f'f\t{item.stat().st_size}\t{digest}\t{path}\n')
+            times = f'{metadata.st_mtime_ns // 1000000}\t{metadata.st_atime_ns // 1000000}\t{round(metadata.st_birthtime * 1000)}'
+            records.append(f'f\t{metadata.st_size}\t{digest}\t{times}\t{path}\n')
 with open(sys.argv[2], 'w') as output:
     output.writelines(sorted(records))
 PY

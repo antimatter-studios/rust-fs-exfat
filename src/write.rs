@@ -42,9 +42,15 @@
 mod alloc;
 #[path = "write_cache.rs"]
 mod cache;
+#[path = "write_dir.rs"]
+mod dir;
+#[path = "write_file.rs"]
+mod file;
 
 pub use alloc::Allocation;
 pub use cache::CacheView;
+pub use dir::{ATTRIBUTE_ARCHIVE, SETTABLE_ATTRIBUTES};
+pub use file::NewEntry;
 
 use crate::volume::{ReadLimits, Volume};
 use crate::{primitives, Error, Result};
@@ -74,6 +80,9 @@ pub struct WriteVolume<Device: BlockDevice> {
     allocated: u64,
     next_free: u32,
     state: State,
+    /// Set when the root directory's stream changed, so the strict reader
+    /// reads it again at the end of the operation.
+    root_changed: bool,
 }
 
 impl<Device: BlockDevice> WriteVolume<Device> {
@@ -128,6 +137,7 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             allocated,
             next_free: 2,
             state: State::Unmounted,
+            root_changed: false,
         };
         mounted.write_boot_state(true)?;
         mounted.cache.sync()?;
@@ -217,8 +227,17 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         }
     }
 
+    /// Writes everything held so far before anything that follows.
+    pub(crate) fn barrier(&self) -> Result<()> {
+        self.cache.flush_dirty()
+    }
+
     fn commit(&mut self) -> Result<()> {
         self.cache.flush_dirty()?;
+        if self.root_changed {
+            self.volume.reload_root()?;
+            self.root_changed = false;
+        }
         if self.percent_in_use() != self.volume.boot().percent_in_use {
             self.write_boot_state(true)?;
         }

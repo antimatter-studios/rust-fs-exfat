@@ -20,10 +20,44 @@ use crate::write::{self, WriteVolume};
 use crate::{Error, Result};
 use fs_core::ffi::{ffi_guard_cleanup, ffi_guard_or, fs_core_last_error_message, set_last_error};
 use fs_core::{BlockDevice, BlockRead, OwnedRwSlice, OwnedSlice};
+use std::cell::Cell;
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::path::Path;
 use std::ptr;
 use std::sync::{Mutex, MutexGuard};
+
+const ENOENT: c_int = 2;
+const EIO: c_int = 5;
+const EEXIST: c_int = 17;
+const ENOTDIR: c_int = 20;
+const EISDIR: c_int = 21;
+const EINVAL: c_int = 22;
+const ENOSPC: c_int = 28;
+const EROFS: c_int = 30;
+#[cfg(target_os = "linux")]
+const ENOTSUP: c_int = 95;
+#[cfg(not(target_os = "linux"))]
+const ENOTSUP: c_int = 45;
+
+thread_local! {
+    static LAST_ERRNO: Cell<c_int> = const { Cell::new(0) };
+}
+
+/// The errno value that matches an error, for callers such as filesystem
+/// bridges that report one.
+fn errno_of(error: &Error) -> c_int {
+    match error {
+        Error::NotFound => ENOENT,
+        Error::NotDirectory => ENOTDIR,
+        Error::Exists => EEXIST,
+        Error::IsDirectory => EISDIR,
+        Error::NoSpace => ENOSPC,
+        Error::Device(fs_core::Error::ReadOnly) => EROFS,
+        Error::Device(_) => EIO,
+        Error::Unsupported(_) => ENOTSUP,
+        Error::Invalid(_) | Error::Bounds => EINVAL,
+    }
+}
 
 pub type ReadCallback = unsafe extern "C" fn(*mut c_void, u64, *mut u8, usize) -> c_int;
 pub type WriteCallback = unsafe extern "C" fn(*mut c_void, u64, *const u8, usize) -> c_int;
@@ -285,9 +319,15 @@ pub struct FsExfatVolumeInfo {
 }
 
 fn guard<Value: Copy>(fallback: Value, body: impl FnOnce() -> Result<Value>) -> Value {
+    // A panic leaves EIO behind; every returning path overwrites it.
+    LAST_ERRNO.with(|errno| errno.set(EIO));
     ffi_guard_or(fallback, || match body() {
-        Ok(value) => value,
+        Ok(value) => {
+            LAST_ERRNO.with(|errno| errno.set(0));
+            value
+        }
         Err(error) => {
+            LAST_ERRNO.with(|errno| errno.set(errno_of(&error)));
             set_last_error(error.to_string());
             fallback
         }
@@ -600,6 +640,111 @@ pub unsafe extern "C" fn fs_exfat_read_file(
 #[no_mangle]
 pub extern "C" fn fs_exfat_last_error() -> *const c_char {
     fs_core_last_error_message()
+}
+
+/// The errno value for the last fallible call on this thread: 0 after
+/// success, ENOENT, ENOTDIR, EEXIST, EISDIR, ENOSPC, EROFS, ENOTSUP or
+/// EINVAL for the matching failure, and EIO for device errors and panics.
+#[no_mangle]
+pub extern "C" fn fs_exfat_last_errno() -> c_int {
+    LAST_ERRNO.with(Cell::get)
+}
+
+/// # Safety
+/// The mount must be live and `path` a NUL-terminated UTF-8 string.
+unsafe fn write_call<Value>(
+    handle: *const FsExfat,
+    path: *const c_char,
+    body: impl FnOnce(&mut WriteVolume<OwnedRwSlice>, &str) -> Result<Value>,
+) -> Result<Value> {
+    let handle = unsafe { handle.as_ref() }.ok_or(Error::Invalid("null mount"))?;
+    let path = unsafe { string(path)? };
+    let mut volume = handle.writable()?;
+    body(&mut volume, path)
+}
+
+/// # Safety
+/// `data` must cover `length` readable bytes; NULL is allowed when it is 0.
+unsafe fn input<'data>(data: *const u8, length: usize) -> Result<&'data [u8]> {
+    if length == 0 {
+        return Ok(&[]);
+    }
+    if data.is_null() || length > isize::MAX as usize {
+        return Err(Error::Invalid("invalid input buffer"));
+    }
+    Ok(unsafe { std::slice::from_raw_parts(data, length) })
+}
+
+/// Creates an empty file with Archive set at the current time. Returns 0, or
+/// -1 with a diagnostic and errno (EEXIST when the name is taken).
+///
+/// # Safety
+/// The mount must be live and `path` a NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_create(handle: *const FsExfat, path: *const c_char) -> c_int {
+    guard(-1, || {
+        unsafe { write_call(handle, path, |volume, path| volume.create(path)) }?;
+        Ok(0)
+    })
+}
+
+/// Creates an empty directory. Returns 0, or -1 with a diagnostic and errno.
+///
+/// # Safety
+/// The mount must be live and `path` a NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_mkdir(handle: *const FsExfat, path: *const c_char) -> c_int {
+    guard(-1, || {
+        unsafe { write_call(handle, path, |volume, path| volume.mkdir(path)) }?;
+        Ok(0)
+    })
+}
+
+/// Writes `length` bytes into an existing file at `offset`, growing it as
+/// needed; a gap past the old end reads as zeros. Returns the bytes written,
+/// or -1 with a diagnostic and errno.
+///
+/// # Safety
+/// The mount must be live, `path` a NUL-terminated UTF-8 string, and `data`
+/// readable for `length` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_pwrite(
+    handle: *const FsExfat,
+    path: *const c_char,
+    offset: u64,
+    data: *const u8,
+    length: usize,
+) -> i64 {
+    guard(-1, || {
+        let data = unsafe { input(data, length)? };
+        unsafe {
+            write_call(handle, path, |volume, path| {
+                volume.pwrite(path, offset, data)
+            })
+        }?;
+        Ok(length as i64)
+    })
+}
+
+/// Makes `path` a file holding exactly `length` bytes of `data`, creating it
+/// or replacing its contents. Returns the new size, or -1 with a diagnostic
+/// and errno.
+///
+/// # Safety
+/// The mount must be live, `path` a NUL-terminated UTF-8 string, and `data`
+/// readable for `length` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fs_exfat_write_file(
+    handle: *const FsExfat,
+    path: *const c_char,
+    data: *const u8,
+    length: usize,
+) -> i64 {
+    guard(-1, || {
+        let data = unsafe { input(data, length)? };
+        unsafe { write_call(handle, path, |volume, path| volume.write_file(path, data)) }?;
+        Ok(length as i64)
+    })
 }
 
 #[cfg(test)]
