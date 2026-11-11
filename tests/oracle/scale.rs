@@ -58,26 +58,132 @@ fn native_check(image: &Image, healthy: bool) {
     drop(attachment);
 }
 
+/// How long a detach may stay busy before the image is reported left behind.
+/// The platform has held a freshly checked million-entry image for longer than
+/// the 20 seconds this once allowed (#109).
+const DETACH_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+
 impl Drop for Attachment {
     fn drop(&mut self) {
-        let mut output = Command::new("/usr/bin/hdiutil")
-            .args(["detach", &self.0])
+        if let Err(message) = detach(
+            std::path::Path::new("/usr/bin/hdiutil"),
+            &self.0,
+            &self.1,
+            DETACH_WINDOW,
+        ) {
+            // A second panic while a failed test unwinds would abort and lose
+            // the message, so it is printed instead.
+            if std::thread::panicking() {
+                eprintln!("{message}");
+            } else {
+                panic!("{message}");
+            }
+        }
+    }
+}
+
+/// Detaches `device` with `program`, retrying with `-force` while it reports
+/// the device busy and `window` has not passed, and records the outcome in the
+/// `attachment-state` beside the receipt in `directory`.
+fn detach(
+    program: &std::path::Path,
+    device: &str,
+    directory: &std::path::Path,
+    window: std::time::Duration,
+) -> Result<(), String> {
+    let mut output = Command::new(program)
+        .args(["detach", device])
+        .output()
+        .unwrap();
+    let deadline = std::time::Instant::now() + window;
+    while !output.status.success()
+        && String::from_utf8_lossy(&output.stderr).contains("Resource busy")
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        output = Command::new(program)
+            .args(["detach", "-force", device])
             .output()
             .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while !output.status.success()
-            && String::from_utf8_lossy(&output.stderr).contains("Resource busy")
-            && std::time::Instant::now() < deadline
-        {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            output = Command::new("/usr/bin/hdiutil")
-                .args(["detach", "-force", &self.0])
-                .output()
-                .unwrap();
-        }
-        assert!(output.status.success(), "{:?}", output);
-        std::fs::write(self.1.join("attachment-state"), "detached").unwrap();
     }
+    if !output.status.success() {
+        return Err(format!(
+            "scale oracle: {device} is still attached after {} s of retries ({}: {}). \
+             Its image and receipt are retained in {}; release it with: {} detach -force {device}",
+            window.as_secs_f64(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim(),
+            directory.display(),
+            program.display(),
+        ));
+    }
+    std::fs::write(directory.join("attachment-state"), "detached").unwrap();
+    Ok(())
+}
+
+/// A directory holding a stand-in for `hdiutil detach` that answers busy for
+/// its first `busy` calls, then succeeds. It touches no device.
+fn busy_detacher(busy: u32) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let directory = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "tmp/detach-stub-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("attachment-state"), "attached").unwrap();
+    let program = directory.join("detach-stub");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\n\
+             count=$(cat \"$0.calls\" 2>/dev/null || echo 0)\n\
+             echo $((count + 1)) > \"$0.calls\"\n\
+             [ \"$count\" -ge {busy} ] && exit 0\n\
+             echo 'hdiutil: couldn'\\''t eject \"disk-stub\" - Resource busy' >&2\n\
+             exit 16\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (directory, program)
+}
+
+#[test]
+fn a_detach_that_clears_within_its_window_records_the_image_detached() {
+    let (directory, program) = busy_detacher(2);
+    detach(
+        &program,
+        "/dev/disk-stub",
+        &directory,
+        std::time::Duration::from_secs(10),
+    )
+    .unwrap();
+    let state = std::fs::read_to_string(directory.join("attachment-state")).unwrap();
+    assert_eq!(state, "detached");
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
+fn a_detach_that_stays_busy_names_the_command_that_releases_the_image() {
+    let (directory, program) = busy_detacher(u32::MAX);
+    let message = detach(
+        &program,
+        "/dev/disk-stub",
+        &directory,
+        std::time::Duration::from_millis(500),
+    )
+    .unwrap_err();
+    let state = std::fs::read_to_string(directory.join("attachment-state")).unwrap();
+    assert_eq!(state, "attached");
+    let command = format!("{} detach -force /dev/disk-stub", program.display());
+    assert!(message.contains(&command), "{message}");
+    assert!(
+        message.contains(&directory.display().to_string()),
+        "{message}"
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
 }
 
 #[test]
