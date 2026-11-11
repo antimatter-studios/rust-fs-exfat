@@ -43,6 +43,12 @@ The allocation audit also uses primitive FAT windows, constant-memory stream
 walks, entry framing and bitmap operations. Audit verdicts, ownership rejection,
 directory workspace budgeting and the complete-report requirement stay in
 `check.rs` and its `check_audit.rs` implementation.
+`fs_exfat::salvage` defines the format-neutral salvage adapter trait of the
+[driver convention](docs/convention.md) and implements it for exFAT on the
+primitives alone. It needs no strict mount, takes sources only as `BlockRead`,
+and returns candidates, extent walks, parent claims and damage as serializable
+evidence rather than trusted files. Plans materialize into a caller's
+`io::Write`, never into the source.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).

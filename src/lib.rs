@@ -1,6 +1,7 @@
 #![deny(unsafe_code)]
 
-//! A strict, read-only exFAT reader with permissive on-disk primitives.
+//! A strict, read-only exFAT reader with permissive on-disk primitives and a
+//! read-only salvage adapter ([`salvage`]) built on them.
 //!
 //! # Test-support images
 //!
@@ -43,6 +44,7 @@ pub mod interface;
 pub mod metadata;
 pub mod path;
 pub mod primitives;
+pub mod salvage;
 pub mod timestamp;
 pub mod volume;
 

@@ -91,12 +91,14 @@ without requiring strict volume or file acceptance. It returns candidates,
 orphans, conflicting claims and damage, not trusted files. It must not repair
 the source or hide uncertainty by routing results through the file API.
 
-There is no exFAT adapter function on the checked main revision.
-`primitives::find_sets` in [src/primitives.rs](../src/primitives.rs) is a
-supporting example: it finds live and deleted entry-set candidates and retains
-their checksum status. It is not an implementation of the common trait.
-The exported modules in [src/lib.rs](../src/lib.rs) contain no salvage module.
-[#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) adds it.
+The common trait is `salvage::SalvageAdapter` in
+[src/salvage_adapter.rs](../src/salvage_adapter.rs), added by
+[#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52).
+exFAT implements it as `salvage::ExfatSalvage` in
+[src/salvage_exfat.rs](../src/salvage_exfat.rs), on the permissive primitives
+only. Its candidate scan streams `primitives::parse_set`, the decoder behind
+`primitives::find_sets` in [src/primitives.rs](../src/primitives.rs). Section 4
+lists the signatures.
 
 ### Extensions
 
@@ -180,6 +182,37 @@ types are settled in
 [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52).
 The common trait must not expose exFAT names. Format knowledge stays in the
 driver, below the adapter.
+
+#52 defines the trait in [src/salvage_adapter.rs](../src/salvage_adapter.rs),
+whose rustdoc is the reference:
+
+| Verb | Method | Result |
+|---|---|---|
+| Find candidates | `find_candidates(source, range, sink)` | `Candidate` values to the sink, then a `ScanReport` with unreadable ranges and a resume offset |
+| Walk chains or extents | `walk_extents(source, candidate)` | `ExtentWalk`: source byte extents and why the walk ended (`Complete`, `Broken`, `OutOfRange`, `Cycle`, `Unreadable`) |
+| Rebuild the tree | `rebuild_tree(source, candidates)` | `Tree`: every parent claim per candidate; none is an orphan, several conflict |
+| Report damage | `report_damage(source, sink)` | `Damage` values to the sink, then a `DamageReport` |
+| Read by extent | `read_extent(source, extent, offset, output)` | Bytes read |
+| Materialize from a plan | `materialize(source, plan, sink)` | A `MaterializeReport` naming the source of every output byte |
+
+`capabilities()` returns the `Feature` values a driver lacks. Its names are
+format-neutral: one per verb, plus `DeletedCandidates` and `DeletedExtents` for
+the deletion-specific parts a read-only format leaves out.
+
+- Every method that reads takes the source as `&dyn BlockRead`. An adapter
+  value holds format context, such as geometry, never a device or path.
+- Candidates, walks, trees, damage, plans and reports serialize with serde
+  and hold no handles. Format-specific candidate fields are the trait's
+  `Detail` type. Damage carries the shared core plus a `detail` string.
+- Scans and damage reports stream to a `Sink`, which may stop them. The
+  report says where, so a scan can resume.
+- Materialization writes to a caller's `io::Write`. No rust-fs-core device
+  implements it, and the borrow rules refuse one value as both source and
+  sink. A second handle on the source's own path is not detectable by type;
+  the caller must not choose it.
+- `SalvageError` covers refusals and operational failures only: `Unsupported`
+  naming a `Feature`, missing geometry, out-of-range requests, source reads
+  that cannot be reported as evidence, and sink failures.
 
 For rust-img drivers (qcow2, vhd, vhdx and vmdk), the same trait uses container
 vocabulary:
@@ -355,10 +388,12 @@ rules. The remaining design details belong to #52, with conformance in #53:
 2. What are the trait's signatures, evidence identities, partial-result types
    and recovery-plan representation within the serializable-data and streaming
    sink design? How is source aliasing prevented when enforcing the separate
-   output-sink requirement?
+   output-sink requirement? #52 answers these for the first version in
+   section 4; ext4 and NTFS test them next.
 3. Which capability bits describe missing operations, deletion-specific parts
    and extensions? The `Unsupported` versus empty-result behavior is settled
-   as the starting position; names and granularity remain open.
+   as the starting position. #52 names one flag per verb and two deletion
+   flags; extension flags wait for the first extension.
 4. What concrete types represent the shared damage fields, and how do #44's
    byte offsets and specification references map into the shared core and
    format-specific details without adding exFAT names to the trait?
