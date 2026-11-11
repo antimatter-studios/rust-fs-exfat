@@ -16,6 +16,11 @@ applied to this page at release time.
 |---|---|---|---|---|
 | Strict filesystem reader | Not yet usable | | #1 | |
 
+## Writing
+
+| Feature | State | Since | Tracking | Checked by |
+|---|---|---|---|---|
+
 ## Interfaces
 
 | Feature | State | Since | Tracking | Checked by |

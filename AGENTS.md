@@ -1,8 +1,10 @@
 # Working in rust-fs-exfat
 
-Strict, read-only exFAT reader. Read README.md, PROVENANCE.md, chores.yml and
-docs/features.md first. Never read copyleft implementation source. Test only
-newly created disk images; never enumerate or act on existing devices.
+exFAT filesystem driver that reads and writes, as rust-fs-ext4 does: a strict
+reader, a writer, and a read-only salvage adapter. Read README.md,
+PROVENANCE.md, chores.yml and docs/features.md first. Never read copyleft
+implementation source. Test only newly created disk images; never enumerate or
+act on existing devices.
 
 <!-- BEGIN SHARED BLOCK: agent-core v8 sha256:1f9d7d85f68196088ee36428968ea4c365c6f99d41b908fd8d2e848a97e5b570 -->
 ## Claiming work
@@ -235,8 +237,12 @@ a fragment until it ships and a line of `CHANGELOG.md` after, never both.
 ## Local contract
 
 Use the pinned Rust toolchain and a fresh CARGO_TARGET_DIR for concurrent work.
-Strict APIs accept only BlockRead and wrap devices in ReadOnlyDevice. No write
-feature, repair or formatter belongs here. fsck.exfat will be check-only.
+The strict reader and the salvage API accept only BlockRead and wrap devices in
+ReadOnlyDevice, so they stay read-only by type. Writing goes through
+`fs_exfat::write`, which takes rust-fs-core's BlockDevice, and nowhere else:
+scripts/check-read-only.sh keeps the writable surface in the write modules and
+the C ABI. Writing is not an optional feature. The formatter is #132; until a
+repair mode is designed, fsck.exfat stays check-only.
 
 The independent oracles, none of which is this crate:
 
@@ -251,7 +257,9 @@ The independent oracles, none of which is this crate:
 The Linux tools run in the guest and never on the host: tests reach them only
 through tests/guest_support, and tests/test_contract.rs fails the suite
 otherwise. The template's Linux VM configuration applies, as rust-fs-ext4's
-chores.yml sets it out; the macOS oracle stays a host oracle. Missing prerequisites fail, never skip.
+chores.yml sets it out; the macOS oracle stays a host oracle. Every volume the
+writer changes must pass fsck_exfat -n and read back through the read-only
+macOS driver as this crate records it. Missing prerequisites fail, never skip.
 Test only images you create: fixtures are built in the guest, and the macOS
 oracle attaches only images it made.
 

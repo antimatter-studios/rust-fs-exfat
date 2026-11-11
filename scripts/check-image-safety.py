@@ -45,6 +45,9 @@ def check(source):
     fixture_regular = '[ -f "$image" ] && [ ! -L "$image" ]'
     fixture_test = 'EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces --test macos_fuzz_seeds -- --nocapture'
     fixture_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"'
+    written_binding = 'image="$directory/written-$sector.dmg"'
+    written_producer = 'EXFAT_ORACLE_DIR="$directory" EXFAT_ORACLE_SECTOR="$sector" cargo test --locked --features cli,test-support --test macos_write -- --nocapture'
+    written_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/written-mount-$sector" -plist "$image" > "$directory/attach.plist"'
     tools = 'for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil; do'
     query = '/usr/sbin/diskutil info -plist "$device" > "$directory/info-$sector.plist"'
     notices = 'export com_apple_hdiutil_nodeprecatedwarning=1'
@@ -53,6 +56,7 @@ def check(source):
     attachments = {
         fixture_attach,
         windows_attach,
+        written_attach,
         '/usr/bin/hdiutil attach -blocksize "$sector" -nomount -nobrowse -plist "$image" > "$directory/attach.plist"',
         '/usr/bin/hdiutil attach -blocksize "$sector" -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"',
         '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"',
@@ -69,6 +73,8 @@ def check(source):
         refuse("reencoded fixtures require the reviewed test producer and private image binding")
     if lines.count(windows_binding) != 1 or lines.count(windows_producer) != 1:
         refuse("Windows-layout fixtures require the reviewed producer and private image binding")
+    if lines.count(written_binding) != 1 or lines.count(written_producer) != 1:
+        refuse("written images require the reviewed producer and private image binding")
     active = False
     created = False
     receipt_pending = False
@@ -77,6 +83,8 @@ def check(source):
     fixtures_ready = False
     windows_image = False
     windows_ready = False
+    written_image = False
+    written_ready = False
     for line in lines:
         if not line:
             continue
@@ -97,7 +105,23 @@ def check(source):
             fixture_image = False
             windows_image = True
             windows_ready = False
+            written_image = False
             created = False
+            continue
+        if line == written_binding:
+            if active:
+                refuse("an attached image cannot be rebound")
+            image_bound = True
+            fixture_image = False
+            windows_image = False
+            written_image = True
+            written_ready = False
+            created = False
+            continue
+        if line == written_producer:
+            if not written_image or active or created:
+                refuse("the writer may change only its detached private image binding")
+            written_ready = True
             continue
         if line == windows_producer:
             if not windows_image or active or created:
@@ -115,10 +139,11 @@ def check(source):
             image_bound = True
             fixture_image = True
             windows_image = False
+            written_image = False
             created = False
             continue
         if line == fixture_regular:
-            if not (fixture_image or (windows_image and windows_ready)) or active:
+            if not (fixture_image or (windows_image and windows_ready) or (written_image and written_ready)) or active:
                 refuse("fixture validation requires its detached private image binding")
             created = True
             continue
@@ -128,6 +153,7 @@ def check(source):
             image_bound = True
             fixture_image = False
             windows_image = False
+            written_image = False
             created = False
             continue
         if line == create:
@@ -142,6 +168,10 @@ def check(source):
                 refuse("reencoded fixture images must be attached read-only")
             if windows_image != (line == windows_attach):
                 refuse("Windows-layout fixtures require their own read-only attachment")
+            if written_image and line not in (fixture_attach, written_attach):
+                refuse("written images must be attached read-only")
+            if not written_image and line == written_attach:
+                refuse("the written-image mount point belongs to written images")
             receipt_pending = True
             continue
         if line == detach or line in device_commands:
