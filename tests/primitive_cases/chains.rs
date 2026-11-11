@@ -1,9 +1,9 @@
 use fs_exfat::primitives::{
     allocation_class, boot_check, chain_head, chain_islands, cluster_offset, clusters_for,
     compute_predecessors, compute_stats, decode_fat, is_allocated, predecessor, root_chain,
-    valid_cluster, AllocationStats, BootCheck, BootSector, ChainGroup, Island, StreamClusters,
-    ALLOC_ALLOCATED, ALLOC_FREE_FAT, ALLOC_FREE_ZERO, FAT_BAD, FAT_END, ISLAND_END_BROKEN,
-    ISLAND_END_EOF, ISLAND_END_JOINS_ANOTHER,
+    valid_cluster, AllocationStats, BootCheck, BootSector, ChainGroup, FatCopy, FatLayout, Island,
+    StreamClusters, ALLOC_ALLOCATED, ALLOC_FREE_FAT, ALLOC_FREE_ZERO, FAT_BAD, FAT_END,
+    ISLAND_END_BROKEN, ISLAND_END_EOF, ISLAND_END_JOINS_ANOTHER,
 };
 use serde_json::json;
 
@@ -314,4 +314,80 @@ fn stale_chains_ask_only_for_recorded_clusters_and_count_the_rest() {
     // A record count past the heap is clamped to it.
     let summary = stale_chains(1, u32::MAX, |_| ClusterRecord::Free(0), |_| unreachable!());
     assert_eq!(summary, StaleSummary::default());
+}
+
+/// `BootSector::parse` keeps damaged geometry as written, so every bound
+/// derived from it answers for every field value: the heap holds clusters 2 to
+/// `cluster_count + 1` even where that passes `u32::MAX`, and a size or offset
+/// past `u64::MAX` saturates (#117).
+#[test]
+fn boot_bounds_answer_for_cluster_counts_and_shifts_outside_the_specifications_range() {
+    const MAX: u32 = u32::MAX;
+    let mut sector = vec![0; 512];
+    sector[3..11].copy_from_slice(b"EXFAT   ");
+    sector[92..96].copy_from_slice(&MAX.to_le_bytes());
+    sector[96] = 2;
+    let mut boot = BootSector::parse(&sector).unwrap();
+    let fat = [0, 0, 3, FAT_END];
+    for (count, last, highest) in [
+        (MAX - 2, MAX, MAX - 1),
+        (MAX - 1, MAX, MAX),
+        (MAX, MAX, MAX),
+    ] {
+        boot.cluster_count = count;
+        let context = format!("cluster count {count:#x}");
+        assert_eq!(boot.last_cluster_exclusive(), last, "{context}");
+        assert!(!valid_cluster(&boot, 1), "{context}");
+        assert!(valid_cluster(&boot, 2), "{context}");
+        assert!(valid_cluster(&boot, highest), "{context}");
+        assert_eq!(valid_cluster(&boot, MAX), highest == MAX, "{context}");
+        assert_eq!(root_chain(&boot, &fat), [2, 3], "{context}");
+        assert_eq!(
+            clusters_for(&boot, &fat, 2, 5, false).clusters,
+            [2, 3],
+            "{context}"
+        );
+        assert_eq!(
+            clusters_for(&boot, &[], highest, 5, true).clusters,
+            [highest],
+            "{context}"
+        );
+    }
+    let shifts: [(u8, u8, u64, u64); 7] = [
+        (0, 0, 1, 1),
+        (63, 0, 1 << 63, 1 << 63),
+        (9, 54, 512, 1 << 63),
+        (9, 55, 512, u64::MAX),
+        (0, 64, 1, u64::MAX),
+        (64, 0, u64::MAX, u64::MAX),
+        (255, 255, u64::MAX, u64::MAX),
+    ];
+    for (sector_shift, cluster_shift, sector_size, cluster_size) in shifts {
+        boot.bytes_per_sector_shift = sector_shift;
+        boot.sectors_per_cluster_shift = cluster_shift;
+        let context = format!("shifts {sector_shift} and {cluster_shift}");
+        assert_eq!(boot.bytes_per_sector(), sector_size, "{context}");
+        assert_eq!(boot.cluster_size(), cluster_size, "{context}");
+    }
+    sector[108] = 64;
+    let mut boot = BootSector::parse(&sector).unwrap();
+    assert_eq!(boot.bytes_per_sector(), u64::MAX);
+    assert_eq!(clusters_for(&boot, &fat, 2, u64::MAX, false).clusters, [2]);
+    boot.cluster_heap_offset = MAX;
+    boot.fat_offset = MAX;
+    boot.fat_length = MAX;
+    boot.number_of_fats = 2;
+    for (shift, offset) in [(32, u64::from(MAX) << 32), (33, u64::MAX)] {
+        boot.bytes_per_sector_shift = shift;
+        assert_eq!(boot.heap_offset(), offset, "shift {shift}");
+        assert_eq!(cluster_offset(&boot, MAX), u64::MAX, "shift {shift}");
+        let layout = FatLayout::from_boot(&boot);
+        assert_eq!(layout.offset(FatCopy::First), Some(offset), "shift {shift}");
+        assert_eq!(layout.length, offset, "shift {shift}");
+        assert_eq!(
+            layout.offset(FatCopy::Second),
+            Some(u64::MAX),
+            "shift {shift}"
+        );
+    }
 }
