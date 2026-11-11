@@ -243,3 +243,96 @@ fn large_files_match_fsck_and_streamed_read_only_macos_driver_hashes() {
         assert_eq!(observed_hash.finalize(), native_hash.finalize());
     }
 }
+
+/// Salvage's cross-link listing names the clusters macOS `fsck_exfat -n`
+/// refuses for being reached twice: two records claiming one cluster, and
+/// two FAT entries naming one cluster.
+#[test]
+fn macos_refuses_the_cross_links_salvage_lists() {
+    use fs_exfat::salvage::{CrossLink, ExfatSalvage, Extent, SalvageAdapter};
+    std::env::var_os("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS");
+    let listing = |image: &Image| {
+        let adapter = ExfatSalvage::probe(image);
+        let mut candidates = Vec::new();
+        adapter
+            .find_candidates(image, Extent::new(image.heap, 512), &mut candidates)
+            .unwrap();
+        let mut found: Vec<CrossLink> = Vec::new();
+        let report = adapter.cross_links(image, &candidates, &mut found).unwrap();
+        assert_eq!(report.unclassified + report.past_source, 0);
+        let records: Vec<_> = candidates
+            .iter()
+            .map(|found| found.location.offset)
+            .collect();
+        (found, records)
+    };
+    let fat = |image: &Image, cluster: u32, value: u32| {
+        image
+            .file
+            .write_all_at(&value.to_le_bytes(), 24 * 512 + u64::from(cluster) * 4)
+            .unwrap();
+    };
+
+    // Two contiguous records claiming one cluster.
+    let image = Image::sparse(65536, 0);
+    let shared = image.allocated as u32 + 7;
+    image.high_file(0, shared);
+    native_check(&image, true);
+    assert!(listing(&image).0.is_empty());
+    image.high_file(1, shared);
+    native_check(&image, false);
+    let (found, records) = listing(&image);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].cluster, shared);
+    assert!(found[0].links.is_empty());
+    assert_eq!(found[0].candidates, records);
+    drop(image);
+
+    // Two FAT chains that meet: first, first + 1 and other, first + 1.
+    let image = Image::sparse(65536, 0);
+    let first = image.allocated as u32 + 7;
+    let other = first + 13;
+    for (slot, start) in [(0, first), (1, other)] {
+        image
+            .file
+            .write_all_at(
+                &base::file_set(&format!("chain{slot}"), 0x20, start, 1024, false),
+                image.heap + 64 + slot * 96,
+            )
+            .unwrap();
+    }
+    for cluster in [first, first + 1, other, other + 1] {
+        image.allocate(cluster);
+    }
+    fat(&image, first, first + 1);
+    fat(&image, first + 1, u32::MAX);
+    fat(&image, other, other + 1);
+    fat(&image, other + 1, u32::MAX);
+    native_check(&image, true);
+    assert!(listing(&image).0.is_empty());
+    // other + 1 is freed, so only the meeting chains are wrong.
+    fat(&image, other, first + 1);
+    fat(&image, other + 1, 0);
+    let index = u64::from(other + 1 - 2);
+    let mut byte = [0];
+    image
+        .file
+        .read_exact_at(&mut byte, image.bitmap + index / 8)
+        .unwrap();
+    byte[0] &= !(1 << (index % 8));
+    image
+        .file
+        .write_all_at(&byte, image.bitmap + index / 8)
+        .unwrap();
+    native_check(&image, false);
+    let (found, records) = listing(&image);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].cluster, first + 1);
+    let links: Vec<_> = found[0]
+        .links
+        .iter()
+        .map(|link| (link.from, link.head))
+        .collect();
+    assert_eq!(links, [(first, first), (other, other)]);
+    assert_eq!(found[0].candidates, records);
+}

@@ -67,6 +67,9 @@ volume's own case mappings. On a two-FAT (TexFAT) volume,
 Allocation Bitmaps record differently, with its byte offset in each copy, and
 `ExfatSalvage::with_fat` walks claims through the inactive pair, which the
 specification calls stale rather than invalid.
+`ExfatSalvage::cross_links` lists each cluster that two or more FAT entries name,
+or that two or more of the caller's candidates claim, with the FAT entries and
+their chains' heads, and the candidate records, that reach it.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).

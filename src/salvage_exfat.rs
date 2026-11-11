@@ -12,6 +12,7 @@
 //! | Uninterpreted entries (extension) | [`primitives::uninterpreted_entries`] over the root and directory-candidate claims |
 //! | Up-case Table for name lookups (extension) | [`primitives::RawRootMetadata`] and [`primitives::RawUpcaseTable`], compressed or not |
 //! | Both TexFAT FAT and bitmap copies compared (extension) | [`primitives::FatLayout`], [`primitives::fat_differences`] and [`primitives::bitmap_differences`] |
+//! | Cross-linked clusters and their claimants (extension) | [`primitives::decode_fat_entry`] over the adapter's FAT words, and the claims walk extents follows |
 //!
 //! Geometry comes from the first usable boot copy: a checksum-valid main copy,
 //! then a checksum-valid backup, then either copy with the exFAT name.
@@ -63,6 +64,11 @@ pub use upcase::UpcaseReport;
 mod copies;
 
 pub use copies::{CopyDifference, CopyKind, CopyPair, CopyReport};
+
+#[path = "salvage_crosslinks.rs"]
+mod crosslinks;
+
+pub use crosslinks::{CrossLink, CrossLinkReport, FatLink};
 
 const SECTOR: u64 = 512;
 /// A file entry set holds at most one primary and 255 secondaries (section

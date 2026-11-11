@@ -1,0 +1,3 @@
+## Reading
+
+| Cross-linked clusters in salvage | Experimental; the `ExfatSalvage::cross_links` extension takes the source as `BlockRead` and lists each cluster on the source that two or more FAT entries name, or two or more supplied candidates claim, with its byte offset, every FAT entry that names it with its chain's head, and the record offset of every candidate that claims it; unreadable FAT entries and links past the source's end are counted, not guessed; the macOS reference images list none, and `fsck_exfat -n` refuses both a shared contiguous claim and two FAT chains that meet, which the listing names | Unreleased (#89) | #89 | `src/salvage_crosslinks.rs`, `tests/salvage_cases/cross_links.rs`, `tests/oracle/primitive_chains.rs`, `tests/oracle/scale.rs` |

@@ -35,7 +35,7 @@ pub use adapter::{
     Severity, Sink, Tree, TreeNode, WalkEnd,
 };
 pub use exfat::{
-    CopyDifference, CopyKind, CopyPair, CopyReport, EntrySetDetail, ExfatSalvage, HoldingSet,
-    StaleChain, StaleChainReport, StaleEntry, UninterpretedEntry, UninterpretedReport,
-    UpcaseReport,
+    CopyDifference, CopyKind, CopyPair, CopyReport, CrossLink, CrossLinkReport, EntrySetDetail,
+    ExfatSalvage, FatLink, HoldingSet, StaleChain, StaleChainReport, StaleEntry,
+    UninterpretedEntry, UninterpretedReport, UpcaseReport,
 };

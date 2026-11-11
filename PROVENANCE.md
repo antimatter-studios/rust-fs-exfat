@@ -29,6 +29,16 @@ implement TexFAT, so the tests build two-FAT images from those sections and
 check the results against a reader written in the test from the same sections,
 which shares no code with the crate's decoders.
 
+## Cross-linked clusters
+
+For #89, the salvage `cross_links` extension is new code written from
+Microsoft's public exFAT specification, sections 4.1.3 "FatEntry[2] ...
+FatEntry[ClusterCount+1]", 6.4.3 "FirstCluster Field" and 7.1 "Allocation
+Bitmap Directory Entry", and from this crate's own FAT and claim walks. No other
+filesystem implementation was an input. The macOS oracle checks that the
+reference images list no cross-link, and that macOS `fsck_exfat -n` refuses the
+shared claim and the meeting FAT chains the listing names.
+
 ## Compressed Up-case Table
 
 For #42, the decoder, the `upcase-run` deviation rule and the salvage
