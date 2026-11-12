@@ -8,8 +8,8 @@ use fs_exfat::fixtures::{
     self, boot_field, BootField, CLUSTER, CLUSTER_COUNT, HEAP_OFFSET, SECTOR,
 };
 use fs_exfat::salvage::{
-    ClusterLayout, ExfatSalvage, Extent, Feature, MaterializedRange, Plan, PlanFault, PlanMetadata,
-    PlanStep, SalvageAdapter, SalvageError,
+    ClusterLayout, ExfatSalvage, Extent, Feature, MaterializedRange, Plan, PlanCheck, PlanFault,
+    PlanMetadata, PlanOverlap, PlanStep, SalvageAdapter, SalvageError,
 };
 
 const C: u64 = CLUSTER as u64;
@@ -588,4 +588,148 @@ fn one_plan_materialized_twice_gives_identical_bytes_and_reports() {
     let again: Plan = serde_json::from_str(&json).unwrap();
     assert_eq!(again.digest(), digest);
     assert_eq!(run(&again), first);
+}
+
+#[test]
+fn checking_a_plan_reports_overlapping_source_reads_as_findings() {
+    let source = Bytes(fixtures::build_volume());
+    let size = source.size_bytes();
+    let adapter = ExfatSalvage::probe(&source);
+    let steps = vec![
+        clusters(30, 2),
+        PlanStep::Extent(Extent::new(position(31) + 100, 200)),
+        PlanStep::Zeros(10),
+        PlanStep::Extent(Extent::new(position(30), 10)),
+        clusters(40, 1),
+        // Adjacent to cluster 40, not overlapping it.
+        PlanStep::Extent(Extent::new(position(41), 5)),
+        clusters(30, 1),
+    ];
+    let plan = Plan::new(steps.clone());
+    let overlap = |first, second, offset, length| PlanOverlap {
+        first,
+        second,
+        source: Extent::new(offset, length),
+    };
+    let total = 2 * C + 200 + 10 + 10 + C + 5 + C;
+    assert_eq!(
+        adapter.check_plan(&plan, size).unwrap(),
+        PlanCheck {
+            length: total,
+            valid_length: total,
+            overlaps: vec![
+                overlap(0, 3, position(30), 10),
+                overlap(0, 6, position(30), C),
+                overlap(3, 6, position(30), 10),
+                overlap(0, 1, position(31) + 100, 200),
+            ],
+        }
+    );
+    // Overlaps are findings: the plan still materializes.
+    assert_eq!(
+        adapter
+            .materialize(&source, &plan, &mut Vec::new())
+            .unwrap()
+            .length,
+        total
+    );
+
+    // Only bytes the plan reads count: past the valid length, cluster 30
+    // is not read again, and cut to the length, step 6 reads only its head.
+    let mut cut = plan.clone();
+    cut.length = Some(total - C + 4);
+    cut.valid_length = Some(total - C + 2);
+    let check = adapter.check_plan(&cut, size).unwrap();
+    assert_eq!(
+        (check.length, check.valid_length),
+        (total - C + 4, total - C + 2)
+    );
+    assert_eq!(
+        check.overlaps,
+        [
+            overlap(0, 3, position(30), 10),
+            overlap(0, 6, position(30), 2),
+            overlap(3, 6, position(30), 2),
+            overlap(0, 1, position(31) + 100, 200),
+        ]
+    );
+    cut.valid_length = Some(total - C);
+    assert_eq!(
+        adapter.check_plan(&cut, size).unwrap().overlaps,
+        [
+            overlap(0, 3, position(30), 10),
+            overlap(0, 1, position(31) + 100, 200),
+        ]
+    );
+
+    let plain = Plan::new(vec![clusters(30, 1), clusters(31, 1)]);
+    assert!(adapter
+        .check_plan(&plain, size)
+        .unwrap()
+        .overlaps
+        .is_empty());
+    let json = serde_json::to_string(&adapter.check_plan(&plan, size).unwrap()).unwrap();
+    assert!(json.contains(r#""overlaps":[{"first":0,"second":3,"source":{"offset":"#));
+}
+
+#[test]
+fn checking_a_plan_without_reading_refuses_what_materializing_would() {
+    let source = Bytes(fixtures::build_volume());
+    let size = source.size_bytes();
+    // The check takes only a size: there is no source to read.
+    let adapter = ExfatSalvage::probe(&source);
+    let last = u64::from(CLUSTER_COUNT) + 1;
+    let refused = |steps: Vec<PlanStep>, length: Option<u64>, valid: Option<u64>| {
+        let mut plan = Plan::new(steps);
+        plan.length = length;
+        plan.valid_length = valid;
+        adapter.check_plan(&plan, size).unwrap_err()
+    };
+
+    for (step, outside) in [clusters(1, 1), clusters(last, 2), clusters(last + 1, 1)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut steps = vec![PlanStep::Zeros(1); step];
+        steps.push(outside);
+        let error = refused(steps, None, None);
+        assert!(
+            matches!(error, SalvageError::Plan(PlanFault::ClustersOutOfRange { step: index }) if index == step),
+            "{error}"
+        );
+    }
+    let error = refused(vec![clusters(30, 2)], Some(2 * C + 1), None);
+    assert!(matches!(
+        error,
+        SalvageError::Plan(PlanFault::LengthMismatch { length, steps }) if length == 2 * C + 1 && steps == 2 * C
+    ));
+    let error = refused(vec![clusters(30, 1), clusters(31, 1)], Some(C), None);
+    assert!(matches!(
+        error,
+        SalvageError::Plan(PlanFault::LengthMismatch { length, steps }) if length == C && steps == 2 * C
+    ));
+    let error = refused(vec![clusters(30, 1)], Some(10), Some(11));
+    assert!(matches!(
+        error,
+        SalvageError::Plan(PlanFault::ValidLengthPastEnd {
+            valid_length: 11,
+            length: 10
+        })
+    ));
+    let error = refused(vec![PlanStep::Extent(Extent::new(size - 1, 2))], None, None);
+    assert!(matches!(error, SalvageError::Bounds));
+    // The same cluster run past a smaller source is out of the source.
+    let plan = Plan::new(vec![clusters(last, 1)]);
+    assert!(adapter.check_plan(&plan, size).is_ok());
+    assert!(matches!(
+        adapter.check_plan(&plan, size - 1),
+        Err(SalvageError::Bounds)
+    ));
+
+    let mut boot = adapter.boot().unwrap().clone();
+    boot.bytes_per_sector_shift = 8;
+    assert!(matches!(
+        ExfatSalvage::from_boot(boot).check_plan(&plan, size),
+        Err(SalvageError::NoGeometry)
+    ));
 }
