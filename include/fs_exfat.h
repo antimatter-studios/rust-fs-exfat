@@ -85,6 +85,11 @@ int64_t fs_exfat_write_file(const fs_exfat_t *, const char *path, const uint8_t 
 int fs_exfat_truncate(const fs_exfat_t *, const char *path, uint64_t length);
 int fs_exfat_unlink(const fs_exfat_t *, const char *path);
 int fs_exfat_rmdir(const fs_exfat_t *, const char *path);
+int fs_exfat_rename(const fs_exfat_t *, const char *from, const char *to);
+int fs_exfat_utimens(const fs_exfat_t *, const char *path, const fs_exfat_timestamp *created,
+                     const fs_exfat_timestamp *modified, const fs_exfat_timestamp *accessed);
+int fs_exfat_set_attributes(const fs_exfat_t *, const char *path, uint16_t attributes);
+int fs_exfat_set_volume_label(const fs_exfat_t *, const char *label);
 const char *fs_exfat_last_error(void);
 int fs_exfat_last_errno(void);
 

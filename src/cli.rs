@@ -99,7 +99,33 @@ fn fs_command() -> Command {
         .subcommand(Command::new("truncate").about("Set a file's length; growing reads as zeros").arg(Arg::new("size").long("size").value_name("BYTES").required(true).value_parser(value_parser!(u64))).arg(path(true)))
         .subcommand(Command::new("rm").about("Remove a file").arg(path(true)))
         .subcommand(Command::new("rmdir").about("Remove an empty directory").arg(path(true)))
-        .after_help("Examples:\n  fs.exfat image.dmg ls /\n  fs.exfat image.dmg stat /file.txt\n  fs.exfat image.dmg cat /file.txt\n  fs.exfat image.dmg export /file.txt output.txt --verify\n  fs.exfat image.dmg mkdir -p /backup/2026\n  fs.exfat image.dmg write /backup/2026/notes.txt < notes.txt\n  printf 'v2' | fs.exfat image.dmg write --at 4096 /data.bin\n  fs.exfat image.dmg truncate --size 0 /data.bin\n  fs.exfat image.dmg rm /data.bin\n  fs.exfat image.dmg rmdir /backup/2026\n\nls, stat, cat and export open the image read-only. mkdir, write, truncate, rm and rmdir open it for writing: the volume is marked dirty while they run and clean when they finish, and a volume already marked dirty is refused. write without --at creates the file or replaces its contents; with --at the file must exist, and a gap past its end reads back as zeros. There is no formatter.")
+        .subcommand(
+            Command::new("mv")
+                .about("Rename or move a file or directory, replacing a file or an empty directory as rename(2) does")
+                .arg(path(true))
+                .arg(Arg::new("to").value_name("TO").required(true).value_parser(value_parser!(OsString))),
+        )
+        .subcommand(
+            Command::new("touch")
+                .about("Set times, creating an empty file if PATH is missing; with no time given, modified and accessed become now")
+                .arg(time_arg("created"))
+                .arg(time_arg("modified"))
+                .arg(time_arg("accessed"))
+                .arg(Arg::new("utc-offset").long("utc-offset").value_name("MINUTES").default_value("0").allow_hyphen_values(true).value_parser(value_parser!(i16)).help("The UTC offset recorded with the given times, a multiple of 15"))
+                .arg(path(true)),
+        )
+        .subcommand(
+            Command::new("attributes")
+                .about("Set ReadOnly, Hidden, System and Archive; names not listed are cleared")
+                .arg(Arg::new("set").long("set").value_name("LIST").required(true).help("Comma-separated: read-only, hidden, system, archive; empty for none"))
+                .arg(path(true)),
+        )
+        .subcommand(
+            Command::new("label")
+                .about("Set the volume label (up to 11 characters; empty for none)")
+                .arg(Arg::new("label").value_name("LABEL").required(true).allow_hyphen_values(true)),
+        )
+        .after_help("Examples:\n  fs.exfat image.dmg ls /\n  fs.exfat image.dmg stat /file.txt\n  fs.exfat image.dmg cat /file.txt\n  fs.exfat image.dmg export /file.txt output.txt --verify\n  fs.exfat image.dmg mkdir -p /backup/2026\n  fs.exfat image.dmg write /backup/2026/notes.txt < notes.txt\n  printf 'v2' | fs.exfat image.dmg write --at 4096 /data.bin\n  fs.exfat image.dmg truncate --size 0 /data.bin\n  fs.exfat image.dmg rm /data.bin\n  fs.exfat image.dmg rmdir /backup/2026\n  fs.exfat image.dmg mv /notes.txt /backup/notes.txt\n  fs.exfat image.dmg touch --modified 1700000000120 /backup/notes.txt\n  fs.exfat image.dmg attributes --set hidden,read-only /backup/notes.txt\n  fs.exfat image.dmg label BACKUP\n\nls, stat, cat and export open the image read-only. mkdir, write, truncate, rm, rmdir, mv, touch, attributes and label open it for writing: the volume is marked dirty while they run and clean when they finish, and a volume already marked dirty is refused. write without --at creates the file or replaces its contents; with --at the file must exist, and a gap past its end reads back as zeros. There is no formatter.")
 }
 
 fn fsck_command() -> Command {
@@ -189,10 +215,26 @@ fn fs_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
     let (verb, arguments) = matches
         .subcommand()
         .ok_or_else(|| CliError::usage("missing verb"))?;
+    if verb == "label" {
+        let label = arguments.get_one::<String>("label").unwrap();
+        let mut volume = write::open_path(image, offset).map_err(error)?;
+        volume.set_label(label).map_err(error)?;
+        volume.unmount().map_err(error)?;
+        return Ok(Outcome::report(Json::object([(
+            "label",
+            Json::from(label.as_str()),
+        )])));
+    }
     let requested = arguments.get_one::<OsString>("path").unwrap();
     let path = requested
         .to_str()
         .ok_or_else(|| CliError::usage("exFAT paths must be UTF-8"))?;
+    if matches!(
+        verb,
+        "mkdir" | "write" | "truncate" | "rm" | "rmdir" | "mv" | "touch" | "attributes"
+    ) {
+        return write_run(image, offset, verb, path, arguments);
+    }
     let export = if verb == "export" {
         Some((
             transfer::ExportRequest::from_matches(arguments)?,
@@ -201,9 +243,6 @@ fn fs_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
     } else {
         None
     };
-    if matches!(verb, "mkdir" | "write" | "truncate" | "rm" | "rmdir") {
-        return write_run(image, offset, verb, path, arguments);
-    }
     let volume = interface::open_path(image, offset).map_err(error)?;
     match verb {
         "ls" => Ok(Outcome::report(Json::Arr(
@@ -308,6 +347,66 @@ fn write_run(
             volume.rmdir(path).map_err(error)?;
             Json::object([("removed", Json::from(path))])
         }
+        "mv" => {
+            let to = arguments
+                .get_one::<OsString>("to")
+                .unwrap()
+                .to_str()
+                .ok_or_else(|| CliError::usage("exFAT paths must be UTF-8"))?;
+            volume.rename(path, to).map_err(error)?;
+            Json::object([("from", Json::from(path)), ("to", Json::from(to))])
+        }
+        "touch" => {
+            let offset_minutes = *arguments.get_one::<i16>("utc-offset").unwrap();
+            let given = |name: &str| -> Result<Option<Timestamp>, CliError> {
+                arguments
+                    .get_one::<i64>(name)
+                    .map(|milliseconds| {
+                        Timestamp::from_unix_milliseconds(*milliseconds, offset_minutes)
+                            .map_err(error)
+                    })
+                    .transpose()
+            };
+            let mut times = write::SetTimes {
+                created: given("created")?,
+                modified: given("modified")?,
+                accessed: given("accessed")?,
+            };
+            if times == write::SetTimes::default() {
+                let now = Timestamp::now().map_err(error)?;
+                times.modified = Some(now);
+                times.accessed = Some(now);
+            }
+            match volume.reader().lookup(path) {
+                Err(Error::NotFound) => volume.create(path).map_err(error)?,
+                Err(problem) => return Err(error(problem)),
+                Ok(_) => {}
+            }
+            volume.set_times(path, times).map_err(error)?;
+            Json::object([("path", Json::from(path))])
+        }
+        "attributes" => {
+            let mut value = 0u16;
+            let list = arguments.get_one::<String>("set").unwrap();
+            for name in list.split(',').filter(|name| !name.is_empty()) {
+                value |= match name {
+                    "read-only" => 0x01,
+                    "hidden" => 0x02,
+                    "system" => 0x04,
+                    "archive" => 0x20,
+                    _ => {
+                        return Err(CliError::usage(
+                            "attributes are read-only, hidden, system and archive",
+                        ))
+                    }
+                };
+            }
+            volume.set_attributes(path, value).map_err(error)?;
+            Json::object([
+                ("path", Json::from(path)),
+                ("attributes", Json::from(value)),
+            ])
+        }
         _ => {
             let start = arguments.get_one::<u64>("at").copied();
             if start.is_none() {
@@ -339,6 +438,15 @@ fn write_run(
     };
     volume.unmount().map_err(error)?;
     Ok(Outcome::report(report))
+}
+
+fn time_arg(name: &'static str) -> Arg {
+    Arg::new(name)
+        .long(name)
+        .value_name("UNIX_MS")
+        .allow_hyphen_values(true)
+        .value_parser(value_parser!(i64))
+        .help("Milliseconds since the Unix epoch; exFAT keeps hundredths")
 }
 
 fn fsck_error(problem: Error) -> CliError {
