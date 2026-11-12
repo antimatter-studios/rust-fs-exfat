@@ -220,12 +220,18 @@ impl BootSector {
         Ok(header.sector)
     }
 
+    /// `2 ^ bytes_per_sector_shift`, saturating at `u64::MAX` for a shift of 64
+    /// or more, whose true size no `u64` holds.
     pub fn bytes_per_sector(&self) -> u64 {
-        1 << self.bytes_per_sector_shift
+        power_of_two(u32::from(self.bytes_per_sector_shift))
     }
 
+    /// `2 ^ (bytes_per_sector_shift + sectors_per_cluster_shift)`, saturating at
+    /// `u64::MAX` when the shifts sum to 64 or more.
     pub fn cluster_size(&self) -> u64 {
-        self.bytes_per_sector() << self.sectors_per_cluster_shift
+        power_of_two(
+            u32::from(self.bytes_per_sector_shift) + u32::from(self.sectors_per_cluster_shift),
+        )
     }
 
     /// Set while a volume is mounted for writing, and cleared by a clean unmount.
@@ -233,13 +239,34 @@ impl BootSector {
         self.volume_flags & VOLUME_DIRTY != 0
     }
 
+    /// The heap's byte offset, saturating at `u64::MAX`, past any device.
     pub fn heap_offset(&self) -> u64 {
-        u64::from(self.cluster_heap_offset) * self.bytes_per_sector()
+        u64::from(self.cluster_heap_offset).saturating_mul(self.bytes_per_sector())
     }
 
+    /// One past the heap's last cluster, `cluster_count + 2`, saturating at
+    /// `u32::MAX`. For a cluster count of FFFFFFFEh or more the heap also holds
+    /// cluster FFFFFFFFh, which this bound leaves out; `valid_cluster` and the
+    /// chain helpers count it.
     pub fn last_cluster_exclusive(&self) -> u32 {
-        self.cluster_count + FIRST_CLUSTER
+        self.cluster_count.saturating_add(FIRST_CLUSTER)
     }
+
+    /// One past the heap's last cluster, in `u64`, where it always fits.
+    pub(crate) fn heap_end(&self) -> u64 {
+        u64::from(self.cluster_count) + u64::from(FIRST_CLUSTER)
+    }
+
+    /// Every heap cluster a `u32` can name, from 2 to `cluster_count + 1`.
+    pub(crate) fn heap_clusters(&self) -> std::ops::RangeInclusive<u32> {
+        let last = u32::try_from(self.heap_end() - 1).unwrap_or(u32::MAX);
+        FIRST_CLUSTER..=last
+    }
+}
+
+/// `2 ^ shift`, saturating at `u64::MAX` where it passes it.
+fn power_of_two(shift: u32) -> u64 {
+    1u64.checked_shl(shift).unwrap_or(u64::MAX)
 }
 
 /// Checksum over sectors 0-10, skipping VolumeFlags and PercentInUse.
