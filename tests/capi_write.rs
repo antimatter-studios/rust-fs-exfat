@@ -269,3 +269,53 @@ fn create_mkdir_pwrite_and_write_file_set_errno_and_persist() {
         fs_exfat_umount(handle);
     }
 }
+
+#[test]
+fn truncate_unlink_and_rmdir_report_errno() {
+    let (image, geometry) = format(&Layout::default());
+    let scratch = Scratch::new(&image);
+    let path = CString::new(scratch.image.to_str().unwrap()).unwrap();
+    let directory = CString::new("/D").unwrap();
+    let file = CString::new("/D/f").unwrap();
+    unsafe {
+        let handle = fs_exfat_mount_rw(path.as_ptr(), 0);
+        assert!(!handle.is_null(), "{}", last_error());
+        assert_eq!(fs_exfat_mkdir(handle, directory.as_ptr()), 0);
+        let body = [4u8; 9000];
+        assert_eq!(
+            fs_exfat_write_file(handle, file.as_ptr(), body.as_ptr(), body.len()),
+            9000
+        );
+        assert_eq!(
+            fs_exfat_truncate(handle, file.as_ptr(), 10),
+            0,
+            "{}",
+            last_error()
+        );
+        assert_eq!(read_back(handle, "/D/f", 10), [4u8; 10]);
+        assert_eq!(fs_exfat_truncate(handle, file.as_ptr(), 20), 0);
+        let mut expected = [4u8; 20];
+        expected[10..].fill(0);
+        assert_eq!(read_back(handle, "/D/f", 20), expected);
+        assert_eq!(fs_exfat_truncate(handle, directory.as_ptr(), 0), -1);
+        assert_eq!(fs_exfat_last_errno(), 21, "EISDIR");
+        assert_eq!(fs_exfat_rmdir(handle, directory.as_ptr()), -1);
+        let not_empty = if cfg!(target_os = "linux") { 39 } else { 66 };
+        assert_eq!(fs_exfat_last_errno(), not_empty, "ENOTEMPTY");
+        assert_eq!(fs_exfat_unlink(handle, directory.as_ptr()), -1);
+        assert_eq!(fs_exfat_last_errno(), 21, "EISDIR");
+        assert_eq!(fs_exfat_rmdir(handle, file.as_ptr()), -1);
+        assert_eq!(fs_exfat_last_errno(), 20, "ENOTDIR");
+        assert_eq!(fs_exfat_unlink(handle, file.as_ptr()), 0);
+        assert_eq!(fs_exfat_unlink(handle, file.as_ptr()), -1);
+        assert_eq!(fs_exfat_last_errno(), 2, "ENOENT");
+        assert_eq!(fs_exfat_rmdir(handle, directory.as_ptr()), 0);
+        assert_eq!(fs_exfat_umount_checked(handle), 0, "{}", last_error());
+    }
+    let after = std::fs::read(&scratch.image).unwrap();
+    assert!(
+        geometry.bitmap_bytes(&after, 0) == geometry.bitmap_bytes(&image, 0)
+            && geometry.fat_bytes(&after, 0) == geometry.fat_bytes(&image, 0),
+        "every cluster made was freed"
+    );
+}

@@ -47,7 +47,7 @@ pub static FAMILY: Family = Family {
 fn target() -> Arg {
     Arg::new("target")
         .value_name("IMAGE")
-        .help("The image or device; opened read-only except by mkdir and write")
+        .help("The image or device; opened read-only except by the writing verbs")
         .required(true)
         .value_parser(value_parser!(OsString))
 }
@@ -96,7 +96,10 @@ fn fs_command() -> Command {
                 .arg(Arg::new("at").long("at").value_name("BYTES").value_parser(value_parser!(u64)).help("Write into the existing file starting this many bytes in, truncating nothing"))
                 .arg(path(true)),
         )
-        .after_help("Examples:\n  fs.exfat image.dmg ls /\n  fs.exfat image.dmg stat /file.txt\n  fs.exfat image.dmg cat /file.txt\n  fs.exfat image.dmg export /file.txt output.txt --verify\n  fs.exfat image.dmg mkdir -p /backup/2026\n  fs.exfat image.dmg write /backup/2026/notes.txt < notes.txt\n  printf 'v2' | fs.exfat image.dmg write --at 4096 /data.bin\n\nls, stat, cat and export open the image read-only. mkdir and write open it for writing: the volume is marked dirty while they run and clean when they finish, and a volume already marked dirty is refused. write without --at creates the file or replaces its contents; with --at the file must exist, and a gap past its end reads back as zeros. There is no formatter.")
+        .subcommand(Command::new("truncate").about("Set a file's length; growing reads as zeros").arg(Arg::new("size").long("size").value_name("BYTES").required(true).value_parser(value_parser!(u64))).arg(path(true)))
+        .subcommand(Command::new("rm").about("Remove a file").arg(path(true)))
+        .subcommand(Command::new("rmdir").about("Remove an empty directory").arg(path(true)))
+        .after_help("Examples:\n  fs.exfat image.dmg ls /\n  fs.exfat image.dmg stat /file.txt\n  fs.exfat image.dmg cat /file.txt\n  fs.exfat image.dmg export /file.txt output.txt --verify\n  fs.exfat image.dmg mkdir -p /backup/2026\n  fs.exfat image.dmg write /backup/2026/notes.txt < notes.txt\n  printf 'v2' | fs.exfat image.dmg write --at 4096 /data.bin\n  fs.exfat image.dmg truncate --size 0 /data.bin\n  fs.exfat image.dmg rm /data.bin\n  fs.exfat image.dmg rmdir /backup/2026\n\nls, stat, cat and export open the image read-only. mkdir, write, truncate, rm and rmdir open it for writing: the volume is marked dirty while they run and clean when they finish, and a volume already marked dirty is refused. write without --at creates the file or replaces its contents; with --at the file must exist, and a gap past its end reads back as zeros. There is no formatter.")
 }
 
 fn fsck_command() -> Command {
@@ -198,7 +201,7 @@ fn fs_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
     } else {
         None
     };
-    if matches!(verb, "mkdir" | "write") {
+    if matches!(verb, "mkdir" | "write" | "truncate" | "rm" | "rmdir") {
         return write_run(image, offset, verb, path, arguments);
     }
     let volume = interface::open_path(image, offset).map_err(error)?;
@@ -291,6 +294,19 @@ fn write_run(
         "mkdir" => {
             volume.mkdir(path).map_err(error)?;
             Json::object([("created", Json::Arr(vec![Json::from(path)]))])
+        }
+        "truncate" => {
+            let size = *arguments.get_one::<u64>("size").unwrap();
+            volume.truncate(path, size).map_err(error)?;
+            Json::object([("path", Json::from(path)), ("size", Json::from(size))])
+        }
+        "rm" => {
+            volume.unlink(path).map_err(error)?;
+            Json::object([("removed", Json::from(path))])
+        }
+        "rmdir" => {
+            volume.rmdir(path).map_err(error)?;
+            Json::object([("removed", Json::from(path))])
         }
         _ => {
             let start = arguments.get_one::<u64>("at").copied();

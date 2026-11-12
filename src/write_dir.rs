@@ -210,6 +210,10 @@ fn free_run(bytes: &[u8], count: usize) -> Option<usize> {
 }
 
 impl<Device: BlockDevice> WriteVolume<Device> {
+    pub(crate) fn read_clusters(&self, clusters: &[u32], length: u64) -> Result<Vec<u8>> {
+        self.read_stream(clusters, length)
+    }
+
     fn read_stream(&self, clusters: &[u32], length: u64) -> Result<Vec<u8>> {
         let length = usize::try_from(length).map_err(|_| Error::Bounds)?;
         let cluster_size = self.volume.boot().cluster_size() as usize;
