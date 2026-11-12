@@ -10,12 +10,22 @@ extern "C" {
 typedef struct FsExfat fs_exfat_t;
 typedef struct FsExfatDirectory fs_exfat_dir_t;
 typedef int (*fs_exfat_read_callback)(void *, uint64_t, uint8_t *, size_t);
+typedef int (*fs_exfat_write_callback)(void *, uint64_t, const uint8_t *, size_t);
+typedef int (*fs_exfat_flush_callback)(void *);
 
 typedef struct {
     void *context;
     uint64_t size_bytes;
     fs_exfat_read_callback read;
 } fs_exfat_callbacks;
+
+typedef struct {
+    void *context;
+    uint64_t size_bytes;
+    fs_exfat_read_callback read;
+    fs_exfat_write_callback write;
+    fs_exfat_flush_callback flush;
+} fs_exfat_rw_callbacks;
 
 typedef struct {
     int64_t unix_milliseconds;
@@ -57,6 +67,10 @@ typedef struct {
 
 fs_exfat_t *fs_exfat_mount(const char *path, uint64_t offset);
 fs_exfat_t *fs_exfat_mount_with_callbacks(const fs_exfat_callbacks *, uint64_t offset);
+fs_exfat_t *fs_exfat_mount_rw(const char *path, uint64_t offset);
+fs_exfat_t *fs_exfat_mount_rw_with_callbacks(const fs_exfat_rw_callbacks *, uint64_t offset);
+int fs_exfat_flush(const fs_exfat_t *);
+int fs_exfat_umount_checked(fs_exfat_t *);
 void fs_exfat_umount(fs_exfat_t *);
 int fs_exfat_get_volume_info(const fs_exfat_t *, fs_exfat_volume_info *);
 int fs_exfat_stat(const fs_exfat_t *, const char *path, fs_exfat_stat_t *);

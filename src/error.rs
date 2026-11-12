@@ -8,6 +8,7 @@ pub enum Error {
     Unsupported(&'static str),
     NotFound,
     NotDirectory,
+    NoSpace,
 }
 
 impl fmt::Display for Error {
@@ -19,6 +20,7 @@ impl fmt::Display for Error {
             Self::Unsupported(reason) => write!(formatter, "unsupported exFAT: {reason}"),
             Self::NotFound => formatter.write_str("exFAT path not found"),
             Self::NotDirectory => formatter.write_str("exFAT path component is not a directory"),
+            Self::NoSpace => formatter.write_str("exFAT volume has too few free clusters"),
         }
     }
 }

@@ -102,6 +102,14 @@ are sparse or streamed files under this worktree's ignored `tmp/`; see the
 [audit memory contract](fsck-memory.md). CLI tests cover verified extraction,
 source protection and repair refusal.
 
+The writer is checked against the same platform. After each reference image
+has been populated and checked, the oracle copies it, and `tests/oracle/write.rs`
+changes the copy through `fs_exfat::write` and records the tree and every
+file's SHA-256 as this crate's reader then sees it. The copy is attached
+read-only for `fsck_exfat -n`, then mounted read-only, and the macOS driver's
+listing must equal the record. The guard admits the written image only after
+its producer has run, and only read-only attachments of it.
+
 Before any image operation, the safety guard checks the reviewed receipt parser,
 cleanup, fresh image binding and attach/query/detach ordering. Only the exact
 read-only diskutil info query on that attachment's own device is accepted; other

@@ -1,7 +1,12 @@
 #![deny(unsafe_code)]
 
-//! A strict, read-only exFAT reader with permissive on-disk primitives and a
-//! read-only salvage adapter ([`salvage`]) built on them.
+//! An exFAT filesystem driver: a strict reader, a writer ([`write`]),
+//! permissive on-disk primitives and a read-only salvage adapter
+//! ([`salvage`]) built on them.
+//!
+//! The strict reader and the salvage adapter take `fs_core::BlockRead` only,
+//! so they cannot write by type. Writing goes through [`write::WriteVolume`],
+//! which takes a writable rust-fs-core device.
 //!
 //! # Test-support images
 //!
@@ -18,7 +23,7 @@
 //!
 //! ```toml
 //! [dev-dependencies]
-//! fs_exfat = { package = "rust-fs-exfat", version = "0.1.0", features = ["test-support"] }
+//! fs_exfat = { package = "rust-fs-exfat", version = "0.2.0", features = ["test-support"] }
 //! ```
 //!
 //! ```
@@ -53,5 +58,6 @@ pub mod primitives;
 pub mod salvage;
 pub mod timestamp;
 pub mod volume;
+pub mod write;
 
 pub use error::{Error, Result};

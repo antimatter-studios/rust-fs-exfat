@@ -52,6 +52,10 @@ variants = {
     'unowned-device-test': source.replace("device=''\n", "device=''\n" + next(line.strip() for line in source.splitlines() if line.strip().startswith('EXFAT_ORACLE_DEVICE=')) + '\n', 1),
     'foreign-device-test': source.replace('EXFAT_ORACLE_DEVICE="$device"', 'EXFAT_ORACLE_DEVICE="$foreign"'),
     'other-device-test': source.replace('--test macos_device --', '--test other_device --'),
+    'missing-written-producer': source.replace('    EXFAT_ORACLE_DIR="$directory" EXFAT_ORACLE_SECTOR="$sector" cargo test --locked --features cli,test-support --test macos_write -- --nocapture\n', ''),
+    'foreign-written-image': source.replace('image="$directory/written-$sector.dmg"', 'image="$foreign"'),
+    'writable-written-image': source.replace('-readonly -nobrowse -mountpoint "$directory/written-mount-$sector"', '-nobrowse -mountpoint "$directory/written-mount-$sector"'),
+    'written-mount-elsewhere': source.replace('-readonly -nobrowse -mountpoint "$directory/mount-$sector"', '-readonly -nobrowse -mountpoint "$directory/written-mount-$sector"', 1),
     'notice-rider': source.replace('export com_apple_hdiutil_nodeprecatedwarning=1', 'export com_apple_hdiutil_nodeprecatedwarning=1; /usr/bin/hdiutil eject "$image"'),
 }
 for name, contents in variants.items():
@@ -62,6 +66,12 @@ PY
 for source_file in "$directory/other-verb.bad" "$directory/other-device.bad" "$directory/missing-plist.bad" "$directory/reassignment.bad" "$directory/foreign-receipt.bad" "$directory/receipt-reuse.bad" "$directory/foreign-image.bad" "$directory/foreign-detach.bad" "$directory/unowned-query.bad" "$directory/loop-rebinding.bad" "$directory/heredoc-device.bad" "$directory/purge.bad" "$directory/process-kill.bad" "$directory/libc-flush.bad" "$directory/missing-fixture-producer.bad" "$directory/missing-fixture-validation.bad" "$directory/foreign-fixture.bad" "$directory/writable-fixture.bad" "$directory/unowned-device-test.bad" "$directory/foreign-device-test.bad" "$directory/other-device-test.bad" "$directory/notice-rider.bad"; do
     if bash scripts/check-image-safety.sh "$source_file" > "$directory/rejected.log" 2>&1; then
         echo "image-safety: unsafe mutation was incorrectly accepted: $source_file" >&2
+        exit 1
+    fi
+done
+for source_file in "$directory/missing-written-producer.bad" "$directory/foreign-written-image.bad" "$directory/writable-written-image.bad" "$directory/written-mount-elsewhere.bad"; do
+    if bash scripts/check-image-safety.sh "$source_file" > "$directory/rejected.log" 2>&1; then
+        echo "image-safety: unsafe written-image mutation was incorrectly accepted: $source_file" >&2
         exit 1
     fi
 done
