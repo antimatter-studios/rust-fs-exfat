@@ -39,7 +39,7 @@ tier has run.
 | oracle | CI run 43105817721, x86_64 guest, cold build: 152 lines, 7274 bytes; 2026-11-11 exfatprogs in the guest (#123), local macOS, cold build: 107 lines, 5718 bytes, 2 tests and one `[oracle vm]` line per fixture | 156 lines, 7500 bytes | 2 |
 | kernel | 2026-11-11 (#124), local macOS HVF guest, cold build: 104 lines, 5590 bytes, 3 tests | 135 lines, 7300 bytes | 3 |
 | third | 2026-11-11 relan/exfat (#125), local macOS HVF guest, warm: 95 lines, 7084 bytes, 3 tests; a cold build adds about 38 lines, 1165 bytes | 175 lines, 10700 bytes | 3 |
-| vm | 2026-11-11 the whole suite in the guest (#126), local macOS HVF guest, warm: 625 lines, 38742 bytes, 411 tests with the write layers above it; on main the suite lists 337 tests (335 and 2 doc tests); CI's fresh guest adds the toolchain install and a whole build, about 60 lines, 3.5 KB | 860 lines, 51000 bytes | 337 |
+| vm | 2026-11-11 the whole suite in the guest (#126), local macOS HVF guest, warm: 625 lines, 38742 bytes, 411 tests with the write layers; CI's fresh guest adds the toolchain install and a whole build, about 60 lines, 3.5 KB | 860 lines, 51000 bytes | 388 |
 | oracle-macos | 2026-11-11 the full pipeline on main (#134), local macOS: 258 lines, 10947 bytes, 40 tests including large-volume and million-entry comparisons | 310 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
 | wasm | CI run 43105817721, ubuntu, cold wasm32 build: 84 lines, 2946 bytes; 2026-11-11 the browser build under Node, local macOS, cold wasm32 build: 41 lines, 1476 bytes, 1 test (7 lines warm) | 86 lines, 3100 bytes | 1 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
