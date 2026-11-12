@@ -110,6 +110,21 @@ read-only for `fsck_exfat -n`, then mounted read-only, and the macOS driver's
 listing must equal the record. The guard admits the written image only after
 its producer has run, and only read-only attachments of it.
 
+The formatter's own tests read every layout back with the strict reader, its
+check and its deviation report, which must all be clean; they prove only that
+the formatter and the reader agree. `tests/oracle/mkfs.rs` is the independent
+evidence. It formats sparse images of 1 MiB, 64 MiB, 300 MiB, 6 GiB and 40 GiB
+at 512 and 4096 bytes per sector, then requires `fsck_exfat -n` to find each
+clean, the macOS driver to mount it read-write and take files and a directory,
+`fsck_exfat -n` to find it clean again, and the reader to return what the driver
+wrote. It formats the same sizes with `newfs_exfat`: at the default alignment
+only FatOffset, FatLength, ClusterHeapOffset and ClusterCount differ, with the
+bitmap length and boot checksum that follow from them, because `newfs_exfat`
+aligns to 64 KiB or more where this formatter aligns to the cluster size. At
+`newfs_exfat`'s 64 KiB alignment a 64 MiB volume is byte-identical at both
+sector sizes. On a two-FAT volume the only difference is FatEntry[3] in each
+FAT, which `newfs_exfat` leaves at 0 and section 4.1.3 requires to be FFFFFFFFh.
+
 Before any image operation, the safety guard checks the reviewed receipt parser,
 cleanup, fresh image binding and attach/query/detach ordering. Only the exact
 read-only diskutil info query on that attachment's own device is accepted; other

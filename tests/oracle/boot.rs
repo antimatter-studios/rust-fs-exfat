@@ -1,6 +1,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod mkfs;
 mod primitives;
 mod salvage;
 mod scale;

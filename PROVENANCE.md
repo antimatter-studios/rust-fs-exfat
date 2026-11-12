@@ -108,7 +108,47 @@ input. The tests build their tables from those rules, not from formatter output.
 Table 25 was transcribed from the specification's source only for a one-off
 comparison: it sums to E619D30Dh, as section 7.2.5.1 says, and macOS
 `newfs_exfat` wrote the same 5836 bytes on fresh images at 512 and 4096 bytes
-per sector. The table is not stored in this repository.
+per sector. For #132 the formatter stores it; see "Formatter" below.
+
+## Formatter
+
+For #132, `src/mkfs.rs`, its C ABI in `src/capi/mkfs.rs` and its command in
+`src/cli/mkfs.rs` are new code written from Microsoft's public exFAT
+specification, read on 2026-11-11: sections 2 "Volume Structure" (Table 3), 3.1
+"Main and Backup Boot Sector Sub-regions" (Table 4 and 3.1.1 to 3.1.20), 3.2
+"Main and Backup Extended Boot Sectors", 3.3 "Main and Backup OEM Parameters"
+(3.3.3 "Null Parameters", and its rule that a later format preserves them), 3.4
+"Main and Backup Boot Checksum Sub-regions", 4.1 "First and Second FAT
+Sub-regions", 5.1 "Cluster Heap Sub-region", 7.1 "Allocation Bitmap Directory
+Entry", 7.2 "Up-case Table Directory Entry", 7.3 "Volume Label Directory
+Entry", 7.5 "Volume GUID Directory Entry" and 7.7.3 Table 35 "Invalid FileName
+Characters". The checksums are this crate's existing `boot_checksum`,
+`checksum32` and `entry_set_checksum`. No other filesystem implementation, and
+no formatter's source, was an input.
+
+`src/mkfs_upcase.rs` holds section 7.2.5.1, Table 25, "Recommended up-case table
+in compressed format", transcribed mechanically from the specification's
+Markdown source (`desktop-src/FileIO/exfat-specification.md` in the
+MicrosoftDocs win32 documentation): a script read each row's offset and eight
+words, refused any row out of sequence, and checked that the 2,918 words make
+5,836 bytes whose TableChecksum is E619D30Dh. `tests/mkfs.rs` checks the same
+sum and that this crate's decoder expands the table completely.
+
+The default cluster sizes, 4 KiB below 256 MiB, 32 KiB below 32 GiB and 128 KiB
+up to 2 TiB, are those Microsoft documents for exFAT under Windows in its
+support article on default cluster sizes for NTFS, FAT and exFAT. Above them,
+the size doubles while the volume would hold more than the 2^24 - 2 clusters
+section 3.1.9 recommends. The specification sets no default alignment;
+sections 3.1.6 to 3.1.8 say the offsets exist to align the FAT and heap to the
+media, and this formatter aligns both to the cluster size unless asked otherwise.
+The volume serial number combines the date and time, as section 3.1.11 asks.
+
+macOS `newfs_exfat`, `fsck_exfat` and the exFAT driver are black-box oracles on
+images the tests create. `newfs_exfat -N` reported its chosen cluster sizes from
+1 MiB to 16 TiB: they match the documented defaults up to 2 TiB, where it uses
+256 KiB as the 2^24 - 2 rule does, and at 16 TiB it stays at 256 KiB where this
+formatter chooses 2 MiB. `tests/oracle/mkfs.rs` compares the bytes each
+formatter writes and documents every difference.
 
 ## Permissive structure snapshots
 

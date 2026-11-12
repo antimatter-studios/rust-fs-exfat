@@ -282,3 +282,157 @@ fn unknown_utc_offsets_remain_explicit_in_the_c_abi() {
         fs_exfat_umount(handle);
     }
 }
+
+struct Disk {
+    bytes: Mutex<Vec<u8>>,
+    fail_writes: AtomicBool,
+    flushes: Mutex<u32>,
+}
+
+unsafe extern "C" fn disk_read(
+    context: *mut c_void,
+    offset: u64,
+    output: *mut u8,
+    length: usize,
+) -> c_int {
+    let disk = unsafe { &*(context.cast::<Disk>()) };
+    let bytes = disk.bytes.lock().unwrap();
+    let Some(source) = bytes.get(offset as usize..offset as usize + length) else {
+        return 12;
+    };
+    unsafe { ptr::copy_nonoverlapping(source.as_ptr(), output, length) };
+    0
+}
+
+unsafe extern "C" fn disk_write(
+    context: *mut c_void,
+    offset: u64,
+    input: *const u8,
+    length: usize,
+) -> c_int {
+    let disk = unsafe { &*(context.cast::<Disk>()) };
+    if disk.fail_writes.load(Ordering::Relaxed) {
+        return 13;
+    }
+    let mut bytes = disk.bytes.lock().unwrap();
+    let Some(target) = bytes.get_mut(offset as usize..offset as usize + length) else {
+        return 12;
+    };
+    unsafe { ptr::copy_nonoverlapping(input, target.as_mut_ptr(), length) };
+    0
+}
+
+unsafe extern "C" fn disk_flush(context: *mut c_void) -> c_int {
+    let disk = unsafe { &*(context.cast::<Disk>()) };
+    *disk.flushes.lock().unwrap() += 1;
+    0
+}
+
+fn format_options(label: &CStr) -> FsExfatFormatOptions {
+    FsExfatFormatOptions {
+        size_bytes: 0,
+        alignment: 0,
+        partition_offset: 0,
+        bytes_per_sector: 4096,
+        cluster_size: 0,
+        volume_serial: 0x1234_abcd,
+        serial_present: 1,
+        number_of_fats: 0,
+        guid_present: 1,
+        reserved: 0,
+        guid: *b"0123456789abcdef",
+        label: label.as_ptr(),
+    }
+}
+
+#[test]
+fn the_formatter_writes_through_callbacks_and_reports_failures() {
+    assert_eq!(std::mem::size_of::<FsExfatFormatOptions>(), 64);
+    let disk = Disk {
+        bytes: Mutex::new(vec![0; 8 << 20]),
+        fail_writes: AtomicBool::new(false),
+        flushes: Mutex::new(0),
+    };
+    let mut device = FsExfatRwCallbacks {
+        context: ptr::from_ref(&disk).cast_mut().cast(),
+        size_bytes: 8 << 20,
+        read: Some(disk_read),
+        write: Some(disk_write),
+        flush: Some(disk_flush),
+    };
+    let label = CString::new("CABI").unwrap();
+    let options = format_options(&label);
+    unsafe {
+        assert_eq!(fs_exfat_mkfs_with_callbacks(&device, &options), 0);
+        assert_eq!(*disk.flushes.lock().unwrap(), 2);
+        let source = Source {
+            bytes: disk.bytes.lock().unwrap().clone(),
+            calls: Mutex::new(Vec::new()),
+            fail: AtomicBool::new(false),
+        };
+        let handle = mount(&source);
+        let mut info = MaybeUninit::<FsExfatVolumeInfo>::uninit();
+        assert_eq!(fs_exfat_get_volume_info(handle, info.as_mut_ptr()), 0);
+        let info = info.assume_init();
+        assert_eq!(
+            CStr::from_ptr(info.label.as_ptr()).to_str().unwrap(),
+            "CABI"
+        );
+        assert_eq!((info.sector_size, info.cluster_size), (4096, 4096));
+        assert_eq!(info.volume_serial, 0x1234_abcd);
+        assert_eq!((info.guid_present, info.guid), (1, *b"0123456789abcdef"));
+        fs_exfat_umount(handle);
+
+        assert_eq!(fs_exfat_mkfs_with_callbacks(&device, ptr::null()), 0);
+        assert_eq!(fs_exfat_last_errno(), 0);
+        disk.fail_writes.store(true, Ordering::Relaxed);
+        assert_eq!(fs_exfat_mkfs_with_callbacks(&device, &options), -1);
+        let message = CStr::from_ptr(fs_exfat_last_error()).to_str().unwrap();
+        assert!(
+            message.contains("write callback failed with status 13"),
+            "{message}"
+        );
+        assert_eq!(fs_exfat_last_errno(), 5);
+        disk.fail_writes.store(false, Ordering::Relaxed);
+        let long = CString::new("a label too long").unwrap();
+        assert_eq!(
+            fs_exfat_mkfs_with_callbacks(&device, &format_options(&long)),
+            -1
+        );
+        let message = CStr::from_ptr(fs_exfat_last_error()).to_str().unwrap();
+        assert!(message.contains("UTF-16 code units"), "{message}");
+        assert_eq!(fs_exfat_last_errno(), 22);
+        device.write = None;
+        assert_eq!(fs_exfat_mkfs_with_callbacks(&device, &options), -1);
+        assert_eq!(fs_exfat_mkfs_with_callbacks(ptr::null(), &options), -1);
+    }
+}
+
+#[test]
+fn the_formatter_formats_a_file_by_path() {
+    let fixture = interface_support::Temp::new();
+    let target = fixture.directory.join("formatted.img");
+    std::fs::File::create(&target)
+        .unwrap()
+        .set_len(16 << 20)
+        .unwrap();
+    let path = CString::new(target.to_str().unwrap()).unwrap();
+    let label = CString::new("FILE").unwrap();
+    unsafe {
+        assert_eq!(fs_exfat_mkfs(path.as_ptr(), &format_options(&label)), 0);
+        let handle = fs_exfat_mount(path.as_ptr(), 0);
+        assert!(!handle.is_null());
+        let mut info = MaybeUninit::<FsExfatVolumeInfo>::uninit();
+        assert_eq!(fs_exfat_get_volume_info(handle, info.as_mut_ptr()), 0);
+        assert_eq!(
+            CStr::from_ptr(info.assume_init().label.as_ptr())
+                .to_str()
+                .unwrap(),
+            "FILE"
+        );
+        fs_exfat_umount(handle);
+        let missing = CString::new(fixture.directory.join("absent.img").to_str().unwrap()).unwrap();
+        assert_eq!(fs_exfat_mkfs(missing.as_ptr(), ptr::null()), -1);
+        assert_eq!(fs_exfat_mkfs(ptr::null(), ptr::null()), -1);
+    }
+}

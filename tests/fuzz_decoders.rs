@@ -377,10 +377,18 @@ fn the_scan_finds_associated_and_free_decoders() {
 #[test]
 fn every_decoder_has_a_target_and_every_target_has_a_binary_and_seeds() {
     let mut found = Vec::new();
-    for entry in std::fs::read_dir(repository().join("src")).unwrap() {
-        let path = entry.unwrap().path();
-        let module = path.file_stem().unwrap().to_string_lossy().into_owned();
-        found.extend(decoders_in(&read(&path), &module));
+    // Every source file, submodules' directories included.
+    let mut pending = vec![repository().join("src")];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let module = path.file_stem().unwrap().to_string_lossy().into_owned();
+            found.extend(decoders_in(&read(&path), &module));
+        }
     }
     found.sort();
     let mut covered: Vec<String> = TARGETS
