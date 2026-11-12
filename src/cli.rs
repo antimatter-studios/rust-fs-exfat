@@ -7,26 +7,27 @@ use crate::path::Node;
 use crate::primitives::{DeviationReport, UninterpretedCounts};
 use crate::salvage::Severity;
 use crate::timestamp::Timestamp;
+use crate::write;
 use crate::Error;
 use fs_core::cli::clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
 use fs_core::cli::{self, transfer, CliError, Family, Json, Outcome, Tool};
 use fs_core::{FileDevice, OwnedSlice};
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 pub static FAMILY: Family = Family {
     repo: "rust-fs-exfat",
     crate_name: "rust-fs-exfat",
     version: env!("CARGO_PKG_VERSION"),
-    about: "Strict read-only exFAT inspection and extraction",
+    about: "exFAT inspection, extraction and writing",
     install_hints: &["cargo install rust-fs-exfat --features cli"],
     tools: &[
         Tool {
             name: "fs.exfat",
             verb: "fs",
             section: 1,
-            about: "List, inspect and extract files without mounting or writing to the source",
+            about: "List, inspect, extract and write files without mounting",
             usage_exit: 2,
             command: fs_command,
             run: fs_run,
@@ -46,7 +47,7 @@ pub static FAMILY: Family = Family {
 fn target() -> Arg {
     Arg::new("target")
         .value_name("IMAGE")
-        .help("The source image or device, opened read-only")
+        .help("The image or device; opened read-only except by mkdir and write")
         .required(true)
         .value_parser(value_parser!(OsString))
 }
@@ -74,7 +75,7 @@ fn path(required: bool) -> Arg {
 
 fn fs_command() -> Command {
     Command::new("fs.exfat")
-        .about("Read an exFAT image without mounting or writing to it")
+        .about("Read and write an exFAT image without mounting it")
         .arg(target())
         .arg(offset())
         .args(cli::format_args().map(|argument| argument.global(true)))
@@ -83,7 +84,19 @@ fn fs_command() -> Command {
         .subcommand(Command::new("stat").about("Inspect a path and its timestamps").arg(path(true)))
         .subcommand(Command::new("cat").about("Write raw file bytes to stdout").arg(path(true)))
         .subcommand(Command::new("export").about("Atomically extract a file; --verify checks the staged bytes before publication").args(transfer::export_args_with_verify()))
-        .after_help("Examples:\n  fs.exfat image.dmg ls /\n  fs.exfat image.dmg stat /file.txt\n  fs.exfat image.dmg cat /file.txt\n  fs.exfat image.dmg export /file.txt output.txt --verify\n\nThe source is always read-only. No formatter or writable mode exists.")
+        .subcommand(
+            Command::new("mkdir")
+                .about("Create a directory (its parent must exist, or with -p every one on the way)")
+                .arg(Arg::new("parents").short('p').long("parents").action(ArgAction::SetTrue).help("Make every missing directory on the way; one already there is success"))
+                .arg(path(true)),
+        )
+        .subcommand(
+            Command::new("write")
+                .about("Create or replace a file with the bytes on stdin, or write them into one at a position")
+                .arg(Arg::new("at").long("at").value_name("BYTES").value_parser(value_parser!(u64)).help("Write into the existing file starting this many bytes in, truncating nothing"))
+                .arg(path(true)),
+        )
+        .after_help("Examples:\n  fs.exfat image.dmg ls /\n  fs.exfat image.dmg stat /file.txt\n  fs.exfat image.dmg cat /file.txt\n  fs.exfat image.dmg export /file.txt output.txt --verify\n  fs.exfat image.dmg mkdir -p /backup/2026\n  fs.exfat image.dmg write /backup/2026/notes.txt < notes.txt\n  printf 'v2' | fs.exfat image.dmg write --at 4096 /data.bin\n\nls, stat, cat and export open the image read-only. mkdir and write open it for writing: the volume is marked dirty while they run and clean when they finish, and a volume already marked dirty is refused. write without --at creates the file or replaces its contents; with --at the file must exist, and a gap past its end reads back as zeros. There is no formatter.")
 }
 
 fn fsck_command() -> Command {
@@ -185,6 +198,9 @@ fn fs_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
     } else {
         None
     };
+    if matches!(verb, "mkdir" | "write") {
+        return write_run(image, offset, verb, path, arguments);
+    }
     let volume = interface::open_path(image, offset).map_err(error)?;
     match verb {
         "ls" => Ok(Outcome::report(Json::Arr(
@@ -244,6 +260,69 @@ fn fs_run(matches: &ArgMatches) -> Result<Outcome, CliError> {
         }
         _ => Err(CliError::usage("unknown verb")),
     }
+}
+
+fn write_run(
+    image: &Path,
+    offset: u64,
+    verb: &str,
+    path: &str,
+    arguments: &ArgMatches,
+) -> Result<Outcome, CliError> {
+    let mut volume = write::open_path(image, offset).map_err(error)?;
+    let report = match verb {
+        "mkdir" if arguments.get_flag("parents") => {
+            let mut made = Vec::new();
+            let mut current = String::new();
+            for part in path.split('/').filter(|part| !part.is_empty()) {
+                current.push('/');
+                current.push_str(part);
+                match volume.reader().lookup(&current) {
+                    Ok(node) if node.is_directory() => continue,
+                    Ok(_) => return Err(error(Error::NotDirectory)),
+                    Err(Error::NotFound) => {}
+                    Err(problem) => return Err(error(problem)),
+                }
+                volume.mkdir(&current).map_err(error)?;
+                made.push(Json::from(current.as_str()));
+            }
+            Json::object([("created", Json::Arr(made))])
+        }
+        "mkdir" => {
+            volume.mkdir(path).map_err(error)?;
+            Json::object([("created", Json::Arr(vec![Json::from(path)]))])
+        }
+        _ => {
+            let start = arguments.get_one::<u64>("at").copied();
+            if start.is_none() {
+                volume.write_file(path, &[]).map_err(error)?;
+            }
+            let mut position = start.unwrap_or(0);
+            let mut buffer = vec![0; transfer::CHUNK];
+            let mut input = std::io::stdin().lock();
+            let mut total = 0u64;
+            loop {
+                let count = input
+                    .read(&mut buffer)
+                    .map_err(|problem| CliError::failed(problem.to_string()))?;
+                if count == 0 {
+                    break;
+                }
+                volume
+                    .pwrite(path, position, &buffer[..count])
+                    .map_err(error)?;
+                position += count as u64;
+                total += count as u64;
+            }
+            if start.is_some() && total == 0 {
+                // An empty write still names a file that must exist.
+                volume.pwrite(path, position, &[]).map_err(error)?;
+            }
+            Json::object([("path", Json::from(path)), ("written", Json::from(total))])
+        }
+    };
+    volume.unmount().map_err(error)?;
+    Ok(Outcome::report(report))
 }
 
 fn fsck_error(problem: Error) -> CliError {

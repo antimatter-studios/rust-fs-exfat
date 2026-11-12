@@ -923,7 +923,7 @@ impl<'a> RawUpcaseTable<'a> {
 }
 
 /// Raw system-stream location, without cluster or length policy.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SystemStream {
     pub first_cluster: u32,
     pub length: u64,

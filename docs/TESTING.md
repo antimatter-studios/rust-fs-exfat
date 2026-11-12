@@ -34,7 +34,7 @@ tier has run.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | 2026-11-11 the full pipeline on main (#134), local macOS: 436 lines, 26410 bytes, 321 tests, after `chore build` | 437 lines, 26527 bytes, allowing one slow-test notice | 150 |
+| unit | 2026-11-11 files, directories and data (#130), local macOS: 488 lines, 29403 bytes, 359 tests, with the 60-second slow-test notice for the 512 MiB bitmap audit; 489 lines, 29565 bytes when the million-entry audit also prints one (#129: 466 lines, 28395 bytes, 347 tests); #127 adds one 69-byte line | 493 lines, 29770 bytes, allowing both notices and timing digits | 150 |
 | images | CI run 43105817721, ubuntu, cold build: 95 lines, 3328 bytes; 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 98 lines, 3500 bytes | 7 |
 | oracle | CI run 43105817721, x86_64 guest, cold build: 152 lines, 7274 bytes; 2026-11-11 exfatprogs in the guest (#123), local macOS, cold build: 107 lines, 5718 bytes, 2 tests and one `[oracle vm]` line per fixture | 156 lines, 7500 bytes | 2 |
 | kernel | 2026-11-11 (#124), local macOS HVF guest, cold build: 104 lines, 5590 bytes, 3 tests | 135 lines, 7300 bytes | 3 |

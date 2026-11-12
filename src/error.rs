@@ -9,6 +9,8 @@ pub enum Error {
     NotFound,
     NotDirectory,
     NoSpace,
+    Exists,
+    IsDirectory,
 }
 
 impl fmt::Display for Error {
@@ -21,6 +23,8 @@ impl fmt::Display for Error {
             Self::NotFound => formatter.write_str("exFAT path not found"),
             Self::NotDirectory => formatter.write_str("exFAT path component is not a directory"),
             Self::NoSpace => formatter.write_str("exFAT volume has too few free clusters"),
+            Self::Exists => formatter.write_str("exFAT path already exists"),
+            Self::IsDirectory => formatter.write_str("exFAT path is a directory"),
         }
     }
 }

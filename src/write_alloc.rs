@@ -110,7 +110,7 @@ impl<Device: BlockDevice> WriteVolume<Device> {
         let clusters = if allocation.no_fat_chain {
             (allocation.first..=allocation.last).collect()
         } else {
-            self.volume.cluster_chain(allocation.first)?
+            self.fat_chain(allocation.first)?
         };
         if clusters.len() != allocation.count as usize || clusters.last() != Some(&allocation.last)
         {
@@ -122,6 +122,43 @@ impl<Device: BlockDevice> WriteVolume<Device> {
             }
         }
         Ok(clusters)
+    }
+
+    /// The FAT chain from `first`, read a window of the active FAT at a
+    /// time. Every link must stay in the heap and the chain must end within
+    /// ClusterCount links, so a cycle is refused.
+    pub(crate) fn fat_chain(&self, first: u32) -> Result<Vec<u32>> {
+        const WINDOW: u64 = 64 * 1024;
+        let boot = self.volume.boot();
+        let fat = self.fats[usize::from((boot.volume_flags & 1) as u8)];
+        let fat_bytes = (u64::from(boot.cluster_count) + 2) * 4;
+        let mut window = Vec::new();
+        let mut window_start = u64::MAX;
+        let mut clusters = Vec::new();
+        let mut cluster = first;
+        loop {
+            boot.cluster_offset(cluster)?;
+            if clusters.len() as u64 >= u64::from(boot.cluster_count) {
+                return Err(Error::Invalid("FAT chain cycle"));
+            }
+            clusters.push(cluster);
+            let position = u64::from(cluster) * 4;
+            if !(window_start..window_start.saturating_add(window.len() as u64)).contains(&position)
+            {
+                window_start = position / WINDOW * WINDOW;
+                window = vec![0; WINDOW.min(fat_bytes - window_start) as usize];
+                self.cache.read(fat + window_start, &mut window)?;
+            }
+            let at = (position - window_start) as usize;
+            let value = u32::from_le_bytes(window[at..at + 4].try_into().expect("four bytes"));
+            if value == primitives::FAT_END {
+                return Ok(clusters);
+            }
+            if !(2..u64::from(boot.cluster_count) + 2).contains(&u64::from(value)) {
+                return Err(Error::Invalid("free or bad cluster in FAT chain"));
+            }
+            cluster = value;
+        }
     }
 
     pub(crate) fn allocate_clusters(
