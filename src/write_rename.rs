@@ -6,9 +6,13 @@
 //! loses its entry set with the same write, and its clusters are freed only
 //! after both. exFAT directories hold no entry for their parent, so moving a
 //! directory changes nothing inside it.
+//!
+//! Each directory whose entries change has its LastModified and LastAccessed
+//! set in the same phase as the entry set written into it.
 
 use super::dir::{renamed, Set};
 use super::WriteVolume;
+use crate::timestamp::Timestamp;
 use crate::{Error, Result};
 use fs_core::BlockDevice;
 
@@ -28,8 +32,9 @@ impl<Device: BlockDevice> WriteVolume<Device> {
     }
 
     fn move_entry(&mut self, from: &str, to: &str) -> Result<()> {
-        let source = self.resolve(from)?;
-        let (source_set, source_entry) = source.found.ok_or(Error::NotFound)?;
+        let now = Timestamp::now()?;
+        let mut source = self.resolve(from)?;
+        let (source_set, source_entry) = source.found.take().ok_or(Error::NotFound)?;
         let mut target = self.resolve(to)?;
         if source_entry.is_directory() {
             let first = source_entry.stream().first_cluster();
@@ -48,7 +53,8 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 // A change of case only: the name has as many units, so the
                 // set keeps its size and is rewritten where it is.
                 let set = Set { raw, ..source_set };
-                return self.write_set(&set);
+                self.write_set(&set)?;
+                return self.touch(&mut target.parent, &now);
             }
             match (source_entry.is_directory(), target_entry.is_directory()) {
                 (false, true) => return Err(Error::IsDirectory),
@@ -76,9 +82,20 @@ impl<Device: BlockDevice> WriteVolume<Device> {
                 .copy_from_slice(&target_set.raw);
         }
         self.insert(&mut target.parent, raw)?;
+        self.touch(&mut target.parent, &now)?;
         self.barrier()?;
         let mut old = source_set;
         self.unset(&mut old)?;
+        // The source's directory is touched once: when it is the target's
+        // too, its File entry was written above, after any growth.
+        let same_parent = match (&source.parent.owner, &target.parent.owner) {
+            (None, None) => true,
+            (Some(first), Some(second)) => same_set(first, second),
+            _ => false,
+        };
+        if !same_parent {
+            self.touch(&mut source.parent, &now)?;
+        }
         if let Some((_, allocation)) = replaced {
             self.barrier()?;
             let mut freed = allocation;
