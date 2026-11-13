@@ -59,11 +59,11 @@ measured 34,300-byte cap covers this case without another budget increase.
 |---|---|---|---|
 | unit | 2026-11-13 (#178), 3ed71ee: 406 passing tests, 567 lines / 33768 bytes with three slow-test notices; earlier c60274f (#173), 402 tests: local macOS 564 lines / 33931 bytes, CI Linux 560 / 32902 and macOS 560 / 32903 | 570 lines, 34300 bytes; three lines above the 406-test measurement for timing diagnostics, with the byte cap retained | 150 |
 | images | CI run 43105817721, ubuntu, cold build: 95 lines, 3328 bytes; 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 98 lines, 3500 bytes | 7 |
-| oracle | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 107 lines, 7943 bytes, 6 tests; the historical CI cold/warm difference adds 83 lines, 2721 bytes: 190 lines, 10664 bytes cold; the formatter alone adds 15 lines, 1475 bytes | 198 lines, 11000 bytes | 6 |
+| oracle | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 107 lines, 7943 bytes, 6 tests; the historical CI cold/warm difference adds 83 lines, 2721 bytes: 190 lines, 10664 bytes cold; the formatter alone adds 15 lines, 1475 bytes; 2026-11-14 (#185), the same host, release build with 39 Compiling lines: 149 lines, 9566 bytes, 7 tests; the write-kind checkpoints add 10 lines, 1135 bytes: 200 lines, 11799 bytes cold | 208 lines, 12150 bytes | 7 |
 | kernel | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 114 lines, 8718 bytes, 7 tests; the historical cold/warm difference adds 39 lines, 1232 bytes: 153 lines, 9950 bytes cold; the formatter alone adds 15 lines, 1639 bytes | 162 lines, 10300 bytes | 7 |
 | third | 2026-11-11 relan/exfat (#125), local macOS HVF guest, warm: 95 lines, 7084 bytes, 3 tests; a cold build adds about 38 lines, 1165 bytes | 175 lines, 10700 bytes | 3 |
 | vm | 2026-11-11 the whole suite in the guest (#126), local macOS HVF guest, warm: 625 lines, 38742 bytes, 411 tests with the write layers; CI's fresh guest adds the toolchain install and a whole build, about 60 lines, 3.5 KB | 860 lines, 51000 bytes | 388 |
-| oracle-macos | 2026-11-13 detach safety gates (#202, #200), local macOS: 318 lines, 14123 bytes, 50 tests. The change adds 13 lines: 9 image-safety verdicts, 3 detach regressions and 1 retained-evidence notice. A further 3 Compiling lines depend on the cache. The same Mac measured 302 lines before the change, and CI on main measured 303 lines, 12925 bytes at most | 320 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
+| oracle-macos | 2026-11-13 detach safety gates (#202, #200), local macOS: 318 lines, 14123 bytes, 50 tests. The change adds 13 lines: 9 image-safety verdicts, 3 detach regressions and 1 retained-evidence notice. A further 3 Compiling lines depend on the cache. The same Mac measured 302 lines before the change, and CI on main measured 303 lines, 12925 bytes at most. 2026-11-14 (#185), the same Mac: 379 lines, 16734 bytes, 52 tests; 30 write-kind checkpoint verdicts, their 30 detach notices and 2 test lines add 62 lines, 2611 bytes | 385 lines, 18700 bytes, allowing formatter/checker diagnostics | 25 |
 | wasm | CI run 43105817721, ubuntu, cold wasm32 build: 84 lines, 2946 bytes; 2026-11-11 the browser build under Node, local macOS, cold wasm32 build: 41 lines, 1476 bytes, 1 test (7 lines warm) | 86 lines, 3100 bytes | 1 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
@@ -239,6 +239,26 @@ before and after the allocation cycle, and against the strict reader.
 Unattached allocations are freed before either final oracle runs. These tests
 do not exercise file-data writing (#130), crash recovery (#133), or TexFAT;
 two-FAT allocation still has synthetic-only evidence.
+
+For #185, both checkers also see a clean, unmounted checkpoint after every
+kind of write on its own. `tests/write_support/kinds.rs` runs each kind on a
+mount of its own, in order: allocation, creation, truncation (grow past
+cluster boundaries, shrink to an unaligned length, to zero, and a fragmented
+chain shrunk into its first run, cut mid-chain and grown again), unlink,
+rmdir, rename (case-only, across directories, replacing a file and an empty
+directory), timestamps, attributes, and a volume label set to eleven
+non-ASCII units and then cleared. After every unmount it checks VolumeDirty
+is clear and the strict reader opens the volume, and it saves the image as a
+checkpoint named for the kind. Whatever the image held before must read back
+unchanged at the end. `chore test:oracle` runs it on the guest-formatted
+images at both geometries above and gives every checkpoint to the guest's
+`fsck.exfat -n` in one guest call per geometry. `chore test:oracle-macos` runs
+it on a fresh copy of each macOS-populated reference volume, and
+`scripts/test-oracle.sh` attaches every listed checkpoint read-only and
+unmounted for `fsck_exfat -n`. A refused checkpoint fails the tier, which
+retains the checkpoint image named for its kind. These are checker verdicts
+on clean unmounts only: they establish nothing about crash recovery or
+TexFAT interoperability.
 
 Windows formatting is additional evidence only if the Windows harness can
 provide it.

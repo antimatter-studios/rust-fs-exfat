@@ -93,6 +93,79 @@ cp --sparse=always "$image" {destination}
     }
 }
 
+impl WriteImage {
+    /// Where the checkpoint after `kind` is kept: beside the image, named
+    /// for the operation, and retained with it when a check fails.
+    pub fn checkpoint_path(&self, kind: &str) -> PathBuf {
+        let stem = self.path.file_stem().unwrap().to_string_lossy();
+        self.directory.join(format!("{stem}-checkpoint-{kind}.img"))
+    }
+
+    /// Check-only, one guest call for every checkpoint in `kinds`, each on a
+    /// private guest-disk copy. Every checkpoint must be clean; a refused one
+    /// is named with fsck.exfat's report and its retained image.
+    pub fn fsck_checkpoints(&self, tier: &str, kinds: &[&str]) {
+        let mut script = String::from(
+            r#"command -v fsck.exfat >/dev/null || { echo "missing fsck.exfat; run 'chore vm:provision'" >&2; exit 1; }
+scratch="$(mktemp -d /var/tmp/exfat-oracle.XXXXXX)"
+trap 'rm -rf "$scratch"' EXIT
+check() {
+    cp --sparse=always "$2" "$scratch/image"
+    if fsck.exfat -n "$scratch/image" > "$scratch/out" 2>&1; then
+        echo "checkpoint clean: $1"
+    else
+        echo "checkpoint refused: $1 (status $?)"
+        cat "$scratch/out"
+    fi
+    rm -f "$scratch/image"
+}
+"#,
+        );
+        for kind in kinds {
+            script.push_str(&format!(
+                "check {} {}\n",
+                quote(kind),
+                quote(&guest_path(&self.checkpoint_path(kind)))
+            ));
+        }
+        let name = self
+            .path
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let out = guest(
+            tier,
+            &format!(
+                "fsck.exfat -n on {} write-kind checkpoints of {name}",
+                kinds.len()
+            ),
+            &script,
+        )
+        .success("fsck.exfat -n on the write-kind checkpoints");
+        let refused: Vec<String> = kinds
+            .iter()
+            .filter(|kind| {
+                !out.stdout
+                    .lines()
+                    .any(|line| line == format!("checkpoint clean: {kind}"))
+            })
+            .map(|kind| format!("{kind} ({})", self.checkpoint_path(kind).display()))
+            .collect();
+        assert!(
+            refused.is_empty(),
+            "fsck.exfat -n refuses the checkpoint after: {}\n{}{}",
+            refused.join(", "),
+            out.stdout,
+            out.stderr
+        );
+        println!(
+            "[{tier} vm] fsck.exfat -n accepted every checkpoint of {name}: {}",
+            kinds.join(" ")
+        );
+    }
+}
+
 impl Drop for WriteImage {
     fn drop(&mut self) {
         // Preserve failed runs for diagnosis; remove only this test's files.
