@@ -65,7 +65,9 @@ name: ci
 #                 which hold this file, its verdict and the repository's own
 #                 scripts to what they say. No toolchain.
 #   ci-ok         the one required check: green only when every job above
-#                 ran and succeeded (failed, cancelled OR skipped fails it).
+#                 ran and succeeded (failed, cancelled OR skipped fails it;
+#                 a run cancelled because a newer one superseded it passes
+#                 it, scripts/ci-superseded.sh, #208).
 #
 # THE OUTPUT BUDGET IS IN THE TASKS, so it is in this workflow too. Each
 # tier writes its full output to tmp/logs/<tier>.log and prints a verdict; a
@@ -101,15 +103,25 @@ on:
   merge_group:
   workflow_dispatch:
 
-# Required runs finish independently, including duplicate PR events for the
-# same commit. GitHub does not expose why a run was cancelled, so accepting
-# cancellation merely because another run exists would also accept a manual
-# cancellation. Distinct run/attempt groups prevent both in-progress
-# cancellation and replacement of a pending run. This also preserves red-test
-# evidence. Superseded runs deliberately keep running to their actual verdict.
+# CONCURRENCY (#208). An ordinary pull request's runs share one group per
+# workflow and pull request number, and a newer head cancels the run it
+# supersedes, its queued jobs included (ci-ok alone still runs, a few
+# seconds, to say the run was superseded): a superseded run holds runners
+# that every other repository's required checks are waiting for, and its
+# verdict judges a commit nobody will land. Everything else keeps its
+# evidence, in a group of its own (run id and attempt, so even a pending run
+# is never replaced by a newer one) with cancelling off:
+#   - a `red:` pull request (the title match ignores case, as scripts/
+#     ci-plan.sh's does): its run is the failing test's evidence (AGENTS.md),
+#     so the group names the head commit, and a later push -- the fix, with
+#     `red:` dropped -- joins the ordinary group without cancelling it;
+#   - every push to main, merge-queue run and manual dispatch: the queue
+#     reads each group's ci-ok, and main's history keeps every verdict.
+# tests/scripts/test-red-runs-uncancelled.sh evaluates these expressions for
+# every event and holds them to this.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:') && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}-{2}-{3}', startsWith(github.event.pull_request.title, 'red:') && 'red' || github.event_name, github.event.pull_request.head.sha || github.sha, github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:') }}
 
 permissions:
   contents: read
@@ -1015,23 +1027,42 @@ jobs:
 
   ci-ok:
     name: ci-ok
+    # Always, so a failed, skipped or cancelled job fails the gate instead of
+    # skipping it: GitHub counts a skipped required check as passing.
     if: always()
     # Every job above. scripts/ci-ok.sh judges the same list, and
     # tests/scripts/test-ci-profile.sh holds the two equal.
     needs: [changes, unit, fixtures, images, test, suite-in-vm, test-arm64, oracle-macos, package, semver, msrv, wasm, cli, provenance, scripts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # scripts/ci-superseded.sh lists this workflow's runs.
+      actions: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
-      - name: A cancelled workflow fails
+      # A cancelled run fails the gate, unless a newer run of the same pull
+      # request superseded it (the concurrency block above): that run's ci-ok
+      # reports the verdict, and a failed one here would sit beside it when
+      # both ran for one commit (#167). Cancelled by hand with nothing newer,
+      # or a red:, main or merge-queue run: it fails.
+      - name: A cancelled workflow fails unless a newer run superseded it
         if: cancelled()
         env:
           CANCELLED: "true"
-        run: bash scripts/ci-ok.sh < /dev/null
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          TITLE: ${{ github.event.pull_request.title }}
+          PR: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci-superseded.sh || bash scripts/ci-ok.sh < /dev/null
+      # Not after a cancellation: the step above decided that run.
       - name: Every job ran and succeeded
+        if: ${{ !cancelled() }}
         env:
           NEEDS: ${{ toJSON(needs) }}
           # The plan the changes job made: quick or full, and false only for
