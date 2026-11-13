@@ -300,7 +300,7 @@ Reference programs are used only as black-box tools on generated disk images.
 
 The repository layout and development conventions follow rust-fs-ext4 (MIT).
 Filesystem-specific source, historical provenance and test fixtures are not
-copied from that template. rust-fs-core 0.4.3 (MIT) supplies the read-only device
+copied from that template. rust-fs-core 0.4.5 (MIT) supplies the read-only device
 traits and shared development scripts. Serde (MIT/Apache-2.0) preserves the
 primitive boot-sector and entry-set types' camelCase serialization contract.
 
