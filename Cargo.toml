@@ -89,6 +89,10 @@ name = "macos_write"
 path = "tests/oracle/write.rs"
 
 [[test]]
+name = "macos_raw_write"
+path = "tests/oracle/raw_write.rs"
+
+[[test]]
 name = "cli"
 path = "tests/cli.rs"
 required-features = ["cli"]
