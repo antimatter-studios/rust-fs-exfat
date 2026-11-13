@@ -31,6 +31,25 @@ mutations = {
     'foreign-holder-node': source.replace('/usr/sbin/lsof -nP +c 0 -- "$device" "$raw"', '/usr/sbin/lsof -nP +c 0 -- /dev/not-owned'),
     'foreign-raw-node': source.replace('local raw="/dev/r${device#/dev/}"', 'local raw="/dev/not-owned"'),
 }
+# #159: the read-write larger-block attachment and the raw-node writer are
+# allowed only for this run's copy of the populated volume, and the writer
+# only under the live receipt of that attachment.
+raw_binding = 'image="$directory/raw-written-512.dmg"\n'
+raw_copy = 'cp "$directory/populated-512.dmg" "$image"\n'
+raw_attach = '/usr/bin/hdiutil attach -blocksize 4096 -nomount -nobrowse -plist "$image" > "$directory/attach.plist"\n'
+raw_producer = 'EXFAT_ORACLE_DEVICE="$device" EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_raw_write -- --nocapture\n'
+mutations.update({
+    'raw-foreign-source': source.replace(raw_copy, 'cp "$HOME/foreign.dmg" "$image"\n'),
+    'raw-foreign-image': source.replace(raw_binding + raw_copy, raw_copy + raw_binding),
+    'raw-reference-image': source.replace(raw_binding, 'image="$directory/reference-512.dmg"\n'),
+    'raw-producer-without-receipt': source.replace(
+        'accept_receipt\n' + raw_producer + 'detach_receipt\n',
+        'accept_receipt\ndetach_receipt\n' + raw_producer),
+    'raw-producer-without-attachment': source.replace(
+        raw_attach + 'accept_receipt\n' + raw_producer + 'detach_receipt\n', raw_producer),
+    'raw-producer-read-only-receipt': source.replace(
+        raw_attach, '/usr/bin/hdiutil attach -blocksize 4096 -readonly -nomount -plist "$image" > "$directory/attach.plist"\n'),
+})
 
 with tempfile.TemporaryDirectory(prefix='image-safety-176-') as temporary:
     root = Path(temporary)

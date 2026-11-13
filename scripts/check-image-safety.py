@@ -65,6 +65,14 @@ def check(source):
     checkpoint_binding = 'image="$directory/checkpoint-$sector-$kind.dmg"'
     checkpoint_check = 'if /sbin/fsck_exfat -n "$device" > "$directory/checkpoint-$sector-$kind.txt" 2>&1; then'
     written_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/written-mount-$sector" -plist "$image" > "$directory/attach.plist"'
+    populated_copy = 'cp "$image" "$directory/populated-$sector.dmg"'
+    raw_binding = 'image="$directory/raw-written-512.dmg"'
+    raw_copy = 'cp "$directory/populated-512.dmg" "$image"'
+    raw_attach = '/usr/bin/hdiutil attach -blocksize 4096 -nomount -nobrowse -plist "$image" > "$directory/attach.plist"'
+    raw_producer = 'EXFAT_ORACLE_DEVICE="$device" EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_raw_write -- --nocapture'
+    raw_check_attach = '/usr/bin/hdiutil attach -blocksize 512 -readonly -nomount -plist "$image" > "$directory/attach.plist"'
+    raw_mount_attach = '/usr/bin/hdiutil attach -blocksize 512 -readonly -nobrowse -mountpoint "$directory/raw-written-mount" -plist "$image" > "$directory/attach.plist"'
+    raw_attachments = (raw_attach, raw_check_attach, raw_mount_attach)
     tools = 'for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil /usr/sbin/lsof; do'
     query = '/usr/sbin/diskutil info -plist "$device" > "$directory/info-$sector.plist"'
     notices = 'export com_apple_hdiutil_nodeprecatedwarning=1'
@@ -74,6 +82,7 @@ def check(source):
         fixture_attach,
         windows_attach,
         written_attach,
+        *raw_attachments,
         '/usr/bin/hdiutil attach -blocksize "$sector" -nomount -nobrowse -plist "$image" > "$directory/attach.plist"',
         '/usr/bin/hdiutil attach -blocksize "$sector" -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"',
         '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"',
@@ -96,6 +105,8 @@ def check(source):
         refuse("written images require the reviewed producer and private image binding")
     if lines.count(checkpoint_binding) != 1 or lines.count(checkpoint_kind) != 1:
         refuse("write checkpoints require the reviewed kind check and private image binding")
+    if any(lines.count(line) != 1 for line in (populated_copy, raw_binding, raw_copy, raw_attach, raw_producer)):
+        refuse("the larger-block raw write requires its reviewed copy, attachment, producer and private image binding")
     active = False
     created = False
     receipt_pending = False
@@ -108,6 +119,13 @@ def check(source):
     written_ready = False
     kind_checked = False
     checkpoint_image = False
+    reference_image = False
+    populated_ready = False
+    raw_image = False
+    raw_copied = False
+    raw_attached = False
+    raw_receipt = False
+    raw_written = False
     for line in lines:
         if not line:
             continue
@@ -116,6 +134,7 @@ def check(source):
                 refuse("every attach must be followed immediately by its own receipt binding")
             active = True
             receipt_pending = False
+            raw_receipt = raw_attached and not raw_written
             continue
         if line == 'accept_receipt':
             refuse("a receipt cannot be reused without a fresh image attachment")
@@ -126,6 +145,8 @@ def check(source):
                 refuse("an attached image cannot be rebound")
             checkpoint_image = False
             image_bound = True
+            reference_image = False
+            raw_image = False
             fixture_image = False
             windows_image = True
             windows_ready = False
@@ -137,6 +158,8 @@ def check(source):
                 refuse("an attached image cannot be rebound")
             checkpoint_image = False
             image_bound = True
+            reference_image = False
+            raw_image = False
             fixture_image = False
             windows_image = False
             written_image = True
@@ -153,6 +176,8 @@ def check(source):
                 refuse("write checkpoints require this run's writer producer and a checked kind name")
             kind_checked = False
             image_bound = True
+            reference_image = False
+            raw_image = False
             fixture_image = False
             windows_image = False
             written_image = False
@@ -179,6 +204,8 @@ def check(source):
                 refuse("fixture attachment requires this run's completed fixture producer")
             checkpoint_image = False
             image_bound = True
+            reference_image = False
+            raw_image = False
             fixture_image = True
             windows_image = False
             written_image = False
@@ -194,10 +221,43 @@ def check(source):
                 refuse("an attached image cannot be rebound")
             checkpoint_image = False
             image_bound = True
+            reference_image = True
+            raw_image = False
             fixture_image = False
             windows_image = False
             written_image = False
             created = False
+            continue
+        if line == populated_copy:
+            if not reference_image or not created or active:
+                refuse("the populated copy requires this run's detached reference image")
+            populated_ready = True
+            continue
+        if line == raw_binding:
+            if active:
+                refuse("an attached image cannot be rebound")
+            checkpoint_image = False
+            image_bound = True
+            reference_image = False
+            raw_image = True
+            fixture_image = False
+            windows_image = False
+            written_image = False
+            created = False
+            raw_copied = False
+            raw_attached = False
+            raw_written = False
+            continue
+        if line == raw_copy:
+            if not raw_image or not populated_ready or active or created:
+                refuse("the raw-node copy requires this run's populated volume and its own private image binding")
+            created = True
+            raw_copied = True
+            continue
+        if line == raw_producer:
+            if not (raw_image and active and raw_receipt):
+                refuse("the raw-node writer requires the live receipt of its own read-write larger-block attachment")
+            raw_written = True
             continue
         if line == create:
             if not image_bound or active:
@@ -217,6 +277,14 @@ def check(source):
                 refuse("write checkpoints must be attached read-only without a mount")
             if not written_image and line == written_attach:
                 refuse("the written-image mount point belongs to written images")
+            if raw_image != (line in raw_attachments):
+                refuse("the larger-block attachments belong to this run's raw-node copy alone")
+            if line == raw_attach:
+                if not raw_copied or raw_attached:
+                    refuse("the read-write larger-block attachment is made once, of the fresh copy")
+                raw_attached = True
+            elif raw_image and not raw_written:
+                refuse("the raw-node copy is checked only after its writer ran")
             receipt_pending = True
             continue
         if line == detach or line in device_commands:
@@ -226,6 +294,7 @@ def check(source):
                 refuse("the checkpoint check belongs to write checkpoints")
             if line == detach:
                 active = False
+                raw_receipt = False
             continue
         if line == "device=''":
             if active:
