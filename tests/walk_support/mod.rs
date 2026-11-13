@@ -83,6 +83,59 @@ pub fn kernel_birth_times(image: &Path) -> BTreeMap<String, i64> {
     serde_json::from_str(&out.stdout).expect("the kernel's birth times as JSON")
 }
 
+/// The kernel's listing and birth times of every image in `images`, each
+/// loop-mounted read-only in turn on a private guest-disk copy, in one guest
+/// call. `what` names the set in the evidence line.
+pub fn kernel_walks(what: &str, images: &[&Path]) -> Vec<(Listing, BTreeMap<String, i64>)> {
+    let mut script = format!(
+        r#"modprobe exfat
+scratch="$(mktemp -d /var/tmp/exfat-oracle.XXXXXX)"
+mkdir "$scratch/mnt"
+trap 'umount "$scratch/mnt" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+walk() {{
+    cp --sparse=always "$1" "$scratch/image"
+    mount -t exfat -o loop,ro,fmask=0,dmask=0,iocharset=utf8 "$scratch/image" "$scratch/mnt"
+    python3 {tool} listing "$scratch/mnt" "$scratch/listing.tsv" >/dev/null
+    python3 {birth} "$scratch/mnt" > "$scratch/birth.json"
+    umount "$scratch/mnt"
+    rm -f "$scratch/image"
+    echo '=== listing'
+    cat "$scratch/listing.tsv"
+    echo '=== birth'
+    cat "$scratch/birth.json"
+    echo
+}}
+"#,
+        tool = tool(),
+        birth = quote(&guest_path(
+            &repo().join("tests/write_support/birth-times.py")
+        )),
+    );
+    for image in images {
+        script.push_str(&format!("walk {}\n", quote(&guest_path(image))));
+    }
+    let out = guest(
+        "kernel",
+        &format!(
+            "mount -o loop,ro and walk {} images of {what}",
+            images.len()
+        ),
+        &script,
+    )
+    .success("the kernel's walks");
+    let mut walks = Vec::new();
+    for (index, section) in out.stdout.split("=== listing\n").skip(1).enumerate() {
+        let (listing, birth) = section.split_once("=== birth\n").expect("birth section");
+        let name = images[index].file_name().unwrap().to_string_lossy();
+        walks.push((
+            parse_listing(listing, &format!("the kernel's walk of {name}")),
+            serde_json::from_str(birth.trim()).expect("the kernel's birth times as JSON"),
+        ));
+    }
+    assert_eq!(walks.len(), images.len(), "one walk per image");
+    walks
+}
+
 /// relan/exfat's reading of a volume: its FUSE driver's listing, and the
 /// read-only attribute its `exfatattrib` reports for up to
 /// [`ATTRIBUTE_SAMPLE`] entries (the FUSE driver's modes do not carry it).

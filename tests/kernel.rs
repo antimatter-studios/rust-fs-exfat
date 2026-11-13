@@ -9,7 +9,9 @@
 //!
 //! `kernel_walk` (tests/walk_support) takes any image under the repository, so the write
 //! direction uses it as it stands: #129 checks allocation/free and volume
-//! state; #130 checks creation and file-data writes. Crash recovery remains #133.
+//! state; #130 checks creation and file-data writes; #186 runs every kind of
+//! write in both directions, this crate to the kernel and the kernel to this
+//! crate. Crash recovery remains #133.
 //!
 //! The kernel driver is GPL: it runs in the guest as an oracle, never read.
 
@@ -18,6 +20,10 @@ mod allocation_support;
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "write_support/kernel_kinds.rs"]
+mod kernel_kinds;
+#[path = "write_support/kinds.rs"]
+mod kinds;
 #[path = "oracle/linux_mkfs.rs"]
 mod linux_mkfs;
 #[path = "walk_support/mod.rs"]
@@ -97,6 +103,159 @@ fn the_kernel_reads_files_and_directories_created_by_this_crate() {
                 "{source}: {path}: the kernel's creation time must include hundredths and UTC offsets"
             );
         }
+    }
+}
+
+/// Created times, which the listing does not carry, as this crate reads them.
+fn birth_times<Device: BlockRead>(
+    volume: &fs_exfat::volume::Volume<Device>,
+    listing: &fixture_support::Listing,
+) -> std::collections::BTreeMap<String, i64> {
+    listing
+        .keys()
+        .map(|path| {
+            let found = volume.lookup(&format!("/{path}")).unwrap();
+            let created = found.entry().unwrap().timestamps().created;
+            (path.clone(), fixture_support::milliseconds(&created))
+        })
+        .collect()
+}
+
+/// The view Linux 6.1 gives of a file whose ValidDataLength is below its
+/// DataLength (#207): its size is ValidDataLength and its bytes are that
+/// prefix. Returns the listing with exactly those files so changed, and the
+/// paths changed, so the comparison stays exact everywhere else.
+fn valid_prefix_view<Device: BlockRead>(
+    volume: &fs_exfat::volume::Volume<Device>,
+    listing: &fixture_support::Listing,
+) -> (fixture_support::Listing, Vec<String>) {
+    let mut view = listing.clone();
+    let mut changed = Vec::new();
+    for (path, row) in view.iter_mut().filter(|(_, row)| !row.directory) {
+        let found = volume.lookup(&format!("/{path}")).unwrap();
+        let entry = found.entry().unwrap();
+        let valid = entry.stream().valid_data_length();
+        if valid == entry.stream().data_length() {
+            continue;
+        }
+        let file = volume.open_file(entry).unwrap();
+        let mut bytes = vec![0; valid as usize];
+        assert_eq!(file.read_at(0, &mut bytes).unwrap(), bytes.len());
+        row.size = valid;
+        row.sha256 = Some(format!("{:x}", Sha256::digest(&bytes)));
+        changed.push(path.clone());
+    }
+    (view, changed)
+}
+
+/// What the kernel cannot show, so the matrix does not claim it.
+const NOT_SHOWN: &str = "the kernel shows no volume label, Hidden, System or Archive bit, \
+                         and no ReadOnly bit on a directory; exfatprogs checks the label (#185)";
+
+/// #186, this crate to the kernel: after each kind of write by this crate
+/// (`tests/write_support/kinds.rs`) the unmounted checkpoint must pass
+/// `fsck.exfat -n`, and the kernel's read-only walk must agree with the
+/// strict reader on the whole tree, every byte and every time it shows.
+#[test]
+fn the_kernel_reads_every_kind_of_write_by_this_crate() {
+    for (sector, cluster) in allocation_support::GEOMETRIES {
+        let image = guest_support::write_image::WriteImage::new("kernel", sector, cluster);
+        let mut done = Vec::new();
+        let mut ours = Vec::new();
+        kinds::run(&image.path, |_, kind| {
+            let checkpoint = image.checkpoint_path(kind);
+            kinds::save_checkpoint(&image.path, &checkpoint);
+            let volume = open_path(&checkpoint, 0).unwrap();
+            let listing = strict_listing(&volume);
+            let birth = birth_times(&volume, &listing);
+            let (view, prefixed) = valid_prefix_view(&volume, &listing);
+            ours.push((view, birth, prefixed));
+            done.push(kind.to_owned());
+        });
+        let kinds: Vec<&str> = done.iter().map(String::as_str).collect();
+        image.fsck_checkpoints("kernel", &kinds);
+        let paths: Vec<std::path::PathBuf> = kinds
+            .iter()
+            .map(|kind| image.checkpoint_path(kind))
+            .collect();
+        let paths: Vec<&std::path::Path> = paths.iter().map(|path| path.as_path()).collect();
+        let walks = walk_support::kernel_walks(&format!("s{sector}/c{cluster}"), &paths);
+        let mut prefix_views = std::collections::BTreeSet::new();
+        for ((kind, (view, birth, prefixed)), (walked, walked_birth)) in
+            kinds.iter().zip(&ours).zip(&walks)
+        {
+            let source = format!("this crate's {kind} s{sector}/c{cluster}");
+            assert_same(
+                &source,
+                "the strict reader's valid-prefix view",
+                view,
+                "the kernel",
+                walked,
+                true,
+            );
+            assert_eq!(birth, walked_birth, "{source}: created times");
+            prefix_views.extend(prefixed.iter().cloned());
+        }
+        assert!(
+            !prefix_views.is_empty(),
+            "truncate growth must leave a ValidDataLength below DataLength to exercise #207"
+        );
+        println!(
+            "[kernel vm] this crate -> kernel s{sector}/c{cluster}: tree, bytes and times agree after {}; \
+             the kernel shows only ValidDataLength of {} (#207); {NOT_SHOWN}",
+            kinds.join(" "),
+            prefix_views.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
+}
+
+/// #186, the kernel to this crate: the kernel makes each kind on a
+/// read-write mount (`tests/write_support/kernel_kinds.rs`); after each one
+/// the strict reader must see the kernel's whole listing and every created
+/// time, the kernel's sentinel unchanged, and what the kind was meant to do.
+#[test]
+fn the_strict_reader_sees_every_kind_of_write_by_the_kernel() {
+    for (sector, cluster) in allocation_support::GEOMETRIES {
+        let image = guest_support::write_image::WriteImage::new("kernel", sector, cluster);
+        let seed = strict_listing(&open_path(&image.path, 0).unwrap());
+        let mut notes = Vec::new();
+        for checkpoint in kernel_kinds::kernel_writes(&image, sector, cluster) {
+            let kind = checkpoint.kind;
+            let source = format!("the kernel's {kind} s{sector}/c{cluster}");
+            let volume = open_path(&checkpoint.image, 0)
+                .unwrap_or_else(|error| panic!("{source}: the strict reader refuses it: {error}"));
+            let listing = strict_listing(&volume);
+            assert_same(
+                &source,
+                "the kernel",
+                &checkpoint.listing,
+                "the strict reader",
+                &listing,
+                true,
+            );
+            assert_eq!(
+                birth_times(&volume, &listing),
+                checkpoint.birth,
+                "{source}: created times"
+            );
+            for (path, row) in &seed {
+                assert_eq!(
+                    listing.get(path),
+                    Some(row),
+                    "{source}: the sentinel {path} changed"
+                );
+            }
+            notes.extend(kernel_kinds::expect(kind, &volume, u64::from(cluster)));
+        }
+        let made: Vec<String> = kernel_kinds::KERNEL_KINDS
+            .iter()
+            .map(|(kind, maker)| format!("{kind} ({maker})"))
+            .collect();
+        println!(
+            "[kernel vm] kernel -> this crate s{sector}/c{cluster}: the strict reader agrees after {}; {}; allocation without an entry has no kernel interface",
+            made.join(" "),
+            notes.join("; ")
+        );
     }
 }
 
