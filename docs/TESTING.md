@@ -3,7 +3,7 @@
 `chore build`, `chore fmt`, `chore lint`, `chore test` and `chore package` are
 the local and CI gates. Rust 1.95.0 is pinned. The shared lint scripts need
 Python 3 with PyYAML 6.0.3 and ripgrep. CI installs those prerequisites explicitly.
-The dependency policy is deny.toml. rust-fs-core 0.4.3 supplies the optional CLI
+The dependency policy is deny.toml. rust-fs-core 0.4.5 supplies the optional CLI
 plumbing; all dependencies must remain permissively licensed. Unicode
 normalization and JSON parsing are test-only dependencies for platform names and
 structured CLI output. A C compiler is required by the unit header check and
