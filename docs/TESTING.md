@@ -12,6 +12,12 @@ the oracle's static-library link test.
 Each test tier uses rust-fs-core's tier.sh, refuses skipped and ignored tests,
 and checks a minimum executed count. Logs stay in tmp/logs/.
 
+Sleuth Kit is an additional black-box probe, not a required tier. The pinned
+Debian 12 arm64 `fsstat` 4.11.1 exceeds a 15-second deadline on fresh controls
+with an empty volume label; giving the control a nonempty label produces a
+complete report. See [the bounded reproduction and retained output](sleuthkit-fsstat.md)
+before interpreting a timeout as filesystem evidence.
+
 ## CI
 
 Every job in `.github/workflows/ci.yml` runs chore tasks, so a green local task is

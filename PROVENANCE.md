@@ -1,5 +1,23 @@
 # Provenance
 
+## Sleuth Kit control reports
+
+For #201, on 2026-11-13, Sleuth Kit was used only as a black-box CLI in the
+fs-linux-test-harness Debian 12 arm64 guest. The installed package's copyright
+metadata was inspected first: it lists CPL/IPL and other licenses, not a
+permissive-only implementation. No implementation source was read, copied,
+vendored or linked, and no dependency was added. All images were newly created
+on the guest's own disk and removed after the probes.
+
+The Debian `sleuthkit` and `libtsk19` packages were pinned to
+`4.11.1+dfsg-1+b1`. On the same exfatprogs-created 64 MiB single-FAT image,
+an empty label reproducibly exceeded a 15-second `fsstat` deadline; setting a
+nonempty label completed the report, clearing it restored the timeout, and
+restoring it completed again. This is a black-box input limitation, not an
+internal-cause diagnosis or a two-FAT verdict. The exact binary hashes,
+commands, statuses and complete successful reports are retained with the
+[validation note](docs/sleuthkit-fsstat.md).
+
 ## Complete allocation audits
 
 For #38, the check-only audit streams the active FAT and directories and tracks
