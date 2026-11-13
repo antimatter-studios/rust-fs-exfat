@@ -8,6 +8,19 @@ def refuse(reason):
     raise ValueError(reason)
 
 
+def check_rust(source):
+    # These sources create private images, derive nodes from each live receipt,
+    # detach ordinarily within a deadline, and retain attached images on failure.
+    # Pin both sides of that ownership boundary: changes require a safety review,
+    # including changes in the fixture producer and its failure cleanup.
+    reviewed = {
+        "625382738f2ad9233b6245414d43cd1d1cb8891d76b0648345a3123d422dc1aa",  # tests/oracle/scale.rs
+        "a80532b0620d3661839bc50e5b26b0bfd439fd63141155d0d6abdb5f081b6207",  # tests/scale_support/mod.rs
+    }
+    if hashlib.sha256(source.encode()).hexdigest() not in reviewed:
+        refuse("the reviewed Rust private-image, attachment-receipt and ordinary-detach lifecycle must remain intact")
+
+
 def check(source):
     if re.search(r"(?<![\w])(?:sync|purge|pkill|eval|exec|alias)(?![\w])|`|os\.(?:system|popen)|subprocess", source):
         refuse("global flushes, process killing and indirect command execution are forbidden")
@@ -15,7 +28,7 @@ def check(source):
         return
     for name, expected in [
         ("cleanup", "4c913177349d7314b04d353248a2a4ab3f0487785b89fb811ebd42df628ada41"),
-        ("detach_receipt", "fd52066154e1776215a6edd9a2735a7064abdd02dc71df7615467cc9a7258e54"),
+        ("detach_receipt", "e0a5e36eadea3d120108bc14e980e49326968c21f69387e2430b3c445bc71383"),
         ("accept_receipt", "4f2972917a8a64e8b892dc73e7a44f550d307d02186edb31fba25c3e5f6757fe"),
     ]:
         blocks = list(re.finditer(r"(?ms)^" + name + r"\(\) \{\n.*?^\}\n", source))
@@ -49,7 +62,7 @@ def check(source):
     written_binding = 'image="$directory/written-$sector.dmg"'
     written_producer = 'EXFAT_ORACLE_DIR="$directory" EXFAT_ORACLE_SECTOR="$sector" cargo test --locked --features cli,test-support --test macos_write -- --nocapture'
     written_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/written-mount-$sector" -plist "$image" > "$directory/attach.plist"'
-    tools = 'for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil; do'
+    tools = 'for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil /usr/sbin/lsof; do'
     query = '/usr/sbin/diskutil info -plist "$device" > "$directory/info-$sector.plist"'
     notices = 'export com_apple_hdiutil_nodeprecatedwarning=1'
     create = '/usr/bin/hdiutil create -size 64m -layout NONE "$image"'
@@ -198,7 +211,11 @@ try:
     target = Path(sys.argv[1])
     if target.is_symlink() or not target.is_file():
         refuse("a regular source file is required")
-    check(target.read_text(encoding="utf-8"))
+    source = target.read_text(encoding="utf-8")
+    if target.suffix == '.rs':
+        check_rust(source)
+    else:
+        check(source)
 except (OSError, UnicodeError, ValueError, IndexError) as error:
     print(f"image-safety: {error}", file=sys.stderr)
     sys.exit(1)
