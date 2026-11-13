@@ -81,9 +81,11 @@ name: ci
 # to that.
 #
 # THE LAYOUT. Each job checks this repository out into rust-fs-exfat/ and
-# rust-fs-core into rust-fs-core/ beside it, at the version Cargo.toml pins,
+# rust-fs-core into rust-fs-core/ beside it, at chores.yml's FS_CORE_REF,
 # because chores.yml runs rust-fs-core's scripts in place from
-# ../rust-fs-core. `chore siblings` (#120) replaces that second checkout.
+# ../rust-fs-core. That tooling ref is v0.4.5, the first release whose
+# agents-core-check.sh expects agent-core v10; the crate dependency in
+# Cargo.toml is pinned separately. `chore siblings` (#120) replaces that second checkout.
 # Every `run:` runs in rust-fs-exfat/ (`defaults` below).
 
 on:
@@ -138,7 +140,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Plan the profile
@@ -198,7 +200,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -316,7 +318,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -369,7 +371,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -500,7 +502,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -567,7 +569,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -623,7 +625,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -672,7 +674,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -741,7 +743,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -787,7 +789,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -851,7 +853,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
