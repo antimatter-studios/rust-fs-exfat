@@ -9,7 +9,7 @@
 //!
 //! `kernel_walk` (tests/walk_support) takes any image under the repository, so the write
 //! direction uses it as it stands: #129 checks allocation/free and volume
-//! state here; file-data writes and crash recovery remain #130 and #133.
+//! state; #130 checks creation and file-data writes. Crash recovery remains #133.
 //!
 //! The kernel driver is GPL: it runs in the guest as an oracle, never read.
 
@@ -20,6 +20,8 @@ mod fixture_support;
 mod guest_support;
 #[path = "walk_support/mod.rs"]
 mod walk_support;
+#[path = "write_support/created.rs"]
+mod write_support;
 
 use fixture_support::{
     assert_same, differences, fixture, images, kernel_listing, manifest, salvage, strict_listing,
@@ -55,6 +57,44 @@ fn the_kernel_mounts_and_preserves_the_tree_after_allocation_and_free() {
             &strict_listing(&volume),
             true,
         );
+    }
+}
+
+#[test]
+fn the_kernel_reads_files_and_directories_created_by_this_crate() {
+    for (sector, cluster) in allocation_support::GEOMETRIES {
+        let image = guest_support::write_image::WriteImage::new("kernel", sector, cluster);
+        write_support::files_and_directories(&image.path);
+        image.fsck("kernel");
+        let source = format!("crate-created s{sector}/c{cluster}");
+        let volume = open_path(&image.path, 0).unwrap();
+        let expected = strict_listing(&volume);
+        let observed = kernel_walk(&image.path);
+        assert_same(
+            &source,
+            "the writer's strict reader",
+            &expected,
+            "the kernel",
+            &observed,
+            true,
+        );
+        let expected_birth_times = expected
+            .keys()
+            .map(|path| {
+                let found = volume.lookup(&format!("/{path}")).unwrap();
+                let created = found.entry().unwrap().timestamps().created;
+                (path.clone(), fixture_support::milliseconds(&created))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let birth_times = walk_support::kernel_birth_times(&image.path);
+        assert_eq!(birth_times.len(), expected_birth_times.len(), "{source}");
+        for (path, expected) in expected_birth_times {
+            assert_eq!(
+                birth_times.get(&path),
+                Some(&expected),
+                "{source}: {path}: the kernel's creation time must include hundredths and UTC offsets"
+            );
+        }
     }
 }
 

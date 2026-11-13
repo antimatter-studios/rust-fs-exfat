@@ -59,6 +59,30 @@ pub fn kernel_walk(image: &Path) -> Listing {
     listing
 }
 
+pub fn kernel_birth_times(image: &Path) -> BTreeMap<String, i64> {
+    let script = format!(
+        "{stage}mkdir \"$scratch/mnt\"\n\
+         trap 'umount \"$scratch/mnt\" 2>/dev/null || true; rm -rf \"$scratch\"' EXIT\n\
+         modprobe exfat\n\
+         mount -t exfat -o loop,ro,fmask=0,dmask=0,iocharset=utf8 \"$image\" \"$scratch/mnt\"\n\
+         python3 {tool} \"$scratch/mnt\" > \"$scratch/birth-times.json\"\n\
+         umount \"$scratch/mnt\"\n\
+         cat \"$scratch/birth-times.json\"\n",
+        stage = stage_image(image),
+        tool = quote(&guest_path(
+            &repo().join("tests/write_support/birth-times.py")
+        )),
+    );
+    let name = image.file_name().unwrap().to_string_lossy();
+    let out = guest(
+        "kernel",
+        &format!("mount -o loop,ro and stat birth times of {name}"),
+        &script,
+    )
+    .success("the kernel's birth times");
+    serde_json::from_str(&out.stdout).expect("the kernel's birth times as JSON")
+}
+
 /// relan/exfat's reading of a volume: its FUSE driver's listing, and the
 /// read-only attribute its `exfatattrib` reports for up to
 /// [`ATTRIBUTE_SAMPLE`] entries (the FUSE driver's modes do not carry it).
