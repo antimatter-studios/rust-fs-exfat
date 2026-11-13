@@ -104,6 +104,30 @@ macOS driver shows attributes in st_flags, and that its formatter writes an
 empty label as a Volume Label entry with no characters, were observed by
 black-box use of the host's own tools on images made for the purpose.
 
+## Bidirectional relan write validation
+
+For #187, the pinned relan/exfat binaries run only as black-box tools through
+`tests/guest_support` in the harness guest. No relan implementation source is
+read, linked or copied. Fresh single-FAT volumes at 512- and 4096-byte sectors
+are formatted and seeded by the existing guest producer. The #179 tree producer
+supplies this crate's create/write cases; further writer operations produce
+detached truncate/remove and rename/time/attribute/label checkpoints.
+
+The reverse producer uses ordinary filesystem calls on relan's FUSE mount and
+its attribute/label CLI tools. Its separate in-memory model predicts every
+path, complete file length and SHA-256, supported flags and modification/access
+times after each phase. Both independent checkers accept each detached phase.
+All writer paths have attribute evidence; the fixture tier's historical sample
+limit is not applied to them. The pinned FUSE interface drops fractional utime
+requests and returns no birth time; those exact capability limits are asserted,
+without claiming an independent creation-time or UTC-offset setter oracle.
+
+The additional kernel observation is #207: Linux 6.1 exposes only the
+ValidDataLength prefix after truncate growth, while relan and this crate return
+the full DataLength with zeros in the extension. A test pins both exact
+size/hash views on fresh images at both geometries. This records a black-box
+divergence, not a writer compatibility change. TexFAT remains unverified here.
+
 ## Cross-linked clusters
 
 For #89, the salvage `cross_links` extension is new code written from
