@@ -61,6 +61,11 @@ variants = {
     'foreign-written-image': source.replace('image="$directory/written-$sector.dmg"', 'image="$foreign"'),
     'writable-written-image': source.replace('-readonly -nobrowse -mountpoint "$directory/written-mount-$sector"', '-nobrowse -mountpoint "$directory/written-mount-$sector"'),
     'written-mount-elsewhere': source.replace('-readonly -nobrowse -mountpoint "$directory/mount-$sector"', '-readonly -nobrowse -mountpoint "$directory/written-mount-$sector"', 1),
+    'unchecked-checkpoint-kind': source.replace("        case \"$kind\" in ''|*[!a-z-]*) exit 1 ;; esac\n", ''),
+    'foreign-checkpoint': source.replace('image="$directory/checkpoint-$sector-$kind.dmg"', 'image="$foreign"'),
+    'unvalidated-checkpoint': source.replace('        [ -f "$image" ] && [ ! -L "$image" ]\n        /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount', '        /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount'),
+    'writable-checkpoint': source.replace('[ ! -L "$image" ]\n        /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist', '[ ! -L "$image" ]\n        /usr/bin/hdiutil attach -blocksize "$sector" -nomount -nobrowse -plist'),
+    'checkpoint-check-elsewhere': source.replace('    /sbin/fsck_exfat -n "$device"\n', '    if /sbin/fsck_exfat -n "$device" > "$directory/checkpoint-$sector-$kind.txt" 2>&1; then\n', 1),
     'notice-rider': source.replace('export com_apple_hdiutil_nodeprecatedwarning=1', 'export com_apple_hdiutil_nodeprecatedwarning=1; /usr/bin/hdiutil eject "$image"'),
 }
 for name, contents in variants.items():
@@ -77,6 +82,12 @@ done
 for source_file in "$directory/missing-written-producer.bad" "$directory/foreign-written-image.bad" "$directory/writable-written-image.bad" "$directory/written-mount-elsewhere.bad"; do
     if bash scripts/check-image-safety.sh "$source_file" > "$directory/rejected.log" 2>&1; then
         echo "image-safety: unsafe written-image mutation was incorrectly accepted: $source_file" >&2
+        exit 1
+    fi
+done
+for source_file in "$directory/unchecked-checkpoint-kind.bad" "$directory/foreign-checkpoint.bad" "$directory/unvalidated-checkpoint.bad" "$directory/writable-checkpoint.bad" "$directory/checkpoint-check-elsewhere.bad"; do
+    if bash scripts/check-image-safety.sh "$source_file" > "$directory/rejected.log" 2>&1; then
+        echo "image-safety: unsafe write-checkpoint mutation was incorrectly accepted: $source_file" >&2
         exit 1
     fi
 done

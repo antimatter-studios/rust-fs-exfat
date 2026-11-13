@@ -334,5 +334,27 @@ with open(sys.argv[2], 'w') as output:
 PY
     detach_receipt
     diff -u "$directory/written-expected-$sector.txt" "$directory/written-listing-$sector.txt"
+    # One clean checkpoint per kind of write (#185): the producer above saved
+    # a fresh copy of the populated volume after each kind, unmounted and
+    # named for it, and listed the kinds in order. Each must pass the macOS
+    # checker on its own; a refused one is retained, named for its operation.
+    refused=0
+    while read -r kind <&3; do
+        case "$kind" in ''|*[!a-z-]*) exit 1 ;; esac
+        image="$directory/checkpoint-$sector-$kind.dmg"
+        [ -f "$image" ] && [ ! -L "$image" ]
+        /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"
+        accept_receipt
+        if /sbin/fsck_exfat -n "$device" > "$directory/checkpoint-$sector-$kind.txt" 2>&1; then
+            echo "oracle: the checkpoint after $kind at $sector-byte sectors is clean"
+        else
+            cat "$directory/checkpoint-$sector-$kind.txt"
+            echo "oracle: the macOS checker refuses the checkpoint after $kind; retained $directory/checkpoint-$sector-$kind.dmg" >&2
+            refused=1
+        fi
+        detach_receipt
+    done 3< "$directory/checkpoints-$sector.txt"
+    [ "$refused" -eq 0 ]
+    [ "$(wc -l < "$directory/checkpoints-$sector.txt")" -eq 15 ]
 done
 bash scripts/test-capi.sh "$directory/reference-512.dmg" "$directory/reference-4096.dmg"

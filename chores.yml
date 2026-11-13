@@ -279,13 +279,20 @@ tasks:
     # 43105817721 vs 69 / 4,553 warm) adds 83 lines / 2,721 bytes:
     # 190 / 10,664 cold. 198 / 11,000 leaves eight lines and 336 bytes.
     # The formatter's own successful report adds 15 lines / 1,475 bytes.
-    # FLOOR: all six tests, including #129's allocation/free cycle, #130's
-    # writer tree and producer check, and #139's ten formatted volumes.
+    # #185's write-kind checkpoints add one test: 10 lines / 1,135 bytes
+    # (its result line, its stdout block of four guest calls and its summary
+    # entry), measured on 2026-11-14 at 149 lines / 9,566 bytes for all seven
+    # tests, macOS host and HVF guest, release build with 39 Compiling lines.
+    # 200 / 11,799 cold; 208 / 12,150 keeps the eight lines and about 350
+    # bytes of headroom.
+    # FLOOR: all seven tests, including #129's allocation/free cycle, #130's
+    # writer tree and producer check, #139's ten formatted volumes and #185's
+    # checkpoint after every kind of write.
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 198 11000 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 6
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 208 12150 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 7
   test:kernel:
     desc: 'THE KERNEL is the judge: every fixture loop-mounted read-only and walked in the guest, against the strict reader and salvage'
     # tests/kernel.rs: one `[kernel vm]` guest call per image mounts it with
@@ -337,8 +344,12 @@ tasks:
     # image-safety verdicts, 3 detach regressions and 1 retained-evidence
     # notice. The other 3 are Compiling lines that depend on the cache.
     # 320 lines covers that run; 16,000 bytes is unchanged.
+    # #185's write-kind checkpoints measured 379 lines / 16,734 bytes on the
+    # same Mac on 2026-11-14 (52 tests, 2 Compiling lines): 30 checkpoint
+    # verdicts, their 30 detach notices and 2 test lines add 62 lines /
+    # 2,611 bytes. 385 lines and 18,700 bytes keep the earlier headroom.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 320 16000 -- bash scripts/test-oracle.sh'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 385 18700 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle-macos 25
   test:vm:
     desc: 'Every Linux tier, compiled and run INSIDE the harness VM: how a Mac runs the Linux suite'

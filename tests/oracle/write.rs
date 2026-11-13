@@ -108,6 +108,28 @@ fn bitmap(image: &Path) -> (Vec<bool>, u32) {
     (bits, count)
 }
 
+#[path = "../write_support/kinds.rs"]
+mod kinds;
+
+/// #185: one clean, unmounted checkpoint after each kind of write, on a
+/// fresh copy of the volume macOS formatted and populated. Each checkpoint
+/// is saved named for its kind, and `scripts/test-oracle.sh` gives every one
+/// listed in `checkpoints-<sector>.txt` to `fsck_exfat -n` on its own.
+#[test]
+fn every_kind_of_write_leaves_a_clean_checkpoint() {
+    let (directory, sector) = paths();
+    let image = directory.join(format!("kinds-{sector}.dmg"));
+    std::fs::copy(directory.join(format!("populated-{sector}.dmg")), &image).unwrap();
+    let mut listed = String::new();
+    kinds::run(&image, |_, kind| {
+        let checkpoint = directory.join(format!("checkpoint-{sector}-{kind}.dmg"));
+        kinds::save_checkpoint(&image, &checkpoint);
+        listed.push_str(kind);
+        listed.push('\n');
+    });
+    std::fs::write(directory.join(format!("checkpoints-{sector}.txt")), listed).unwrap();
+}
+
 /// One test, because every step changes the same image in turn.
 #[test]
 fn the_writer_changes_a_volume_macos_populated() {

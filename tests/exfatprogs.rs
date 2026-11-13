@@ -18,6 +18,8 @@ mod allocation_support;
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "write_support/kinds.rs"]
+mod kinds;
 #[path = "oracle/linux_mkfs.rs"]
 mod linux_mkfs;
 #[path = "write_support/created.rs"]
@@ -43,6 +45,24 @@ fn fsck_exfat_accepts_files_and_directories_created_by_this_crate() {
         let image = guest_support::write_image::WriteImage::new("oracle", sector, cluster);
         write_support::files_and_directories(&image.path);
         image.fsck("oracle");
+    }
+}
+
+/// #185: one clean, unmounted checkpoint after each kind of write, on a
+/// fresh guest-formatted image at each sector size. A refused checkpoint is
+/// kept beside the image, named for the operation that produced it.
+#[test]
+fn fsck_exfat_accepts_a_clean_checkpoint_after_every_kind_of_write() {
+    for (sector, cluster) in allocation_support::GEOMETRIES {
+        let image = guest_support::write_image::WriteImage::new("oracle", sector, cluster);
+        let mut done = Vec::new();
+        kinds::run(&image.path, |_, kind| {
+            kinds::save_checkpoint(&image.path, &image.checkpoint_path(kind));
+            done.push(kind.to_owned());
+        });
+        let done: Vec<&str> = done.iter().map(String::as_str).collect();
+        assert_eq!(done.len(), kinds::KINDS.len());
+        image.fsck_checkpoints("oracle", &done);
     }
 }
 
