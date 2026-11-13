@@ -329,7 +329,7 @@ tasks:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 186 14150 -- scripts/test.sh --locked --release --features cli,test-support --test kernel -- --show-output'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 9
   test:third:
-    desc: 'CROSS-VALIDATION: relan/exfat, a third implementation built in the guest, reads every fixture as the kernel and this crate do'
+    desc: 'CROSS-VALIDATION: pinned guest-built relan/exfat checks fixtures and both write directions at both sector geometries'
     # tests/third.rs: relan/exfat's FUSE driver, exfatattrib and exfatfsck,
     # built by scripts/vm-setup.sh at the commit tests/walk_support pins.
     # Every undamaged fixture is read three ways, and a disagreement names the
@@ -338,15 +338,20 @@ tasks:
     # Its own tier, like rust-fs-ext4's test:lwext4: a different oracle with
     # a different failure mode, and its verdict is not exfatprogs'.
     #
-    # BUDGET: 95 lines / 7,084 bytes warm on a macOS host (#125). A cold
-    # build adds the 38 lines / 1,165 bytes measured on test:oracle, which
-    # builds the same dependencies: about 133 / 8,250. 175 / 10,700 is about
-    # 30% over that. FLOOR: all three tests.
+    # #187 adds complete writer trees in both directions at both sector
+    # geometries, with no attribute sampling, and the exact #207 kernel
+    # ValidDataLength-prefix divergence. Both checkers judge every phase.
+    # BUDGET: 2026-11-13 macOS/HVF, nine tests after an incremental build:
+    # 253 lines / 21,408 bytes. The historical cold-build addition of
+    # 38 / 1,165 gives 291 / 22,573; 320 / 27,000 leaves 29 lines and
+    # 4,427 bytes for cold-build and diagnostic variation. Rebased onto
+    # #188 (2026-11-14), a cold release build with 39 Compiling lines measured
+    # 289 / 22,370, inside the estimate. FLOOR: all nine.
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored third third 175 10700 -- scripts/test.sh --locked --release --features cli,test-support --test third -- --show-output'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored third 3
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored third third 320 27000 -- scripts/test.sh --locked --release --features cli,test-support --test third -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored third 9
   test:oracle-macos:
     desc: 'macOS newfs_exfat, fsck_exfat -n and the read-only macOS driver, on a Mac host'
     # The host oracle that was test:oracle before exfatprogs took the name
@@ -484,10 +489,13 @@ tasks:
     # verdict; 36 / 2,100 leaves room for one.
     # #170's shared-guest contract (79 bytes) measured 38 lines / 2,167
     # bytes on top of #202's detach gates; 40 / 2,300 leaves room for one.
+    # #187's relan metadata and write-model regression measured 40 lines /
+    # 2,287 bytes over fourteen files on top of #208 (2026-11-14, macOS);
+    # 42 / 2,420 leaves room for one more file.
     cmds:
       - |
         set -eu
-        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 40 2300 -- bash -c '
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 42 2420 -- bash -c '
           set -eu
           for t in tests/scripts/*.sh; do
             echo "== $t"
