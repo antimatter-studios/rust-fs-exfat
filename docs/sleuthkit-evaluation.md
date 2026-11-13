@@ -92,8 +92,6 @@ unexpected result. It leaves host images and JSON receipts in the printed
 ```sh
 mkdir -p tmp
 export CARGO_TARGET_DIR="$(mktemp -d "$PWD/tmp/target-sleuthkit.XXXXXX")"
-export FLTH_SHARED_ROOT=/Users/chris/projects
-export FLTH_SLOT_WAIT=900
 bash ../rust-fs-core/scripts/tier.sh sleuthkit-build sleuthkit-build 100 10000 -- chore build
 bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored \
   sleuthkit-verdict sleuthkit-verdict 200 6000 -- bash docs/sleuthkit-probe.sh
@@ -103,11 +101,10 @@ The complete successful negative diagnostic measured 185 lines / 4,540 bytes
 on November 13, 2026; the 200-line / 6,000-byte budget retains the matrix and
 every CLI report while leaving room for path and package-manager diagnostics.
 
-Set the shared root to the directory agreed by the harness's participating
-consumers, or omit it for a private guest. Never take over another consumer's
-private guest. The 900-second wait is the harness's own bounded slot queue.
-When finished, use the same shared-root setting with `chore vm:down`; the
-harness refuses to stop a shared guest another run is using.
+The probe is one session on the host's shared guest, and nothing has to be
+set for it. The guest stays up for the next run when the probe ends. When
+finished, `chore vm:down` stops it; the harness refuses to stop the guest
+while another run is using it.
 
 **A successful probe means the negative verdict was reproduced**, not that
 Sleuth Kit passed an interoperability gate. This deliberately opt-in diagnostic
