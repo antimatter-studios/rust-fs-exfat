@@ -1,0 +1,3 @@
+## Validation
+
+| Linux allocation and volume-state write oracle | Linux gates require clean exfatprogs checks after allocation/free cycles on newly guest-formatted images at 512 and 4096 bytes per sector, then an unchanged kernel-created tree on a read-only kernel mount; checks cover VolumeDirty, PercentInUse, boot checksum, unchanged Backup Boot region, NoFatChain growth, conversion to a FAT chain and back, fragmented allocation and a full heap; file-data writing, crash recovery and TexFAT are outside these gates | Unreleased (#129) | #129 | `tests/exfatprogs.rs`, `tests/kernel.rs`, `tests/allocation_support/mod.rs`, `tests/guest_support/write_image.rs` |

@@ -36,6 +36,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
+pub mod write_image;
+
 /// Linux's limit on one command-line argument on a kernel with 4 KiB pages.
 /// A guest script is one argument, so it must be shorter than this.
 const MAX_SCRIPT_BYTES: usize = 32 * 4096;

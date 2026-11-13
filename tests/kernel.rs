@@ -8,11 +8,12 @@
 //! one guest call per image, tagged `[kernel vm]`.
 //!
 //! `kernel_walk` (tests/walk_support) takes any image under the repository, so the write
-//! direction (#133: this crate writes, the kernel reads back) uses it as it
-//! stands.
+//! direction uses it as it stands: #129 checks allocation/free and volume
+//! state here; file-data writes and crash recovery remain #130 and #133.
 //!
 //! The kernel driver is GPL: it runs in the guest as an oracle, never read.
 
+mod allocation_support;
 #[path = "fixture_support/mod.rs"]
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
@@ -28,6 +29,34 @@ use fs_exfat::interface::open_path;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use walk_support::kernel_walk;
+
+#[test]
+fn the_kernel_mounts_and_preserves_the_tree_after_allocation_and_free() {
+    for (sector, cluster) in allocation_support::GEOMETRIES {
+        let image = guest_support::write_image::WriteImage::new("kernel", sector, cluster);
+        let before = kernel_walk(&image.path);
+        allocation_support::allocate_and_free(&image.path);
+        image.fsck("kernel");
+        let after = kernel_walk(&image.path);
+        assert_same(
+            "allocation/free",
+            "the kernel before",
+            &before,
+            "the kernel after unmount",
+            &after,
+            true,
+        );
+        let volume = open_path(&image.path, 0).unwrap();
+        assert_same(
+            "allocation/free",
+            "the kernel",
+            &after,
+            "the strict reader",
+            &strict_listing(&volume),
+            true,
+        );
+    }
+}
 
 fn undamaged() -> Vec<String> {
     images()

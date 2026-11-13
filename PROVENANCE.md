@@ -47,6 +47,12 @@ read-only mounted macOS driver. Observing that the macOS driver marks only the
 Main Boot Sector dirty was black-box use of the host's own driver on an image
 created for the purpose.
 
+The Linux allocation tests use exfatprogs and the kernel only as black-box
+tools in the harness guest. They format fresh images, seed a sentinel tree
+through the kernel, change only allocation and volume state through this
+crate, and require check-only fsck acceptance and an unchanged read-only
+kernel listing after unmount. They do not read any implementation source.
+
 ## Writing: files, directories and data
 
 For #130, the entry-set encoder, directory growth, name checks and the data

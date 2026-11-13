@@ -13,6 +13,7 @@
 //! exfatprogs is GPL: it runs in the guest as an oracle, never linked and
 //! never read (AGENTS.md).
 
+mod allocation_support;
 #[path = "fixture_support/mod.rs"]
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
@@ -22,6 +23,15 @@ use fixture_support::{fixture, images, kernel_listing, manifest};
 use fs_exfat::interface::open_path;
 use guest_support::{guest, stage_image};
 use std::collections::BTreeMap;
+
+#[test]
+fn fsck_exfat_accepts_the_writers_allocation_and_volume_state_changes() {
+    for (sector, cluster) in allocation_support::GEOMETRIES {
+        let image = guest_support::write_image::WriteImage::new("oracle", sector, cluster);
+        allocation_support::allocate_and_free(&image.path);
+        image.fsck("oracle");
+    }
+}
 
 /// One guest call per image: fsck.exfat -n's status and dump.exfat's output,
 /// with the separators the parser below reads.
