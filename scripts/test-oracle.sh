@@ -122,6 +122,36 @@ with open(sys.argv[1], 'r+b') as image:
         image.write(directory[index * cluster_size:(index + 1) * cluster_size])
 PY
 }
+# What the macOS driver lists of a written volume it mounted read-only, in the
+# format tests/oracle/listing.rs records this crate's view: the two are
+# compared with diff.
+driver_listing() {
+    /usr/bin/python3 - "$1" "$2" <<'PY'
+from pathlib import Path
+import hashlib, os, sys, unicodedata
+root = Path(sys.argv[1])
+if not os.statvfs(root).f_flag & os.ST_RDONLY:
+    raise SystemExit('oracle: written image must be mounted read-only')
+records = []
+for current, directories, files in os.walk(root):
+    for name in directories + files:
+        item = Path(current) / name
+        if item.is_symlink():
+            raise SystemExit('oracle: unexpected symlink on written image')
+        path = unicodedata.normalize('NFC', str(item.relative_to(root)))
+        metadata = item.stat()
+        # ReadOnly, Hidden and a clear Archive bit, as the driver shows them.
+        flags = f'{metadata.st_flags & (0x2 | 0x8000 | 0x10000):x}'
+        times = f'{metadata.st_mtime_ns // 1000000}\t{metadata.st_atime_ns // 1000000}\t{round(metadata.st_birthtime * 1000)}'
+        if item.is_dir():
+            records.append(f'd\t0\t-\t{flags}\t{times}\t{path}\n')
+        else:
+            digest = hashlib.sha256(item.read_bytes()).hexdigest()
+            records.append(f'f\t{metadata.st_size}\t{digest}\t{flags}\t{times}\t{path}\n')
+with open(sys.argv[2], 'w') as output:
+    output.writelines(sorted(records))
+PY
+}
 for sector in 512 4096; do
     image="$directory/reference-$sector.dmg"
     /usr/bin/hdiutil create -size 64m -layout NONE "$image"
@@ -307,31 +337,7 @@ for sector in 512 4096; do
     mkdir "$directory/written-mount-$sector"
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/written-mount-$sector" -plist "$image" > "$directory/attach.plist"
     accept_receipt
-    /usr/bin/python3 - "$directory/written-mount-$sector" "$directory/written-listing-$sector.txt" <<'PY'
-from pathlib import Path
-import hashlib, os, sys, unicodedata
-root = Path(sys.argv[1])
-if not os.statvfs(root).f_flag & os.ST_RDONLY:
-    raise SystemExit('oracle: written image must be mounted read-only')
-records = []
-for current, directories, files in os.walk(root):
-    for name in directories + files:
-        item = Path(current) / name
-        if item.is_symlink():
-            raise SystemExit('oracle: unexpected symlink on written image')
-        path = unicodedata.normalize('NFC', str(item.relative_to(root)))
-        metadata = item.stat()
-        # ReadOnly, Hidden and a clear Archive bit, as the driver shows them.
-        flags = f'{metadata.st_flags & (0x2 | 0x8000 | 0x10000):x}'
-        times = f'{metadata.st_mtime_ns // 1000000}\t{metadata.st_atime_ns // 1000000}\t{round(metadata.st_birthtime * 1000)}'
-        if item.is_dir():
-            records.append(f'd\t0\t-\t{flags}\t{times}\t{path}\n')
-        else:
-            digest = hashlib.sha256(item.read_bytes()).hexdigest()
-            records.append(f'f\t{metadata.st_size}\t{digest}\t{flags}\t{times}\t{path}\n')
-with open(sys.argv[2], 'w') as output:
-    output.writelines(sorted(records))
-PY
+    driver_listing "$directory/written-mount-$sector" "$directory/written-listing-$sector.txt"
     detach_receipt
     diff -u "$directory/written-expected-$sector.txt" "$directory/written-listing-$sector.txt"
     # One clean checkpoint per kind of write (#185): the producer above saved
@@ -357,4 +363,25 @@ PY
     [ "$refused" -eq 0 ]
     [ "$(wc -l < "$directory/checkpoints-$sector.txt")" -eq 15 ]
 done
+# The writer on a raw node with larger blocks than the volume's sectors
+# (#159): a copy of the populated 512-byte-sector volume, attached read-write
+# with 4096-byte blocks and not mounted. The writer changes it through the raw
+# node of that attach receipt, which refuses 512-byte transfers; then the
+# macOS checker and the read-only macOS driver must agree with this crate.
+image="$directory/raw-written-512.dmg"
+cp "$directory/populated-512.dmg" "$image"
+/usr/bin/hdiutil attach -blocksize 4096 -nomount -nobrowse -plist "$image" > "$directory/attach.plist"
+accept_receipt
+EXFAT_ORACLE_DEVICE="$device" EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_raw_write -- --nocapture
+detach_receipt
+/usr/bin/hdiutil attach -blocksize 512 -readonly -nomount -plist "$image" > "$directory/attach.plist"
+accept_receipt
+/sbin/fsck_exfat -n "$device"
+detach_receipt
+mkdir "$directory/raw-written-mount"
+/usr/bin/hdiutil attach -blocksize 512 -readonly -nobrowse -mountpoint "$directory/raw-written-mount" -plist "$image" > "$directory/attach.plist"
+accept_receipt
+driver_listing "$directory/raw-written-mount" "$directory/raw-written-listing.txt"
+detach_receipt
+diff -u "$directory/raw-written-expected.txt" "$directory/raw-written-listing.txt"
 bash scripts/test-capi.sh "$directory/reference-512.dmg" "$directory/reference-4096.dmg"
