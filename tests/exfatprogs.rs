@@ -18,6 +18,8 @@ mod allocation_support;
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "oracle/linux_mkfs.rs"]
+mod linux_mkfs;
 #[path = "write_support/created.rs"]
 mod write_support;
 
@@ -42,6 +44,11 @@ fn fsck_exfat_accepts_files_and_directories_created_by_this_crate() {
         write_support::files_and_directories(&image.path);
         image.fsck("oracle");
     }
+}
+
+#[test]
+fn fsck_exfat_accepts_formatted_volumes_at_both_sector_sizes_and_every_default_cluster_step() {
+    linux_mkfs::fsck_accepts_formatted_volumes();
 }
 
 /// One guest call per image: fsck.exfat -n's status and dump.exfat's output,
