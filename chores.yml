@@ -366,8 +366,15 @@ tasks:
     # same Mac on 2026-11-14 (52 tests, 2 Compiling lines): 30 checkpoint
     # verdicts, their 30 detach notices and 2 test lines add 62 lines /
     # 2,611 bytes. 385 lines and 18,700 bytes keep the earlier headroom.
+    # #159's raw-node write on larger blocks measured 397 lines / 17,290
+    # bytes on the same Mac on 2026-11-14 with a warm cache (53 tests, no
+    # Compiling lines): its cargo test, fsck_exfat -n and three detach
+    # notices print 21 lines / 747 bytes of that. A cold build printed 43
+    # Compiling lines more (440 / 19,012), which no cached run prints. 405 lines
+    # leaves room for two Compiling lines and the earlier six; 18,700 bytes
+    # still covers it.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 385 18700 -- bash scripts/test-oracle.sh'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 405 18700 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle-macos 25
   test:vm:
     desc: 'Every Linux tier, compiled and run INSIDE the harness VM: how a Mac runs the Linux suite'
