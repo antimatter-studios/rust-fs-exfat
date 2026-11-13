@@ -34,7 +34,7 @@ tier has run.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | 2026-11-11 renames, times, attributes and the label (#131) with #127's and #123's checks, local macOS: 524 lines, 31002 bytes, 377 tests, without the 60-second slow-test notices the scale audits may print, each about one line and 165 bytes | 527 lines, 31400 bytes, allowing both notices and timing digits | 150 |
+| unit | CI run 43356731975 at e26b767 (#171), 402 tests: macOS 562 lines, 33134 bytes including two scale-audit slow-test notices (112 and 116 bytes); Linux unit job 560 lines, 32903 bytes; #169 added one test line (55 bytes) | 564 lines, 33300 bytes, allowing two more lines and 166 bytes above macOS for timing digits and diagnostics | 150 |
 | images | CI run 43105817721, ubuntu, cold build: 95 lines, 3328 bytes; 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 98 lines, 3500 bytes | 7 |
 | oracle | CI run 43105817721, x86_64 guest, cold build: 152 lines, 7274 bytes; 2026-11-11 exfatprogs in the guest (#123), local macOS, cold build: 107 lines, 5718 bytes, 2 tests and one `[oracle vm]` line per fixture | 156 lines, 7500 bytes | 2 |
 | kernel | 2026-11-11 (#124), local macOS HVF guest, cold build: 104 lines, 5590 bytes, 3 tests | 135 lines, 7300 bytes | 3 |
