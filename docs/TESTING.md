@@ -32,6 +32,14 @@ on PATH and runs `chore test:cli` against them as installed; `scripts` runs
 their headers. A job's tier logs are uploaded as `tier-logs-<job>` once its first
 tier has run.
 
+The macOS job uses `tmp/target-worktree` as its Cargo target directory, so the
+unit tier also checks the longer executable paths used in local worktrees.
+For #182, on 2026-11-13, main `1a9477c` and stack `5952c46` each measured
+562 lines / 33,461 bytes with 19-character worktree-local target paths and
+all 402 tests passing. These paths add 325 bytes across 25 executable banners
+compared with `target`, exceeding the old 33,300-byte cap. The stack's existing
+measured 34,300-byte cap covers this case without another budget increase.
+
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
 | unit | c60274f (#173), 402 tests: 2026-11-13 local macOS 564 lines, 33931 bytes including four slow-test notices and absolute CARGO_TARGET_DIR paths; CI run 43391840746 Linux unit job 560 lines, 32902 bytes, macOS job 560 lines, 32903 bytes | 566 lines, 34300 bytes, allowing two more lines and 369 bytes above local macOS for timing and diagnostics | 150 |

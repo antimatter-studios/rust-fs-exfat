@@ -557,6 +557,8 @@ jobs:
     needs: fixtures
     runs-on: macos-26
     timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/rust-fs-exfat/tmp/target-worktree
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -579,9 +581,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            rust-fs-exfat/target
-          key: ${{ runner.os }}-oracle-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-oracle-cargo-
+            rust-fs-exfat/tmp/target-worktree
+          key: ${{ runner.os }}-oracle-worktree-cargo-${{ hashFiles('rust-fs-exfat/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-oracle-worktree-cargo-
       # Everything test:unit links, built first, so the tier's log holds the
       # tests and not a cold build's hundred `Compiling` lines, which its
       # measured budget does not allow for.
