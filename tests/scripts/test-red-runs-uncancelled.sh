@@ -1,19 +1,8 @@
 #!/usr/bin/env bash
-# A pull request's red run is never cancelled by the push that adds its fix.
-#
-# A pull request opens holding only its failing test, with a title that starts
-# "red:", and the CI run of that commit is the red evidence. The fix is pushed
-# to the same branch after the title loses "red:". ci.yml cancels a pull
-# request's run when a newer push arrives, so without an exception the fix push
-# would cancel the red run, often before it has failed, and the evidence would
-# be gone. This holds the exception: while the title starts "red:" the run gets
-# a concurrency group of its own commit and is never cancelled, and every other
-# pull request run still cancels the one it supersedes.
-#
-# Keyed by the commit, not only by the pull request: GitHub keeps one pending
-# run per group even with cancelling off, so a second push to a red: pull
-# request sharing the first one's group would replace a red run still waiting
-# for a runner.
+# Every required CI run retains its verdict, including a red-test run and
+# duplicate events for the same commit. GitHub keeps only one pending run per
+# concurrency group even with cancelling off, so each run and attempt needs its
+# own group. Ordinary runs must now remain independent too (#167).
 #
 # The concurrency expressions are evaluated here as GitHub evaluates them
 # (startsWith ignores case; && and || return an operand; null reads as '';
@@ -71,8 +60,9 @@ def render(template, ctx):
         return template
     return re.sub(r"\$\{\{(.*?)\}\}", lambda m: text(evaluate(m.group(1), ctx)), template)
 
-def run(event_name, title=None, head="a" * 40):
+def run(event_name, title=None, head="a" * 40, run_id=1, run_attempt=1):
     ctx = {"workflow": "CI", "event_name": event_name, "sha": head[::-1],
+           "run_id": run_id, "run_attempt": run_attempt,
            "ref": "refs/heads/main", "ref_name": "main", "head_ref": "", "event": {}}
     if title is not None:
         ctx.update(ref="refs/pull/7/merge", ref_name="7/merge", head_ref="fix/run-end-bound")
@@ -80,23 +70,30 @@ def run(event_name, title=None, head="a" * 40):
     return render(conc["group"], ctx), render(conc["cancel-in-progress"], ctx) == "true"
 
 red_group, red_cancels = run("pull_request", "red: the run-end bound is checked")
-red_again, _ = run("pull_request", "red: the run-end bound is checked", head="b" * 40)
-fix_group, fix_cancels = run("pull_request", "the run-end bound is checked", head="c" * 40)
-fix_again, _ = run("pull_request", "the run-end bound is checked", head="d" * 40)
+red_again, _ = run("pull_request", "red: the run-end bound is checked", head="b" * 40, run_id=2)
+fix_group, fix_cancels = run("pull_request", "the run-end bound is checked", head="c" * 40, run_id=3)
+fix_again, _ = run("pull_request", "the run-end bound is checked", head="d" * 40, run_id=4)
 problems = []
 if red_cancels:
     problems.append("a red: pull request's run cancels the run before it")
 if red_group == red_again:
     problems.append("two pushes to a red: pull request share group %r, so the second replaces the red run while it waits" % red_group)
-if not fix_cancels or fix_group != fix_again:
-    problems.append("an ordinary pull request run no longer cancels the run it supersedes")
+if fix_cancels or fix_group == fix_again:
+    problems.append("an ordinary pull request run can cancel or replace the run it supersedes")
 if red_group == fix_group:
     problems.append("the red run and the fix push share group %r, so the fix push cancels the red run" % fix_group)
-for event in ("push", "merge_group"):
+for event in ("push", "merge_group", "workflow_dispatch"):
     if run(event)[1]:
         problems.append("a %s run is cancelled by a newer one" % event)
+for event, title in (("pull_request", "red: evidence"), ("pull_request", "fix: evidence"),
+                     ("push", None), ("merge_group", None), ("workflow_dispatch", None)):
+    original, _ = run(event, title)
+    duplicate, _ = run(event, title, run_id=2)
+    retry, _ = run(event, title, run_attempt=2)
+    if len({original, duplicate, retry}) != 3:
+        problems.append("%s runs of the same commit or their attempts share a pending slot" % event)
 if problems:
     sys.exit("\n".join("FAIL  " + p for p in problems))
 PY
 
-echo "red runs: a red: pull request's run is never cancelled; other pull request runs still are"
+echo "red runs: every run and attempt retains its own verdict and pending slot"
