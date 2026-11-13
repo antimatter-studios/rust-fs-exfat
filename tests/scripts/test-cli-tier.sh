@@ -31,7 +31,7 @@ if [ -z "$jq_path" ]; then
 fi
 
 mkdir -p "$REPO/tmp"
-sandbox="$(mktemp -d "$REPO/tmp/cli-tier.XXXXXX")"
+sandbox="$(mktemp -d "$REPO/tmp/cli-tier.XXXXXX")" || exit 1
 trap 'rm -rf "$sandbox"' EXIT HUP INT TERM
 mkdir -p "$sandbox/jq" "$sandbox/bin" "$sandbox/tests"
 ln -s "$jq_path" "$sandbox/jq/jq"
