@@ -60,7 +60,7 @@ measured 34,300-byte cap covers this case without another budget increase.
 | unit | 2026-11-13 (#178), 3ed71ee: 406 passing tests, 567 lines / 33768 bytes with three slow-test notices; earlier c60274f (#173), 402 tests: local macOS 564 lines / 33931 bytes, CI Linux 560 / 32902 and macOS 560 / 32903 | 570 lines, 34300 bytes; three lines above the 406-test measurement for timing diagnostics, with the byte cap retained | 150 |
 | images | CI run 43105817721, ubuntu, cold build: 95 lines, 3328 bytes; 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 98 lines, 3500 bytes | 7 |
 | oracle | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 107 lines, 7943 bytes, 6 tests; the historical CI cold/warm difference adds 83 lines, 2721 bytes: 190 lines, 10664 bytes cold; the formatter alone adds 15 lines, 1475 bytes; 2026-11-14 (#185), the same host, release build with 39 Compiling lines: 149 lines, 9566 bytes, 7 tests; the write-kind checkpoints add 10 lines, 1135 bytes: 200 lines, 11799 bytes cold | 208 lines, 12150 bytes | 7 |
-| kernel | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 114 lines, 8718 bytes, 7 tests; the historical cold/warm difference adds 39 lines, 1232 bytes: 153 lines, 9950 bytes cold; the formatter alone adds 15 lines, 1639 bytes | 162 lines, 10300 bytes | 7 |
+| kernel | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 114 lines, 8718 bytes, 7 tests; the historical cold/warm difference adds 39 lines, 1232 bytes: 153 lines, 9950 bytes cold; the formatter alone adds 15 lines, 1639 bytes; 2026-11-14 (#186), the same host, release build with 1 Compiling line: 136 lines, 12319 bytes, 9 tests; the write matrix adds 24 lines, 3834 bytes: 177 lines, 13784 bytes cold | 186 lines, 14150 bytes | 9 |
 | third | 2026-11-11 relan/exfat (#125), local macOS HVF guest, warm: 95 lines, 7084 bytes, 3 tests; a cold build adds about 38 lines, 1165 bytes | 175 lines, 10700 bytes | 3 |
 | vm | 2026-11-11 the whole suite in the guest (#126), local macOS HVF guest, warm: 625 lines, 38742 bytes, 411 tests with the write layers; CI's fresh guest adds the toolchain install and a whole build, about 60 lines, 3.5 KB | 860 lines, 51000 bytes | 388 |
 | oracle-macos | 2026-11-13 detach safety gates (#202, #200), local macOS: 318 lines, 14123 bytes, 50 tests. The change adds 13 lines: 9 image-safety verdicts, 3 detach regressions and 1 retained-evidence notice. A further 3 Compiling lines depend on the cache. The same Mac measured 302 lines before the change, and CI on main measured 303 lines, 12925 bytes at most. 2026-11-14 (#185), the same Mac: 379 lines, 16734 bytes, 52 tests; 30 write-kind checkpoint verdicts, their 30 detach notices and 2 test lines add 62 lines, 2611 bytes | 385 lines, 18700 bytes, allowing formatter/checker diagnostics | 25 |
@@ -259,6 +259,28 @@ unmounted for `fsck_exfat -n`. A refused checkpoint fails the tier, which
 retains the checkpoint image named for its kind. These are checker verdicts
 on clean unmounts only: they establish nothing about crash recovery or
 TexFAT interoperability.
+
+For #186, `chore test:kernel` runs the same kinds as an explicit matrix in
+both directions at both geometries. This crate to the kernel: after each kind
+in `tests/write_support/kinds.rs`, the checkpoint must pass `fsck.exfat -n`,
+and the kernel's read-only walk of every checkpoint, in one guest call per
+geometry, must agree with the strict reader on the whole tree, every size,
+SHA-256, ReadOnly flag, modified, accessed and created time. The kernel to
+this crate: `tests/write_support/kernel_kinds.rs` makes the equivalent kinds
+on a read-write loop mount in the guest, with kernel-written sentinel content,
+and saves an unmounted checkpoint after each with the kernel's own listing and
+created times. The strict reader must agree with that listing, must find the
+original kernel-made sentinel unchanged, and must see what each kind was meant
+to leave. Three platform differences are scoped exactly and named in the
+evidence line. Linux 6.1 shows a file grown by `truncate` only up to its
+ValidDataLength (#207), so those files, and only those, are compared with
+that prefix view. rename(2) to a case-only variant of the same name leaves
+the name unchanged on Linux, which the test asserts. The kernel has no label
+or Hidden/System/Archive interface, and no ReadOnly bit on directories, so
+exfatprogs' `exfatlabel` sets and clears the label in the kernel direction.
+The label in the crate direction is left to the #185 checkers. Allocation
+without an entry has no kernel interface. No crash safety or TexFAT behaviour
+is inferred.
 
 Windows formatting is additional evidence only if the Windows harness can
 provide it.
