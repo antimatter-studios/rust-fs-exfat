@@ -91,9 +91,11 @@ fn listing<Device: fs_core::BlockRead>(volume: &Volume<Device>) -> String {
 }
 
 fn paths() -> (PathBuf, String) {
-    let directory =
-        PathBuf::from(std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle on macOS"));
-    let sector = std::env::var("EXFAT_ORACLE_SECTOR").expect("run chore test:oracle on macOS");
+    let directory = PathBuf::from(
+        std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
+    );
+    let sector =
+        std::env::var("EXFAT_ORACLE_SECTOR").expect("run chore test:oracle-macos on macOS");
     (directory, sector)
 }
 

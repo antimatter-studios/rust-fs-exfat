@@ -232,4 +232,43 @@ fn the_scans_recognise_the_shapes_they_refuse() {
     assert_eq!(harness_spawns(&harness).len(), 1);
     let skip = ["println!(\"", "SKIP", ": no VM\");"].concat();
     assert_eq!(announced_skips(&skip).len(), 1);
+    let task = ["chore test:", "oracle"].concat();
+    let wrong = format!(".expect(\"run {task} on macOS\")");
+    assert_eq!(foreign_oracle_tasks(&wrong).len(), 1);
+    let right = format!(".expect(\"run {task}-macos on macOS\")");
+    assert!(foreign_oracle_tasks(&right).is_empty());
+}
+
+/// Lines that send the reader of a macOS oracle test to a chore task other
+/// than `test:oracle-macos`. `test:oracle` is the exfatprogs tier in the
+/// harness guest (#123), so a macOS test naming it points at the wrong
+/// oracle.
+fn foreign_oracle_tasks(text: &str) -> Vec<String> {
+    let task = ["chore test:", "oracle"].concat();
+    text.lines()
+        .filter(|line| {
+            line.match_indices(&task)
+                .any(|(at, _)| !line[at + task.len()..].starts_with("-macos"))
+        })
+        .map(|line| line.trim().to_owned())
+        .collect()
+}
+
+#[test]
+fn the_macos_oracle_tests_name_their_own_task() {
+    let mut problems = Vec::new();
+    for (name, text) in test_sources() {
+        if !name.starts_with("oracle/") {
+            continue;
+        }
+        for found in foreign_oracle_tasks(&text) {
+            problems.push(format!("tests/{name}: {found}"));
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "a macOS oracle test names a task other than test:oracle-macos, which \
+         runs it (test:oracle is exfatprogs in the harness guest):\n  {}",
+        problems.join("\n  ")
+    );
 }

@@ -362,7 +362,7 @@ tasks:
         # shellcheck disable=SC2086  # the words are the point
         bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored test:vm vm 860 51000 -- \
           ../fs-linux-test-harness/scripts/vm.sh guest-test $guest_args
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored vm 337
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored vm 388
   test:
     desc: 'Everything, as CI runs it: natively on Linux; on a Mac, the Linux tiers in the VM and the macOS oracle here'
     # WE RUN THE LINUX TESTS ON LINUX. On a Linux host that is this host. On
