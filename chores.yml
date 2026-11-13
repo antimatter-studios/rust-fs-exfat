@@ -237,9 +237,16 @@ tasks:
     # #182 rechecked main 1a9477c and stack 5952c46: 562 / 33,461 with
     # 19-character worktree-local target paths, which add 325 bytes across
     # 25 executable banners. macOS CI now exercises that target-path length.
+    # #195's four writer fuzz cases bring 402 tests to 406 (#206): CI run
+    # 43414666807 measured Linux 564 / 33,057 and macOS 564 / 33,382,
+    # with no slow-test notices. Two macOS scale-audit notices (112 and 116
+    # bytes) and 40 bytes for timing digits make 566 / 33,650; local runs
+    # at 406 tests printed 567 and 568 lines (34,003 bytes) with a third
+    # notice and a doctest compile line. 570 / 34,300 leaves two lines
+    # above that and keeps the byte cap.
     # CI runs `chore build` first, so the log holds no cold build.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 566 34300 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 570 34300 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:images:
     desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'
