@@ -48,7 +48,7 @@ sha256_of() {
 }
 
 mkdir -p "$REPO/tmp"
-SANDBOX="$(mktemp -d "$REPO/tmp/cli-$NAME.XXXXXX")"
+SANDBOX="$(mktemp -d "$REPO/tmp/cli-$NAME.XXXXXX")" || exit 1
 trap 'rm -rf "$SANDBOX"' EXIT HUP INT TERM
 
 # sample_image: a newly made copy of the synthetic volume in the sandbox,
