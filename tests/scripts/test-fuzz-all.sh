@@ -13,8 +13,14 @@ sandbox="$(mktemp -d "${TMPDIR:-/tmp}/test-fuzz-all.XXXXXX")" || exit 1
 trap 'rm -r "$sandbox"' EXIT
 
 mkdir -p "$sandbox/tree/scripts" "$sandbox/bin" "$sandbox/tree/fuzz/corpus/one" "$sandbox/tree/fuzz/corpus/two"
+for target in write_allocations write_sequence write_failures; do
+    mkdir -p "$sandbox/tree/fuzz/corpus/$target"
+    printf '\n[[bin]]\nname = "%s"\n' "$target" >>"$sandbox/writer-bins"
+    printf 'seed' >"$sandbox/tree/fuzz/corpus/$target/seed"
+done
 cp "$here/scripts/fuzz-all.sh" "$sandbox/tree/scripts/"
 printf '[package]\nname = "stub"\n\n[[bin]]\nname = "one"\n\n[[bin]]\nname = "two"\n' >"$sandbox/tree/fuzz/Cargo.toml"
+cat "$sandbox/writer-bins" >>"$sandbox/tree/fuzz/Cargo.toml"
 printf 'seed' >"$sandbox/tree/fuzz/corpus/one/seed"
 printf 'seed' >"$sandbox/tree/fuzz/corpus/two/seed"
 
@@ -68,6 +74,12 @@ if grep -q -- '-max_total_time=5 ' "$sandbox/calls" && grep -q 'fuzz/corpus/one'
     ok 'the budget and the committed seeds reach the fuzzer'
 else
     fail "fuzzer arguments: $(cat "$sandbox/calls")"
+fi
+if [ "$(grep 'fuzz run write_' "$sandbox/calls" | grep -c -- '-max_len=292 ')" -eq 3 ] &&
+    ! grep 'fuzz run one ' "$sandbox/calls" | grep -q -- '-max_len='; then
+    ok 'writer targets are discovered and receive their bounded input length'
+else
+    fail "writer discovery or input limit: $(cat "$sandbox/calls")"
 fi
 
 run idle 5

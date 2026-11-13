@@ -147,6 +147,40 @@ const TARGETS: &[Target] = &[
         run: shared::plan,
         rounds: 400,
     },
+    Target {
+        name: "write_allocations",
+        decoders: &[],
+        verbs: &[".allocate", ".extend", ".shrink", ".free", ".clusters"],
+        run: shared::write_allocations,
+        rounds: 20,
+    },
+    Target {
+        name: "write_sequence",
+        decoders: &[],
+        verbs: &[
+            ".create",
+            ".mkdir",
+            ".pwrite",
+            ".write_file",
+            ".truncate",
+            ".unlink",
+            ".rmdir",
+            ".rename",
+            ".set_times",
+            ".set_attributes",
+            ".set_label",
+            ".unmount",
+        ],
+        run: shared::write_sequence,
+        rounds: 20,
+    },
+    Target {
+        name: "write_failures",
+        decoders: &[],
+        verbs: &["WriteVolume::mount_with_limits", ".flush"],
+        run: shared::write_failures,
+        rounds: 20,
+    },
 ];
 
 /// Fixed, so a failure reproduces from its message alone.
@@ -286,7 +320,63 @@ replays!(
     chain_islands,
     salvage,
     plan,
+    write_allocations,
+    write_sequence,
+    write_failures,
 );
+
+#[test]
+fn writer_seeds_reach_success_refusal_and_each_device_failure() {
+    let mut success = 0;
+    let mut refusal = 0;
+    for (_, seed) in seeds_of("write_sequence") {
+        let findings = shared::write_sequence_findings(&seed);
+        success |= findings.succeeded;
+        refusal |= findings.refused;
+        assert!(findings.clean, "{findings:?}");
+    }
+    assert_eq!(success, 0xfff);
+    assert_eq!(refusal & 0x7ff, 0x7ff);
+    for (_, seed) in seeds_of("write_allocations") {
+        let findings = shared::write_allocation_findings(&seed);
+        assert_eq!(findings.succeeded, 0xf, "{findings:?}");
+        assert_eq!(findings.refused, 3, "{findings:?}");
+        assert!(findings.clean);
+    }
+    let mut failures = 0;
+    let mut poisoned = false;
+    let mut recovered = false;
+    for (_, seed) in seeds_of("write_failures") {
+        let findings = shared::write_failure_findings(&seed);
+        assert!(findings.injected > 0, "{findings:?}");
+        assert_eq!(findings.mount_failed, seed[3] & 1 != 0, "{findings:?}");
+        poisoned |= findings.poisoned;
+        recovered |= findings.clean;
+        failures |= 1 << (seed[1] % 3 + 3 * (seed[3] & 1));
+    }
+    assert_eq!(failures, 0x3f);
+    assert!(poisoned && recovered);
+    for geometry in 0..4 {
+        for kind in 0..3 {
+            let findings = shared::write_failure_findings(&[geometry, kind, 15, 0]);
+            assert!(findings.clean && findings.injected == 0, "{findings:?}");
+        }
+    }
+    let mut bounded = vec![0];
+    for _ in 0..shared::WRITE_STEPS {
+        bounded.extend_from_slice(&[11, 0, 0, 0, 0, 0, 0, 0]);
+    }
+    let expected = shared::write_sequence_findings(&bounded);
+    assert_eq!(expected.succeeded, 1 << 11);
+    bounded.extend_from_slice(&[b':', 0, 0, 1, 0, 0, 0, 0]);
+    assert_eq!(shared::write_sequence_findings(&bounded), expected);
+    let mut bounded = vec![b'\n'; shared::WRITE_INPUT_BYTES];
+    bounded[0] = 0;
+    let expected = shared::write_sequence_findings(&bounded);
+    assert_eq!(expected.succeeded, 0);
+    bounded.extend_from_slice(&[b':', 0, 0, 1, 0, 0, 0, 0]);
+    assert_eq!(shared::write_sequence_findings(&bounded), expected);
+}
 
 #[test]
 fn the_image_target_starts_from_a_healthy_volume_with_every_kind_of_entry() {
