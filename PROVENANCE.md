@@ -29,6 +29,16 @@ implement TexFAT, so the tests build two-FAT images from those sections and
 check the results against a reader written in the test from the same sections,
 which shares no code with the crate's decoders.
 
+For #154, the oracle-suitability review on 2026-11-13 used Microsoft's public
+specification, relan/exfat's maintainer discussion (not its implementation),
+and FatFs R0.16's exFAT mount restriction. FatFs's published one-clause
+BSD-style license was checked before reading its source. No implementation
+was copied, linked or added as a dependency. A subsequent Sleuth Kit capability
+search unexpectedly returned copyleft source excerpts in search results and
+an upstream issue body; these were not used as implementation inputs, and no
+Sleuth Kit implementation files were opened. Sources, hashes and the remaining
+evidence gap are recorded in [the TexFAT validation review](docs/texfat-validation.md).
+
 ## Writing: write mount, volume state and allocation
 
 For #129, `fs_exfat::write` (the write mount, its sector cache, VolumeDirty

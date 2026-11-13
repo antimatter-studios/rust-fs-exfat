@@ -16,11 +16,10 @@ attached=0
 cleanup() {
     local result=$?
     if [ -n "$device" ]; then
-        if ! /usr/bin/hdiutil detach "$device"; then
+        if ! detach_receipt; then
             echo "oracle: detach failed; retained receipt and image in $directory" >&2
             return 1
         fi
-        attached=0
     fi
     if [ "$attached" -ne 0 ]; then
         echo "oracle: attach receipt could not be parsed; retained $directory/attach.plist" >&2
@@ -34,6 +33,22 @@ cleanup() {
     return "$result"
 }
 trap cleanup EXIT
+detach_receipt() {
+    local attempt=0
+    while [ "$attempt" -lt 5 ]; do
+        if /usr/bin/hdiutil detach "$device"; then
+            device=''
+            attached=0
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        if [ "$attempt" -lt 5 ]; then
+            sleep 1
+        fi
+    done
+    echo "oracle: detach retry exhausted; retained receipt and image in $directory" >&2
+    return 1
+}
 accept_receipt() {
     attached=1
     device="$(/usr/bin/python3 - "$directory/attach.plist" <<'PY'
@@ -108,9 +123,7 @@ for sector in 512 4096; do
     accept_receipt
     /sbin/newfs_exfat -R -S "$sector" -b 4096 -v M1ORACLE "$device" | tee "$directory/format-$sector.txt"
     /sbin/fsck_exfat -n "$device"
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
     /usr/bin/python3 - "$image" <<'PY'
 import struct, sys
 with open(sys.argv[1], 'r+b') as image:
@@ -156,9 +169,7 @@ with (root / 'fragmented.bin').open('ab') as output:
 (root / 'timestamp.bin').write_bytes(b'timestamp oracle\n')
 os.utime(root / 'timestamp.bin', ns=(1700000000120000000, 1700000001120000000))
 PY
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
     set_valid_tail 513
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"
     accept_receipt
@@ -173,9 +184,7 @@ if len(data) != 12288 or any(data[kept:]):
 with open(sys.argv[2], 'w') as output:
     output.write(f'{kept}\n')
 PY
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
     set_valid_tail 4096
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/mount-$sector" -plist "$image" > "$directory/attach.plist"
     accept_receipt
@@ -236,15 +245,11 @@ with open(sys.argv[2], 'w') as output:
             value = 'not-directory'
         output.write(query + '\t' + value + '\n')
 PY
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"
     accept_receipt
     EXFAT_ORACLE_DEVICE="$device" EXFAT_ORACLE_SECTOR="$sector" EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_device -- --nocapture
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
     cp "$image" "$directory/populated-$sector.dmg"
 done
 for sector in 512 4096; do
@@ -270,9 +275,7 @@ for item in root.iterdir():
 with open(sys.argv[2], 'w') as output:
     output.writelines(sorted(records))
 PY
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
 done
 EXFAT_ORACLE_DIR="$directory" cargo test --locked --features cli,test-support --test macos_boot --test macos_metadata --test macos_directory --test macos_file --test macos_path --test macos_interfaces --test macos_fuzz_seeds -- --nocapture
 for sector in 512 4096; do
@@ -281,9 +284,7 @@ for sector in 512 4096; do
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"
     accept_receipt
     /sbin/fsck_exfat -n "$device"
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
 done
 # The writer's volumes: each starts as a copy of a volume macOS formatted and
 # populated, is changed by fs_exfat::write, and must then pass the macOS checker
@@ -295,9 +296,7 @@ for sector in 512 4096; do
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"
     accept_receipt
     /sbin/fsck_exfat -n "$device" | tee "$directory/written-fsck-$sector.txt"
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
     grep -Fqx "** Volume name is $(cat "$directory/written-label-$sector.txt")." "$directory/written-fsck-$sector.txt"
     mkdir "$directory/written-mount-$sector"
     /usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/written-mount-$sector" -plist "$image" > "$directory/attach.plist"
@@ -327,9 +326,7 @@ for current, directories, files in os.walk(root):
 with open(sys.argv[2], 'w') as output:
     output.writelines(sorted(records))
 PY
-    /usr/bin/hdiutil detach "$device"
-    device=''
-    attached=0
+    detach_receipt
     diff -u "$directory/written-expected-$sector.txt" "$directory/written-listing-$sector.txt"
 done
 bash scripts/test-capi.sh "$directory/reference-512.dmg" "$directory/reference-4096.dmg"
