@@ -128,8 +128,8 @@ required = {
     "images": ["test:images"],
     "test-arm64": ["lint", "build", "test:unit", "test:images"],
     "oracle-macos": ["build", "test:unit", "test:images", "test:oracle-macos"],
-    "suite-in-vm": ["siblings", "test:vm", "vm:status"],
-    "test": ["siblings", "tools", "test:oracle", "test:kernel", "test:third", "vm:status"],
+    "suite-in-vm": ["siblings", "test:vm", "vm:down", "vm:status"],
+    "test": ["siblings", "tools", "test:oracle", "test:kernel", "test:third", "vm:down", "vm:status"],
     "package": ["test:package"],
     "semver": ["check:semver"],
     "msrv": ["check:msrv"],
@@ -137,7 +137,7 @@ required = {
     "cli": ["cli:install", "test:cli"],
     "provenance": ["check:provenance"],
     "scripts": ["test:scripts"],
-    "fixtures": ["siblings", "tools", "fixtures", "vm:status"],
+    "fixtures": ["siblings", "tools", "fixtures", "vm:down", "vm:status"],
 }
 for name, tasks in required.items():
     job = jobs.get(name)
