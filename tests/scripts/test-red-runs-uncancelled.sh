@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
-# Every required CI run retains its verdict, including a red-test run and
-# duplicate events for the same commit. GitHub keeps only one pending run per
-# concurrency group even with cancelling off, so each run and attempt needs its
-# own group. Ordinary runs must now remain independent too (#167).
+# The workflows that gate main cancel only what a newer run supersedes (#208):
 #
-# The concurrency expressions are evaluated here as GitHub evaluates them
-# (startsWith ignores case; && and || return an operand; null reads as '';
-# format fills {0}, {1} ...),
-# for each event the workflow runs on, so a reworded expression is judged by
-# what it does, not by how it reads.
+#   - an ordinary pull request's runs share one group per workflow and pull
+#     request number, and a newer head cancels the run before it;
+#   - a red: pull request's run is the failing test's evidence (AGENTS.md):
+#     a group naming its head commit, never cancelled, never shared with the
+#     fix push that follows it;
+#   - pushes to main, merge-queue runs and manual dispatches each keep their
+#     verdict: never cancelled, and a group per run and attempt, because
+#     GitHub keeps only one pending run per group even with cancelling off;
+#   - ci-ok runs after every failure and every cancellation, so a failed or
+#     cancelled job fails the required gate rather than skipping it; what it
+#     does in a superseded run is test-ci-cancellation.sh's.
+#
+# The expressions are evaluated here as GitHub evaluates them (startsWith
+# ignores case; && and || return an operand; null reads as ''; format fills
+# {0}, {1} ...), for each event the workflows run on, so a reworded
+# expression is judged by what it does, not by how it reads.
 #
 #   bash tests/scripts/test-red-runs-uncancelled.sh
 set -uo pipefail
@@ -21,12 +29,11 @@ command -v python3 >/dev/null 2>&1 || fail "python3 is required"
 python3 -c 'import yaml' 2>/dev/null ||
     fail "the python3 yaml module is required (pip install pyyaml)"
 
-python3 - "$REPO/.github/workflows/ci.yml" <<'PY' || exit 1
-import re, sys, yaml
+python3 - "$REPO/.github/workflows" <<'PY' || exit 1
+import os, re, sys, yaml
 
-conc = (yaml.safe_load(open(sys.argv[1])) or {}).get("concurrency")
-if not isinstance(conc, dict) or "group" not in conc or "cancel-in-progress" not in conc:
-    sys.exit("FAIL  ci.yml has no concurrency group and cancel-in-progress")
+root = sys.argv[1]
+problems = []
 
 def lookup(ctx, path):
     for key in path.split("."):
@@ -42,10 +49,17 @@ def fill(template, *args):
 def evaluate(expr, ctx):
     py = re.sub(r"\bstartsWith\(", "_sw(", expr)
     py = re.sub(r"\bformat\(", "_fmt(", py)
+    py = re.sub(r"\b(always|cancelled|failure|success)\(\)", r"_\1()", py)
     py = py.replace("&&", " and ").replace("||", " or ")
     py = re.sub(r"!(?!=)", " not ", py)
     py = re.sub(r"\bgithub((?:\.[A-Za-z_]+)+)", lambda m: "_g(%r)" % m.group(1)[1:], py)
-    return eval(py, {"__builtins__": {}, "_sw": starts_with, "_fmt": fill, "_g": lambda p: lookup(ctx, p)})
+    status = ctx["status"]
+    return eval(py, {"__builtins__": {}, "_sw": starts_with, "_fmt": fill,
+                     "_g": lambda p: lookup(ctx, p),
+                     "_always": lambda: True,
+                     "_cancelled": lambda: status == "cancelled",
+                     "_failure": lambda: status == "failure",
+                     "_success": lambda: status == "success"})
 
 def text(value):
     if value is None:
@@ -60,40 +74,93 @@ def render(template, ctx):
         return template
     return re.sub(r"\$\{\{(.*?)\}\}", lambda m: text(evaluate(m.group(1), ctx)), template)
 
-def run(event_name, title=None, head="a" * 40, run_id=1, run_attempt=1):
-    ctx = {"workflow": "CI", "event_name": event_name, "sha": head[::-1],
-           "run_id": run_id, "run_attempt": run_attempt,
+def condition(expr, ctx):
+    # A job `if` may omit ${{ }}; one without a status function gets success().
+    expr = str(expr).strip()
+    m = re.fullmatch(r"\$\{\{(.*)\}\}", expr, re.S)
+    expr = m.group(1) if m else expr
+    if not re.search(r"\b(always|cancelled|failure|success)\(\)", expr):
+        expr = "success() && (%s)" % expr
+    return bool(evaluate(expr, ctx))
+
+def context(workflow, event_name, title=None, number=7, head="a" * 40, run_id=1,
+            run_attempt=1, status="success"):
+    # github.sha is the head for a push, a test merge commit for a pull request.
+    ctx = {"workflow": workflow, "event_name": event_name, "sha": head,
+           "run_id": run_id, "run_attempt": run_attempt, "status": status,
            "ref": "refs/heads/main", "ref_name": "main", "head_ref": "", "event": {}}
     if title is not None:
-        ctx.update(ref="refs/pull/7/merge", ref_name="7/merge", head_ref="fix/run-end-bound")
-        ctx["event"] = {"pull_request": {"number": 7, "title": title, "head": {"sha": head}}}
-    return render(conc["group"], ctx), render(conc["cancel-in-progress"], ctx) == "true"
+        ctx.update(sha="%040x" % run_id, ref="refs/pull/%d/merge" % number, ref_name="%d/merge" % number,
+                   head_ref="fix/run-end-bound")
+        ctx["event"] = {"pull_request": {"number": number, "title": title, "head": {"sha": head}}}
+    return ctx
 
-red_group, red_cancels = run("pull_request", "red: the run-end bound is checked")
-red_again, _ = run("pull_request", "red: the run-end bound is checked", head="b" * 40, run_id=2)
-fix_group, fix_cancels = run("pull_request", "the run-end bound is checked", head="c" * 40, run_id=3)
-fix_again, _ = run("pull_request", "the run-end bound is checked", head="d" * 40, run_id=4)
-problems = []
-if red_cancels:
-    problems.append("a red: pull request's run cancels the run before it")
-if red_group == red_again:
-    problems.append("two pushes to a red: pull request share group %r, so the second replaces the red run while it waits" % red_group)
-if fix_cancels or fix_group == fix_again:
-    problems.append("an ordinary pull request run can cancel or replace the run it supersedes")
-if red_group == fix_group:
-    problems.append("the red run and the fix push share group %r, so the fix push cancels the red run" % fix_group)
-for event in ("push", "merge_group", "workflow_dispatch"):
-    if run(event)[1]:
-        problems.append("a %s run is cancelled by a newer one" % event)
-for event, title in (("pull_request", "red: evidence"), ("pull_request", "fix: evidence"),
-                     ("push", None), ("merge_group", None), ("workflow_dispatch", None)):
-    original, _ = run(event, title)
-    duplicate, _ = run(event, title, run_id=2)
-    retry, _ = run(event, title, run_attempt=2)
-    if len({original, duplicate, retry}) != 3:
-        problems.append("%s runs of the same commit or their attempts share a pending slot" % event)
+groups = {}
+for name in ("ci.yml", "image-safety.yml"):
+    workflow = yaml.safe_load(open(os.path.join(root, name))) or {}
+    conc = workflow.get("concurrency")
+    if not isinstance(conc, dict) or "group" not in conc or "cancel-in-progress" not in conc:
+        problems.append("%s has no concurrency group and cancel-in-progress" % name)
+        continue
+    wf = workflow.get("name") or name
+
+    def run(*args, **kwargs):
+        ctx = context(wf, *args, **kwargs)
+        return render(conc["group"], ctx), render(conc["cancel-in-progress"], ctx) == "true"
+
+    fix = "the run-end bound is checked"
+    first, first_cancels = run("pull_request", fix)
+    newer, _ = run("pull_request", fix, head="b" * 40, run_id=2)
+    other, _ = run("pull_request", fix, number=8, head="c" * 40, run_id=3)
+    if not first_cancels:
+        problems.append("%s: a newer head of a pull request does not cancel the run it supersedes" % name)
+    if first != newer:
+        problems.append("%s: two heads of one pull request land in groups %r and %r, so neither supersedes the other" % (name, first, newer))
+    if first == other:
+        problems.append("%s: two pull requests share group %r and cancel each other" % (name, first))
+    groups.setdefault(first, []).append(name)
+
+    for title in ("red: the run-end bound is checked", "RED: the run-end bound is checked"):
+        red, red_cancels = run("pull_request", title)
+        red_again, _ = run("pull_request", title, head="b" * 40, run_id=2)
+        red_retry, _ = run("pull_request", title, run_attempt=2)
+        if red_cancels:
+            problems.append("%s: a %r pull request's run cancels the run before it" % (name, title))
+        if "a" * 40 not in red:
+            problems.append("%s: a red: run's group %r does not name its head commit" % (name, red))
+        if len({red, red_again, red_retry}) != 3:
+            problems.append("%s: red: runs share a pending slot, so a newer one replaces the red run while it waits" % name)
+        if red == first:
+            problems.append("%s: the red run and the fix push share group %r, so the fix push cancels the red run" % (name, red))
+
+    for event in ("push", "merge_group", "workflow_dispatch"):
+        original, cancels = run(event)
+        duplicate, _ = run(event, run_id=2)
+        retry, _ = run(event, run_attempt=2)
+        if cancels:
+            problems.append("%s: a %s run is cancelled by a newer one" % (name, event))
+        if len({original, duplicate, retry}) != 3:
+            problems.append("%s: %s runs of the same commit or their attempts share a pending slot" % (name, event))
+        if original == first:
+            problems.append("%s: a %s run shares the pull request group %r" % (name, event, first))
+
+    gate = (workflow.get("jobs") or {}).get("ci-ok")
+    if name == "ci.yml":
+        if not gate:
+            problems.append("ci.yml has no ci-ok job")
+            continue
+        for event, title in (("pull_request", fix), ("pull_request", "red: x"), ("push", None),
+                             ("merge_group", None), ("workflow_dispatch", None)):
+            for status in ("success", "failure", "cancelled"):
+                if not condition(gate.get("if", ""), context(wf, event, title, status=status)):
+                    problems.append("ci-ok is skipped in a %s %s run, and a skipped required check passes" % (
+                        status, "red: pull request" if title == "red: x" else event))
+
+for group, names in groups.items():
+    if len(names) > 1:
+        problems.append("%s share pull request group %r and cancel each other" % (" and ".join(names), group))
 if problems:
     sys.exit("\n".join("FAIL  " + p for p in problems))
 PY
 
-echo "red runs: every run and attempt retains its own verdict and pending slot"
+echo "concurrency: superseded pull request runs cancel; red, main and queue runs keep their verdicts"
