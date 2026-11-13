@@ -142,12 +142,24 @@ walk() {{
 pub struct RelanWalk {
     pub listing: Listing,
     pub read_only: BTreeMap<String, bool>,
+    pub attributes: BTreeMap<String, u16>,
+    pub label: String,
+    pub birth_unavailable: usize,
 }
 
 /// relan/exfat's FUSE driver mounts the image read-only (through a
 /// read-only loop device: as root it asks for a block device) and the walk
 /// runs over that mount.
 pub fn relan_walk(image: &Path) -> RelanWalk {
+    relan_walk_limit(image, ATTRIBUTE_SAMPLE, false)
+}
+
+/// Writer images compare every attribute, with no fixture sampling limit.
+pub fn relan_walk_all(image: &Path) -> RelanWalk {
+    relan_walk_limit(image, usize::MAX, true)
+}
+
+fn relan_walk_limit(image: &Path, sample: usize, full: bool) -> RelanWalk {
     let script = format!(
         "{stage}mkdir \"$scratch/mnt\"\n\
          loop=''\n\
@@ -157,19 +169,17 @@ pub fn relan_walk(image: &Path) -> RelanWalk {
          loop=\"$(losetup -r -f --show \"$image\")\"\n\
          {relan}/mount.exfat-fuse -o ro \"$loop\" \"$scratch/mnt\" 2>/dev/null\n\
          python3 {tool} listing \"$scratch/mnt\" \"$scratch/listing.tsv\" >/dev/null\n\
+         python3 {metadata} \"$loop\" \"$scratch/listing.tsv\" {sample} \"$scratch/mnt\" {mode} > \"$scratch/metadata.json\"\n\
          umount \"$scratch/mnt\"\n\
          cat \"$scratch/listing.tsv\"\n\
-         echo '--- attributes'\n\
-         awk -F '\\t' -v n={sample} '!/^#/ && ++seen <= n {{ print $7 }}' \"$scratch/listing.tsv\" |\n\
-         while IFS= read -r path; do\n\
-             ro=\"$({relan}/exfatattrib -d \"$loop\" \"/$path\" | sed -n 's/^ *Read-only: //p')\"\n\
-             printf '%s\\t%s\\n' \"$ro\" \"$path\"\n\
-         done\n",
+         echo '--- metadata'\n\
+         cat \"$scratch/metadata.json\"\n",
         stage = stage_image(image),
         pin = quote(RELAN_PIN),
         relan = RELAN,
         tool = tool(),
-        sample = ATTRIBUTE_SAMPLE,
+        metadata = quote(&guest_path(&repo().join("tests/walk_support/relan-metadata.py"))),
+        mode = if full { "all" } else { "sample" },
     );
     let name = image.file_name().unwrap().to_string_lossy();
     let out = guest(
@@ -178,36 +188,49 @@ pub fn relan_walk(image: &Path) -> RelanWalk {
         &script,
     )
     .success("relan/exfat's walk");
-    let (listing, attributes) = out
+    let (listing, metadata) = out
         .stdout
-        .split_once("--- attributes\n")
-        .expect("the attribute section");
+        .split_once("--- metadata\n")
+        .expect("the metadata section");
     let listing = parse_listing(listing, &format!("relan/exfat's walk of {name}"));
-    let read_only = attributes
-        .lines()
-        .map(|line| {
-            let (flag, path) = line.split_once('\t').expect("flag and path");
-            assert!(
-                matches!(flag, "yes" | "no"),
-                "exfatattrib said {flag:?} for {path}"
-            );
-            (path.to_owned(), flag == "yes")
-        })
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(read_only.len(), listing.len().min(ATTRIBUTE_SAMPLE));
+    #[derive(serde::Deserialize)]
+    struct Metadata {
+        attributes: BTreeMap<String, u16>,
+        label: String,
+        birth_unavailable: usize,
+    }
+    let metadata: Metadata = serde_json::from_str(metadata).expect("relan tool metadata as JSON");
+    let read_only = metadata
+        .attributes
+        .iter()
+        .map(|(path, flags)| (path.clone(), flags & 1 != 0))
+        .collect();
+    assert_eq!(metadata.attributes.len(), listing.len().min(sample));
+    assert_eq!(
+        metadata.birth_unavailable,
+        if full { listing.len() } else { 0 }
+    );
     println!(
         "[third vm] relan/exfat listed {} entries of {name} and gave the attributes of {}",
         listing.len(),
-        read_only.len()
+        metadata.attributes.len()
     );
-    RelanWalk { listing, read_only }
+    RelanWalk {
+        listing,
+        read_only,
+        attributes: metadata.attributes,
+        label: metadata.label,
+        birth_unavailable: metadata.birth_unavailable,
+    }
 }
 
 /// relan/exfat's `exfatfsck -n` on an image: the checker's status and output.
 pub fn relan_fsck(image: &Path) -> (i32, String) {
     let script = format!(
-        "{stage}set +e\n{relan}/exfatfsck -n \"$image\" 2>&1\necho \"status: $?\"\n",
+        "{stage}[ \"$(cat /opt/relan-exfat/relan-exfat.pin)\" = {pin} ] || {{ echo 'relan pin differs; run chore vm:provision' >&2; exit 1; }}\n\
+         set +e\n{relan}/exfatfsck -n \"$image\" 2>&1\necho \"status: $?\"\n",
         stage = stage_image(image),
+        pin = quote(RELAN_PIN),
         relan = RELAN,
     );
     let name = image.file_name().unwrap().to_string_lossy();
