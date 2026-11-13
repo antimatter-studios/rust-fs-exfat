@@ -7,6 +7,9 @@ applied to this page at release time.
 The unreleased Linux write gates are limited to mount state and allocation/free
 cycles; see `features.d/test-linux-allocation-oracles.md`. File-data writing,
 crash recovery and two-FAT interoperability are not established by those gates.
+Interrupted writes are held to the block-cut contract in
+`features.d/test-write-cut-matrix-188.md` (other files are safe), which claims
+no atomicity, no repair mode and no TexFAT behaviour.
 
 ## Safety
 
