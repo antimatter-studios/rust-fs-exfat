@@ -13,6 +13,12 @@ pub struct WriteImage {
 
 impl WriteImage {
     pub fn new(tier: &str, sector: u32, cluster: u32) -> Self {
+        Self::with_size(tier, sector, cluster, "64M")
+    }
+
+    /// A fresh image of `size` (a `truncate -s` size) formatted and seeded
+    /// in the guest as [`WriteImage::new`] does.
+    pub fn with_size(tier: &str, sector: u32, cluster: u32, size: &str) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let scratch = repo().join("tmp");
         std::fs::create_dir_all(&scratch).unwrap();
@@ -46,7 +52,7 @@ cleanup() {{
 }}
 trap cleanup EXIT
 image="$scratch/new.img"
-truncate -s 64M "$image"
+truncate -s {size} "$image"
 loop="$(losetup -f --show -b {sector} "$image")"
 mkfs.exfat -c {cluster} -L ALLOCATION "$loop" >/dev/null
 modprobe exfat || {{ echo "missing exfat module; run 'chore vm:provision'" >&2; exit 1; }}
@@ -67,6 +73,7 @@ loop=''
 cp --sparse=always "$image" {destination}
 "#,
             destination = quote(&guest_path(&path)),
+            size = quote(size),
         );
         guest(
             tier,
@@ -94,6 +101,12 @@ cp --sparse=always "$image" {destination}
 }
 
 impl WriteImage {
+    /// The directory this image and its evidence live in, retained when a
+    /// test fails.
+    pub fn directory(&self) -> &std::path::Path {
+        &self.directory
+    }
+
     /// Where the checkpoint after `kind` is kept: beside the image, named
     /// for the operation, and retained with it when a check fails.
     pub fn checkpoint_path(&self, kind: &str) -> PathBuf {
