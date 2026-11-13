@@ -18,6 +18,8 @@ mod allocation_support;
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "write_support/created.rs"]
+mod write_support;
 
 use fixture_support::{fixture, images, kernel_listing, manifest};
 use fs_exfat::interface::open_path;
@@ -29,6 +31,15 @@ fn fsck_exfat_accepts_the_writers_allocation_and_volume_state_changes() {
     for (sector, cluster) in allocation_support::GEOMETRIES {
         let image = guest_support::write_image::WriteImage::new("oracle", sector, cluster);
         allocation_support::allocate_and_free(&image.path);
+        image.fsck("oracle");
+    }
+}
+
+#[test]
+fn fsck_exfat_accepts_files_and_directories_created_by_this_crate() {
+    for (sector, cluster) in allocation_support::GEOMETRIES {
+        let image = guest_support::write_image::WriteImage::new("oracle", sector, cluster);
+        write_support::files_and_directories(&image.path);
         image.fsck("oracle");
     }
 }

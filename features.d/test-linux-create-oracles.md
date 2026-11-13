@@ -1,0 +1,3 @@
+## Validation
+
+| Linux create/write oracle coverage | Guest tests require exfatprogs `fsck.exfat -n` acceptance and read-only Linux kernel agreement on paths, sizes, read-only attributes, all three times and SHA-256s for a crate-written tree at 512 and 4096 bytes per sector; large and fragmented files, directory growth, non-ASCII and long names, gaps and replacement are exercised; guest execution remains required evidence, not a synthetic-only substitute | Unreleased (#130) | #130 | `tests/exfatprogs.rs`, `tests/kernel.rs`, `tests/write_support/created.rs`, `tests/write_support/birth-times.py` |
