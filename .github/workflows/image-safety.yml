@@ -5,6 +5,12 @@ on:
   pull_request:
   merge_group:
   workflow_dispatch:
+# The same groups as ci.yml (#208): a newer head of an ordinary pull request
+# cancels the run it supersedes; red: pull requests, pushes to main and
+# merge-queue runs each keep a group of their own and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:') && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}-{2}-{3}', startsWith(github.event.pull_request.title, 'red:') && 'red' || github.event_name, github.event.pull_request.head.sha || github.sha, github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:') }}
 permissions:
   contents: read
 jobs:
