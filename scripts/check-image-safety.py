@@ -14,7 +14,8 @@ def check(source):
     if not re.search(r"diskutil|hdiutil|newfs_exfat|fsck_exfat|\$device|/dev/", source):
         return
     for name, expected in [
-        ("cleanup", "760ec1fb1b60d50b2f11f7ce4e24695109e781eb03425293dd4fdbf32312ef2d"),
+        ("cleanup", "4c913177349d7314b04d353248a2a4ab3f0487785b89fb811ebd42df628ada41"),
+        ("detach_receipt", "fd52066154e1776215a6edd9a2735a7064abdd02dc71df7615467cc9a7258e54"),
         ("accept_receipt", "4f2972917a8a64e8b892dc73e7a44f550d307d02186edb31fba25c3e5f6757fe"),
     ]:
         blocks = list(re.finditer(r"(?ms)^" + name + r"\(\) \{\n.*?^\}\n", source))
@@ -52,7 +53,7 @@ def check(source):
     query = '/usr/sbin/diskutil info -plist "$device" > "$directory/info-$sector.plist"'
     notices = 'export com_apple_hdiutil_nodeprecatedwarning=1'
     create = '/usr/bin/hdiutil create -size 64m -layout NONE "$image"'
-    detach = '/usr/bin/hdiutil detach "$device"'
+    detach = 'detach_receipt'
     attachments = {
         fixture_attach,
         windows_attach,
@@ -185,7 +186,7 @@ def check(source):
             if active:
                 refuse("a live attachment cannot lose its ownership binding")
             continue
-        if re.search(r"diskutil|hdiutil|newfs_exfat|fsck_exfat", line) and line not in (tools, notices):
+        if re.search(r"diskutil|hdiutil|newfs_exfat|fsck_exfat|\bdetach_receipt\b", line) and line not in (tools, notices):
             refuse("only the reviewed image commands and exact receipt-owned info query are permitted")
         if re.search(r"EXFAT_ORACLE_DEVICE|\$device|\b(?:device|image|directory)\s*\+?=|\b(?:read|for|declare|typeset|export|local|unset)\b.*\b(?:device|image|directory)\b|printf\s+-v\s+(?:device|image|directory)\b", line):
             refuse("a device or image binding outside its reviewed ownership boundary is forbidden")

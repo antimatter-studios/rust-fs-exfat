@@ -24,6 +24,7 @@ crash recovery and two-FAT interoperability are not established by those gates.
 
 | Feature | State | Since | Tracking | Checked by |
 |---|---|---|---|---|
+| Two-FAT writing (TexFAT interoperability) | Independently unverified; mirroring both FATs and Allocation Bitmaps is checked only on specification-built images with this crate's own reader; macOS, the Linux kernel and exfatprogs do not implement TexFAT, and no TexFAT-capable harness oracle has been validated; no transactional or crash-recovery guarantee | | #154 | Synthetic only: `tests/write.rs`; [oracle review](texfat-validation.md) |
 
 ## Interfaces
 
