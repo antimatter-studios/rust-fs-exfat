@@ -13,6 +13,12 @@
 # until then nothing may be skipped.
 set -uo pipefail
 
+case "${CANCELLED-false}" in
+  false) ;;
+  true) echo "::error::workflow cancelled"; exit 1 ;;
+  *) echo "::error::invalid workflow cancellation state"; exit 1 ;;
+esac
+
 all="changes unit fixtures images test suite-in-vm test-arm64 oracle-macos package semver msrv wasm cli provenance scripts"
 full_only=" "
 vm_only=" "

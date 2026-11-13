@@ -99,18 +99,15 @@ on:
   merge_group:
   workflow_dispatch:
 
-# A newer push to a pull request cancels the run still going on the older one,
-# except while the pull request's title starts "red:". Such a pull request
-# holds only its failing test, and its run is the red evidence: it gets a
-# group of its own commit and is never cancelled, so the push that adds the
-# fix, made after the title loses "red:", cannot cancel it either. Keyed by
-# the commit because GitHub keeps one pending run per group even with
-# cancelling off: a second push sharing the group would replace the red run
-# while it waits. tests/scripts/test-red-runs-uncancelled.sh fails if that
-# stops being so.
+# Required runs finish independently, including duplicate PR events for the
+# same commit. GitHub does not expose why a run was cancelled, so accepting
+# cancellation merely because another run exists would also accept a manual
+# cancellation. Distinct run/attempt groups prevent both in-progress
+# cancellation and replacement of a pending run. This also preserves red-test
+# evidence. Superseded runs deliberately keep running to their actual verdict.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}${{ startsWith(github.event.pull_request.title, 'red:') && format('-red-{0}', github.event.pull_request.head.sha) || '' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:') }}
+  group: ci-${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -892,6 +889,11 @@ jobs:
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: A cancelled workflow fails
+        if: cancelled()
+        env:
+          CANCELLED: "true"
+        run: bash scripts/ci-ok.sh < /dev/null
       - name: Every job ran and succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
