@@ -285,14 +285,20 @@ tasks:
     # tests, macOS host and HVF guest, release build with 39 Compiling lines.
     # 200 / 11,799 cold; 208 / 12,150 keeps the eight lines and about 350
     # bytes of headroom.
-    # FLOOR: all seven tests, including #129's allocation/free cycle, #130's
-    # writer tree and producer check, #139's ten formatted volumes and #185's
-    # checkpoint after every kind of write.
+    # #188's block-cut matrix adds one test: 12 lines / 967 bytes (its
+    # result line, its stdout block of two guest calls, two guest summaries
+    # and two cut summaries, and its summary entry), measured on 2026-11-14
+    # at 123 lines / 9,379 bytes for all eight tests, macOS host and HVF
+    # guest, warm release build with one Compiling line. 212 / 12,766 cold;
+    # 220 / 13,150 keeps the eight lines and about 380 bytes of headroom.
+    # FLOOR: all eight tests, including #129's allocation/free cycle, #130's
+    # writer tree and producer check, #139's ten formatted volumes, #185's
+    # checkpoint after every kind of write and #188's block-cut matrix.
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 208 12150 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 7
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 220 13150 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 8
   test:kernel:
     desc: 'THE KERNEL is the judge: every fixture loop-mounted read-only and walked in the guest, against the strict reader and salvage'
     # tests/kernel.rs: one `[kernel vm]` guest call per image mounts it with

@@ -14,6 +14,8 @@
 //! never read (AGENTS.md).
 
 mod allocation_support;
+#[path = "write_support/cuts.rs"]
+mod cuts;
 #[path = "fixture_support/mod.rs"]
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
@@ -64,6 +66,124 @@ fn fsck_exfat_accepts_a_clean_checkpoint_after_every_kind_of_write() {
         assert_eq!(done.len(), kinds::KINDS.len());
         image.fsck_checkpoints("oracle", &done);
     }
+}
+
+/// #188: the block-cut crash matrix. The write script is replayed onto a
+/// fresh guest-formatted image once for every sector it writes, cut off
+/// there. exfatprogs judges every partial image and repairs a copy of each
+/// one it refuses; the strict reader then finds every file and directory
+/// the interrupted operation was not changing exactly as it was. A cut at a
+/// step boundary must be clean as it stands.
+#[test]
+fn every_block_cut_of_the_write_script_leaves_the_other_files_intact() {
+    for (sector, cluster) in allocation_support::GEOMETRIES {
+        block_cut_matrix(sector, cluster);
+    }
+}
+
+fn block_cut_matrix(sector: u32, cluster: u32) {
+    use guest_support::write_cuts;
+    // Retaining every failing image would fill a runner; deltas.bin keeps
+    // every cut, rebuildable in order from the retained fresh image.
+    const RETAINED: usize = 8;
+    let image = guest_support::write_image::WriteImage::with_size("oracle", sector, cluster, "8M");
+    let name = format!("s{sector}/c{cluster}");
+    let base = std::fs::read(&image.path).unwrap();
+    let plan = cuts::Plan::measure(&base, u64::from(sector));
+    let mut previous = base.clone();
+    let mut records = Vec::new();
+    let mut deltas = Vec::new();
+    for cut in 0..=plan.total() {
+        let mut record = cuts::replay(&base, u64::from(sector), &plan, cut);
+        let image = std::mem::take(&mut record.image);
+        deltas.push((cut, cuts::delta(&previous, &image, sector as usize)));
+        previous = image;
+        records.push(record);
+    }
+    let verdicts = write_cuts::judge(
+        "oracle",
+        &format!("fsck.exfat on {} block cuts of {name}", deltas.len()),
+        &image.path,
+        image.directory(),
+        sector,
+        &deltas,
+    );
+
+    let mut current = base;
+    let mut problems = Vec::new();
+    let (mut clean, mut repaired, mut leaked) = (0, 0, 0);
+    for (record, (_, delta)) in records.iter().zip(&deltas) {
+        cuts::apply(&mut current, delta);
+        let verdict = &verdicts[&record.cut];
+        let judged = match &verdict.repair {
+            None => {
+                clean += 1;
+                Ok(current.clone())
+            }
+            Some(_) if record.at_boundary() => Err(format!(
+                "fsck.exfat -n refuses a clean unmount (status {})",
+                verdict.check
+            )),
+            Some((repair, after, _)) if !matches!(repair, 0 | 1) || *after != 0 => Err(format!(
+                "fsck.exfat -y cannot repair it (status {repair}, then -n status {after})"
+            )),
+            Some((_, _, fixes)) => {
+                repaired += 1;
+                let mut copy = current.clone();
+                cuts::apply(&mut copy, fixes);
+                Ok(copy)
+            }
+        };
+        let checked = judged.and_then(|judged| {
+            record.manifest.check(judged.clone())?;
+            cuts::audit(judged)
+        });
+        let problem = match checked {
+            Ok(0) => continue,
+            Ok(_) => {
+                leaked += 1;
+                continue;
+            }
+            Err(problem) => problem,
+        };
+        let mut problem = format!("{}: {problem}", record.describe(&plan));
+        if problems.len() < RETAINED {
+            let kept = image.directory().join(format!(
+                "cut-{}-{}.img",
+                record.cut,
+                cuts::STEPS[record.step].name
+            ));
+            std::fs::write(&kept, &current).unwrap();
+            problem.push_str(&format!(
+                "\n  retained {}\n{}",
+                kept.display(),
+                verdict.report
+            ));
+        }
+        problems.push(problem);
+    }
+    // The last step's manifest holds the files every earlier step made.
+    let last = records.last().unwrap();
+    assert!(
+        last.manifest.contains("/Cut/a.bin"),
+        "{name}: thin manifest"
+    );
+    cuts::assert_check_sees_a_changed_sentinel(&last.manifest, &current);
+    assert!(
+        problems.is_empty(),
+        "{name}: {} of {} block cuts break the recovery contract (#188); every cut is \
+         rebuildable from {}:\n{}",
+        problems.len(),
+        records.len(),
+        image.directory().join("deltas.bin").display(),
+        problems.join("\n")
+    );
+    println!(
+        "[oracle cuts] {name}: {} cuts over {} steps; {clean} accepted as cut, {repaired} \
+         refused and repaired; {leaked} leave leaked clusters; every untouched file intact",
+        records.len(),
+        cuts::STEPS.len()
+    );
 }
 
 #[test]
