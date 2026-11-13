@@ -11,7 +11,9 @@ Writing is being built ([#135](https://github.com/antimatter-studios/rust-fs-exf
 a volume can be mounted for writing, files and directories created, written,
 truncated, removed and renamed, and times, attributes and the label set. A
 formatter creates new, empty volumes. There is no repair operation, and the
-Linux kernel and exfatprogs do not check the writer or the formatter yet ([#133](https://github.com/antimatter-studios/rust-fs-exfat/issues/133)).
+Linux tiers check write mounts, volume state and allocation/free cycles at both
+sector sizes. File-data writes and the formatter still need Linux validation
+([#133](https://github.com/antimatter-studios/rust-fs-exfat/issues/133)).
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per

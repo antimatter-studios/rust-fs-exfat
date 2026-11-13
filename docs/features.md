@@ -4,6 +4,10 @@ Nothing is released yet, so the tables below still show the initial scaffold. Th
 current state of each row is a fragment under `features.d/`, and fragments are
 applied to this page at release time.
 
+The unreleased Linux write gates are limited to mount state and allocation/free
+cycles; see `features.d/test-linux-allocation-oracles.md`. File-data writing,
+crash recovery and two-FAT interoperability are not established by those gates.
+
 ## Safety
 
 | Feature | State | Since | Tracking | Checked by |

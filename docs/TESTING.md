@@ -34,10 +34,10 @@ tier has run.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | CI run 43356731975 at e26b767 (#171), 402 tests: macOS 562 lines, 33134 bytes including two scale-audit slow-test notices (112 and 116 bytes); Linux unit job 560 lines, 32903 bytes; #169 added one test line (55 bytes) | 564 lines, 33300 bytes, allowing two more lines and 166 bytes above macOS for timing digits and diagnostics | 150 |
+| unit | c60274f (#173), 402 tests: 2026-11-13 local macOS 564 lines, 33931 bytes including four slow-test notices and absolute CARGO_TARGET_DIR paths; CI run 43391840746 Linux unit job 560 lines, 32902 bytes, macOS job 560 lines, 32903 bytes | 566 lines, 34300 bytes, allowing two more lines and 369 bytes above local macOS for timing and diagnostics | 150 |
 | images | CI run 43105817721, ubuntu, cold build: 95 lines, 3328 bytes; 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 98 lines, 3500 bytes | 7 |
-| oracle | CI run 43105817721, x86_64 guest, cold build: 152 lines, 7274 bytes; 2026-11-11 exfatprogs in the guest (#123), local macOS, cold build: 107 lines, 5718 bytes, 2 tests and one `[oracle vm]` line per fixture | 156 lines, 7500 bytes | 2 |
-| kernel | 2026-11-11 (#124), local macOS HVF guest, cold build: 104 lines, 5590 bytes, 3 tests | 135 lines, 7300 bytes | 3 |
+| oracle | CI run 43105817721, x86_64 guest, cold build: 152 lines, 7274 bytes; 2026-11-11 exfatprogs in the guest (#123), local macOS, cold build: 107 lines, 5718 bytes, 2 tests; CI run 43391840746 at c60274f, warm: 81 lines, 5450 bytes, all 3 tests passing including #129's allocation/free cycle at both sector sizes | 166 lines, 8100 bytes | 3 |
+| kernel | 2026-11-11 (#124), local macOS HVF guest, cold build: 104 lines, 5590 bytes, 3 tests; CI run 43391840746 at c60274f, warm: 83 lines, 5648 bytes, all 4 tests passing including #129's allocation/free cycle | 135 lines, 7300 bytes | 4 |
 | third | 2026-11-11 relan/exfat (#125), local macOS HVF guest, warm: 95 lines, 7084 bytes, 3 tests; a cold build adds about 38 lines, 1165 bytes | 175 lines, 10700 bytes | 3 |
 | vm | 2026-11-11 the whole suite in the guest (#126), local macOS HVF guest, warm: 625 lines, 38742 bytes, 411 tests with the write layers; CI's fresh guest adds the toolchain install and a whole build, about 60 lines, 3.5 KB | 860 lines, 51000 bytes | 388 |
 | oracle-macos | 2026-11-11 the full pipeline on main (#134), local macOS: 258 lines, 10947 bytes, 40 tests including large-volume and million-entry comparisons | 310 lines, 16000 bytes, allowing formatter/checker diagnostics | 25 |
@@ -176,6 +176,28 @@ Two deviation-report findings are expected on every kernel-made image and
 allowed by rule, severity and offset only: mkfs.exfat 1.2.0 fills the OEM
 Parameters sector's reserved bytes with FFh, and the kernel never updates
 PercentInUse.
+
+For #129, both Linux tiers also create fresh 64 MiB volumes in the guest, at
+512-byte sectors with 4 KiB clusters and 4096-byte sectors with 128 KiB clusters.
+`tests/guest_support/write_image.rs` formats them with exfatprogs and seeds a
+directory and a multi-cluster sentinel file with the kernel, checks them, and
+returns only detached images. This producer and its check-only fsck helper are
+reusable by later write-direction tests. Missing guest tools fail naming
+`chore vm:provision`; a missing harness or host prerequisite fails naming
+`chore siblings` or `chore tools`.
+
+`tests/allocation_support` mounts each image through the writer and exercises
+NoFatChain growth, blocked growth into a FAT chain, shrinking back to a run,
+allocation from isolated holes, a full heap and freeing everything. It checks
+the persisted bitmap and FAT, VolumeDirty, PercentInUse and boot checksum while
+mounted, and that the backup boot region is unchanged. After unmount, the FAT,
+bitmap, directories and data must equal their original bytes. The oracle tier
+then requires `fsck.exfat -n` to accept the result; the kernel tier requires it
+too, then mounts read-only and compares the kernel's entire tree and hashes
+before and after the allocation cycle, and against the strict reader.
+Unattached allocations are freed before either final oracle runs. These tests
+do not exercise file-data writing (#130), crash recovery (#133), or TexFAT;
+two-FAT allocation still has synthetic-only evidence.
 
 Windows formatting is additional evidence only if the Windows harness can
 provide it.

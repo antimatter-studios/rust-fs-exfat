@@ -225,15 +225,15 @@ tasks:
       - cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - cargo clippy --locked --all-targets --all-features -- -D warnings
   test:unit:
-    # BUDGET: CI run 43356731975 at e26b767 (#171), 402 tests: macOS
-    # 562 lines / 33,134 bytes; Linux unit job 560 / 32,903. #169 added
-    # the_macos_oracle_tests_name_their_own_task (one line / 55 bytes).
-    # macOS includes two useful scale-audit slow-test notices (112 and
-    # 116 bytes); keep them. 564 / 33,300 leaves two lines and 166 bytes
-    # above that macOS measurement for timing digits and diagnostics.
+    # BUDGET: c60274f (#173), 402 tests: local macOS on 2026-11-13
+    # measured 564 lines / 33,931 bytes; CI run 43391840746's Linux unit
+    # job measured 560 / 32,902, and its macOS job 560 / 32,903.
+    # Local macOS includes four useful slow-test notices and absolute
+    # CARGO_TARGET_DIR paths; keep them. 566 / 34,300 leaves two lines
+    # and 369 bytes above that measurement for timing and diagnostics.
     # CI runs `chore build` first, so the log holds no cold build.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 564 33300 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 566 34300 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:images:
     desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'
@@ -262,13 +262,17 @@ tasks:
     #
     # BUDGET: 152 lines / 7,274 bytes in CI (run 43105817721, x86_64 guest,
     # cold build: 81 of those lines are cargo's), 107 / 5,718 cold and 69 /
-    # 4,553 warm on a macOS host (#123). 156 / 7,500 leaves four lines and
-    # about 3% of bytes. FLOOR: both tests.
+    # 4,553 warm on a macOS host (#123). CI run 43391840746 at c60274f
+    # measured 81 / 5,450 warm, all three tests passing, including #129's
+    # allocation/free cycle at both sector sizes. 166 / 8,100 retains the
+    # cold-build allowance and room for timing digits.
+    # FLOOR: all three tests, including #129's write mount
+    # and allocation/free cycle on newly guest-formatted images.
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 156 7500 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 2
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 166 8100 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 3
   test:kernel:
     desc: 'THE KERNEL is the judge: every fixture loop-mounted read-only and walked in the guest, against the strict reader and salvage'
     # tests/kernel.rs: one `[kernel vm]` guest call per image mounts it with
@@ -279,12 +283,13 @@ tasks:
     #
     # BUDGET: 104 lines / 5,590 bytes from a cold build on a macOS host, 65 /
     # 4,358 warm (#124); 135 / 7,300 is about 30% over the cold run. FLOOR:
-    # all three tests.
+    # all four tests, including #129's allocation/free cycle and preserved
+    # kernel-created tree after a write mount.
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 135 7300 -- scripts/test.sh --locked --release --features cli,test-support --test kernel -- --show-output'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 3
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 4
   test:third:
     desc: 'CROSS-VALIDATION: relan/exfat, a third implementation built in the guest, reads every fixture as the kernel and this crate do'
     # tests/third.rs: relan/exfat's FUSE driver, exfatattrib and exfatfsck,
