@@ -61,6 +61,9 @@ def check(source):
     fixture_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nomount -plist "$image" > "$directory/attach.plist"'
     written_binding = 'image="$directory/written-$sector.dmg"'
     written_producer = 'EXFAT_ORACLE_DIR="$directory" EXFAT_ORACLE_SECTOR="$sector" cargo test --locked --features cli,test-support --test macos_write -- --nocapture'
+    checkpoint_kind = "case \"$kind\" in ''|*[!a-z-]*) exit 1 ;; esac"
+    checkpoint_binding = 'image="$directory/checkpoint-$sector-$kind.dmg"'
+    checkpoint_check = 'if /sbin/fsck_exfat -n "$device" > "$directory/checkpoint-$sector-$kind.txt" 2>&1; then'
     written_attach = '/usr/bin/hdiutil attach -blocksize "$sector" -readonly -nobrowse -mountpoint "$directory/written-mount-$sector" -plist "$image" > "$directory/attach.plist"'
     tools = 'for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil /usr/sbin/lsof; do'
     query = '/usr/sbin/diskutil info -plist "$device" > "$directory/info-$sector.plist"'
@@ -81,6 +84,7 @@ def check(source):
         '/sbin/newfs_exfat -R -S "$sector" -b 4096 -v M1ORACLE "$device" | tee "$directory/format-$sector.txt"',
         '/sbin/fsck_exfat -n "$device"',
         '/sbin/fsck_exfat -n "$device" | tee "$directory/written-fsck-$sector.txt"',
+        checkpoint_check,
     }
     if lines.count(initialization) != 1 or lines.count('trap cleanup EXIT') != 1 or lines.count(image_binding) != 1:
         refuse("images must be bound to this run's fresh private temporary directory")
@@ -90,6 +94,8 @@ def check(source):
         refuse("Windows-layout fixtures require the reviewed producer and private image binding")
     if lines.count(written_binding) != 1 or lines.count(written_producer) != 1:
         refuse("written images require the reviewed producer and private image binding")
+    if lines.count(checkpoint_binding) != 1 or lines.count(checkpoint_kind) != 1:
+        refuse("write checkpoints require the reviewed kind check and private image binding")
     active = False
     created = False
     receipt_pending = False
@@ -100,6 +106,8 @@ def check(source):
     windows_ready = False
     written_image = False
     written_ready = False
+    kind_checked = False
+    checkpoint_image = False
     for line in lines:
         if not line:
             continue
@@ -116,6 +124,7 @@ def check(source):
         if line == windows_binding:
             if active:
                 refuse("an attached image cannot be rebound")
+            checkpoint_image = False
             image_bound = True
             fixture_image = False
             windows_image = True
@@ -126,11 +135,28 @@ def check(source):
         if line == written_binding:
             if active:
                 refuse("an attached image cannot be rebound")
+            checkpoint_image = False
             image_bound = True
             fixture_image = False
             windows_image = False
             written_image = True
             written_ready = False
+            created = False
+            continue
+        if line == checkpoint_kind:
+            kind_checked = True
+            continue
+        if line == checkpoint_binding:
+            if active:
+                refuse("an attached image cannot be rebound")
+            if not (written_ready and kind_checked):
+                refuse("write checkpoints require this run's writer producer and a checked kind name")
+            kind_checked = False
+            image_bound = True
+            fixture_image = False
+            windows_image = False
+            written_image = False
+            checkpoint_image = True
             created = False
             continue
         if line == written_producer:
@@ -151,6 +177,7 @@ def check(source):
         if line == fixture_binding:
             if active or not fixtures_ready:
                 refuse("fixture attachment requires this run's completed fixture producer")
+            checkpoint_image = False
             image_bound = True
             fixture_image = True
             windows_image = False
@@ -158,13 +185,14 @@ def check(source):
             created = False
             continue
         if line == fixture_regular:
-            if not (fixture_image or (windows_image and windows_ready) or (written_image and written_ready)) or active:
+            if not (fixture_image or checkpoint_image or (windows_image and windows_ready) or (written_image and written_ready)) or active:
                 refuse("fixture validation requires its detached private image binding")
             created = True
             continue
         if line == image_binding:
             if active:
                 refuse("an attached image cannot be rebound")
+            checkpoint_image = False
             image_bound = True
             fixture_image = False
             windows_image = False
@@ -185,6 +213,8 @@ def check(source):
                 refuse("Windows-layout fixtures require their own read-only attachment")
             if written_image and line not in (fixture_attach, written_attach):
                 refuse("written images must be attached read-only")
+            if checkpoint_image and line != fixture_attach:
+                refuse("write checkpoints must be attached read-only without a mount")
             if not written_image and line == written_attach:
                 refuse("the written-image mount point belongs to written images")
             receipt_pending = True
@@ -192,6 +222,8 @@ def check(source):
         if line == detach or line in device_commands:
             if not active:
                 refuse("device operations require this run's live attach receipt")
+            if line == checkpoint_check and not checkpoint_image:
+                refuse("the checkpoint check belongs to write checkpoints")
             if line == detach:
                 active = False
             continue
