@@ -14,6 +14,9 @@ const LABEL: u8 = 0x83;
 const LABEL_UNITS: usize = 11;
 
 /// Which of a file's times to change; `None` leaves one as it is.
+/// Create and LastModified retain hundredths of a second. LastAccessed has
+/// two-second resolution: odd seconds round down and milliseconds are discarded.
+/// All three retain their UTC offsets.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SetTimes {
     pub created: Option<Timestamp>,
@@ -23,8 +26,10 @@ pub struct SetTimes {
 
 impl<Device: BlockDevice> WriteVolume<Device> {
     /// Sets a file's or directory's Create, LastModified and LastAccessed
-    /// times, each with its hundredths and UTC offset. The root directory has
-    /// no entry set and so no times.
+    /// times, retaining each UTC offset. Create and LastModified retain
+    /// hundredths of a second; LastAccessed has no 10ms increment field, so
+    /// odd seconds round down and milliseconds are discarded (two-second
+    /// resolution). The root directory has no entry set and so no times.
     pub fn set_times(&mut self, path: &str, times: SetTimes) -> Result<()> {
         self.operation(|volume| {
             let target = volume.resolve(path)?;
