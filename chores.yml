@@ -93,9 +93,8 @@ vars:
   # is pinned separately.
   FS_CORE_REF: v0.4.5
   LINUX_HARNESS_URL: https://github.com/antimatter-studios/fs-linux-test-harness.git
-  # v0.6.2: the release whose guest-run.sh the family's shared guest
-  # (FLTH_SHARED_ROOT) was booted with, so this consumer can join it.
-  LINUX_HARNESS_REF: v0.6.2
+  # Every consumer uses the shared guest; no host-directory opt-in is needed.
+  LINUX_HARNESS_REF: v0.7.0
 
 # The harness's consumer tasks, as `chore vm:<task>`. OPTIONAL because the
 # harness is a sibling that `chore siblings` itself checks out: without it
@@ -108,7 +107,7 @@ includes:
     taskfile: ../fs-linux-test-harness/vm.chores.yml
     optional: true
 
-# The reaper: any chore invocation stops a VM nothing else brought down.
+# The reaper stops only an unfinished boot and detaches abandoned runs.
 # Fails soft, and does nothing before the harness is checked out.
 lifecycle:
   after_all:
@@ -178,8 +177,8 @@ tasks:
   fixtures:
     desc: Build every test-disks/*.img fixture with its manifest and kernel listing (kernel-made, in the harness VM)
     # Up to date while the recipe is unchanged and every image exists;
-    # --force rebuilds. The VM comes down when the build ends, however it
-    # ends (build-fixtures.sh sources the harness's vm-session.sh).
+    # --force rebuilds. The build's session ends with it; the shared guest
+    # stays up (build-fixtures.sh sources the harness's vm-session.sh).
     #
     # THIS LIST AND IMAGES IN build-fixtures.sh MUST AGREE.
     sources:
@@ -202,10 +201,10 @@ tasks:
       - test-disks/exfat-tree-s512-c4k-upcase.img
       - test-disks/exfat-tree-s512-c4k-data.img
       - test-disks/exfat-fragmented-s512-c4k-boot.img
-    # A hung boot must not hold the VM and the machine-wide slot for ever.
+    # Reap an unfinished boot without stopping another consumer's run.
     timeout: 60m
     on_timeout:
-      - cmd: '../fs-linux-test-harness/scripts/vm.sh down || ../fs-linux-test-harness/scripts/vm.sh destroy'
+      - cmd: '../fs-linux-test-harness/scripts/vm.sh reap'
     cmds: ['test-disks/build-fixtures.sh']
 
   build:
@@ -269,8 +268,8 @@ tasks:
     # tests/exfatprogs.rs, through tests/guest_support: one guest call per
     # image, each tagged `[oracle vm]`. --show-output keeps those lines, the
     # evidence of what was checked, in tmp/logs/oracle.log. scripts/test.sh
-    # runs cargo as a harness session, so the VM it boots comes down when
-    # the tier ends. tests/test_contract.rs (unit tier) fails the suite if a
+    # runs cargo as a harness session, ending its own run while the shared
+    # guest stays up. tests/test_contract.rs (unit tier) fails the suite if a
     # test runs a Linux tool on the host. The formatter also creates ten
     # new volumes, from 1 MiB to 40 GiB at both sector sizes, for fsck.
     #
@@ -361,9 +360,10 @@ tasks:
     # whole release build, about 60 lines / 3.5 KB on the first run here:
     # about 660 / 39,300 for a passing cold run. 860 / 51,000 is about 30%
     # over it. FLOOR: 388, 95% of the 408 that passed.
+    # Reap an unfinished boot without stopping another consumer's run.
     timeout: 120m
     on_timeout:
-      - cmd: '../fs-linux-test-harness/scripts/vm.sh down || ../fs-linux-test-harness/scripts/vm.sh destroy'
+      - cmd: '../fs-linux-test-harness/scripts/vm.sh reap'
     cmds:
       - test-disks/build-fixtures.sh --check
       - |
@@ -458,10 +458,12 @@ tasks:
     # BUDGET: measured at 34 lines / 1,970 bytes with the sandbox-creation
     # failure regression (#197). A new file adds its `== name` line and a
     # verdict; 36 / 2,100 leaves room for one.
+    # #170's shared-guest contract (79 bytes) measured 38 lines / 2,167
+    # bytes on top of #202's detach gates; 40 / 2,300 leaves room for one.
     cmds:
       - |
         set -eu
-        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 36 2100 -- bash -c '
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 40 2300 -- bash -c '
           set -eu
           for t in tests/scripts/*.sh; do
             echo "== $t"

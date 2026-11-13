@@ -25,10 +25,3 @@ guest_command = "scripts/guest-suite.sh"
 
 [share]
 dir = ".vm-share"
-
-[vm]
-memory = "4G"
-cpus = 4
-disk = "16G"
-ssh_port = 50131
-deadline_minutes = 480
