@@ -18,6 +18,8 @@ mod allocation_support;
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "oracle/linux_mkfs.rs"]
+mod linux_mkfs;
 #[path = "walk_support/mod.rs"]
 mod walk_support;
 #[path = "write_support/created.rs"]
@@ -96,6 +98,11 @@ fn the_kernel_reads_files_and_directories_created_by_this_crate() {
             );
         }
     }
+}
+
+#[test]
+fn the_kernel_writes_formatted_volumes_and_the_strict_reader_returns_every_byte() {
+    linux_mkfs::kernel_writes_formatted_volumes();
 }
 
 fn undamaged() -> Vec<String> {

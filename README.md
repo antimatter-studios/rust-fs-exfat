@@ -11,9 +11,11 @@ Writing is being built ([#135](https://github.com/antimatter-studios/rust-fs-exf
 a volume can be mounted for writing, files and directories created, written,
 truncated, removed and renamed, and times, attributes and the label set. A
 formatter creates new, empty volumes. There is no repair operation, and the
-Linux tiers check write mounts, volume state and allocation/free cycles at both
-sector sizes. File-data writes and the formatter still need Linux validation
+Linux tiers check write mounts, volume state, allocation/free cycles, file and
+directory creation, data writes and formatted volumes at both sector sizes.
+Other write operations still need Linux validation
 ([#133](https://github.com/antimatter-studios/rust-fs-exfat/issues/133)).
+The formatter is also checked on macOS.
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
@@ -259,8 +261,8 @@ guest, a Debian 12 VM that `scripts/vm-setup.sh` provisions.
 |---|---|---|
 | `chore test:unit` | nothing | the library, synthetic images, the C ABI and CLI, and `tests/test_contract.rs`, which fails the suite if a test runs a Linux tool on the host |
 | `chore test:images` | the fixtures | the strict reader, the allocation audit and salvage on every kernel-made image, against the kernel's own listing captured when it was built |
-| `chore test:oracle` | the VM | exfatprogs in the guest: `fsck.exfat -n` accepts every undamaged fixture and refuses structural damage, and `dump.exfat` agrees with this crate field for field |
-| `chore test:kernel` | the VM | the Linux kernel loop-mounts every fixture read-only, and its walk agrees with the strict reader on every path, size, attribute, time and SHA-256; salvage rebuilds every file it reads |
+| `chore test:oracle` | the VM | exfatprogs in the guest: `fsck.exfat -n` accepts every undamaged fixture and this crate's newly formatted volumes and refuses structural damage; `dump.exfat` agrees with this crate field for field |
+| `chore test:kernel` | the VM | the Linux kernel loop-mounts every fixture read-only, and its walk agrees with the strict reader on every path, size, attribute, time and SHA-256; salvage rebuilds every file it reads; the kernel writes files and a directory to this crate's newly formatted volumes, then exfatprogs and this crate check them and the strict reader returns every byte |
 | `chore test:third` | the VM | relan/exfat, a third implementation built in the guest at a pinned commit, reads every fixture as the kernel and this crate do |
 | `chore test:oracle-macos` | a Mac | macOS `newfs_exfat`, `fsck_exfat -n` and the read-only macOS driver on newly created images |
 | `chore test:vm` | the VM | every Linux tier above, compiled and run inside the guest |
@@ -304,6 +306,16 @@ fixture as the strict reader does: every path, size, attribute, time and file
 SHA-256. relan/exfat, built in the guest at a pinned commit, must read them the
 same way. Where relan departs from the specification, as `tests/third.rs` lists,
 the kernel and this crate agree.
+
+The formatter's Linux checks create sparse volumes from 1 MiB to 40 GiB at
+512- and 4096-byte sectors, covering the 4, 32 and 128 KiB default cluster
+sizes. exfatprogs checks each before use; the kernel tier attaches each image
+with its actual logical sector size, mounts it read-write, creates files and
+a directory, and unmounts it. exfatprogs must still find it clean, the strict
+reader must return the kernel-written bytes, and this crate's check must stay
+healthy. As with macOS, the Linux kernel can leave PercentInUse stale after
+writes; only that advisory warning is allowed after unmounting (#175), not an
+unhealthy audit. These tests use only `tests/guest_support` to reach the guest.
 
 Only Microsoft's public specification and black-box reference tools are format
 sources. Never use the source code of Linux exFAT, exfatprogs or relan/exfat: they

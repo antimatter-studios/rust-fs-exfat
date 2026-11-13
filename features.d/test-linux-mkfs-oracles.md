@@ -1,0 +1,3 @@
+## Validation
+
+| Linux formatter cross-validation | The oracle and kernel tiers format sparse volumes with this crate from 1 MiB to 40 GiB, at 512- and 4096-byte sectors and the 4, 32 and 128 KiB default cluster sizes; exfatprogs checks each empty volume, the Linux kernel mounts and writes files and a directory, exfatprogs checks it again after unmounting, and the strict reader returns every byte while the allocation audit stays healthy; tools run only through the harness guest and missing prerequisites fail | Unreleased (#139) | #139 | `tests/oracle/linux_mkfs.rs`, `tests/exfatprogs.rs`, `tests/kernel.rs`, `chore test:oracle`, `chore test:kernel`, `chore test:vm` |
