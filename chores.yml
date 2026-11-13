@@ -332,8 +332,14 @@ tasks:
     desc: 'macOS newfs_exfat, fsck_exfat -n and the read-only macOS driver, on a Mac host'
     # The host oracle that was test:oracle before exfatprogs took the name
     # (#123). Its log is still tmp/logs/oracle-macos.log.
+    # BUDGET: CI measured 303 lines / 12,925 bytes at most before the detach
+    # safety gates (#202, #200). On one Mac, the same tier measured 302 lines
+    # before and 318 lines / 14,123 bytes after. The change adds 13 lines: 9
+    # image-safety verdicts, 3 detach regressions and 1 retained-evidence
+    # notice. The other 3 are Compiling lines that depend on the cache.
+    # 320 lines covers that run; 16,000 bytes is unchanged.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 310 16000 -- bash scripts/test-oracle.sh'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle-macos oracle-macos 320 16000 -- bash scripts/test-oracle.sh'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle-macos 25
   test:vm:
     desc: 'Every Linux tier, compiled and run INSIDE the harness VM: how a Mac runs the Linux suite'
