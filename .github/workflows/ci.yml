@@ -331,6 +331,12 @@ jobs:
         run: chore tools
       - name: chore fixtures
         run: chore fixtures
+      # The shared guest outlives each run by design (harness v0.7.0), but a
+      # runner has no later run to share it with: stop it, then prove it
+      # stopped. vm:down leaves the guest up while a session still holds it,
+      # so a leaked session fails the status check below.
+      - name: chore vm:down
+        run: chore vm:down
       - name: chore vm:status (the VM is down again)
         run: '! chore vm:status'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -511,6 +517,12 @@ jobs:
           name: tier-logs-test
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
+      # The shared guest outlives each run by design (harness v0.7.0), but a
+      # runner has no later run to share it with: stop it, then prove it
+      # stopped. vm:down leaves the guest up while a session still holds it,
+      # so a leaked session fails the status check below.
+      - name: chore vm:down
+        run: chore vm:down
       - name: chore vm:status (the VM is down again)
         run: '! chore vm:status'
 
@@ -559,6 +571,12 @@ jobs:
           name: tier-logs-suite-in-vm
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
+      # The shared guest outlives each run by design (harness v0.7.0), but a
+      # runner has no later run to share it with: stop it, then prove it
+      # stopped. vm:down leaves the guest up while a session still holds it,
+      # so a leaked session fails the status check below.
+      - name: chore vm:down
+        run: chore vm:down
       - name: chore vm:status (the VM is down again)
         run: '! chore vm:status'
 
