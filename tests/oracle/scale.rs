@@ -82,7 +82,7 @@ impl Drop for Attachment {
     }
 }
 
-/// Detaches `device` with `program`, retrying with `-force` while it reports
+/// Detaches `device` with `program`, retrying ordinary detaches while it reports
 /// the device busy and `window` has not passed, and records the outcome in the
 /// `attachment-state` beside the receipt in `directory`.
 pub(super) fn detach(
@@ -102,14 +102,14 @@ pub(super) fn detach(
     {
         std::thread::sleep(std::time::Duration::from_millis(200));
         output = Command::new(program)
-            .args(["detach", "-force", device])
+            .args(["detach", device])
             .output()
             .unwrap();
     }
     if !output.status.success() {
         return Err(format!(
             "scale oracle: {device} is still attached after {} s of retries ({}: {}). \
-             Its image and receipt are retained in {}; release it with: {} detach -force {device}",
+             Its image and receipt are retained in {}; retry an ordinary detach with: {} detach {device}",
             window.as_secs_f64(),
             output.status,
             String::from_utf8_lossy(&output.stderr).trim(),
@@ -138,6 +138,7 @@ fn busy_detacher(busy: u32) -> (std::path::PathBuf, std::path::PathBuf) {
         &program,
         format!(
             "#!/bin/sh\n\
+             [ \"$#\" -eq 2 ] && [ \"$1\" = detach ] && [ \"$2\" = /dev/disk-stub ] || exit 97\n\
              count=$(cat \"$0.calls\" 2>/dev/null || echo 0)\n\
              echo $((count + 1)) > \"$0.calls\"\n\
              [ \"$count\" -ge {busy} ] && exit 0\n\
@@ -177,12 +178,86 @@ fn a_detach_that_stays_busy_names_the_command_that_releases_the_image() {
     .unwrap_err();
     let state = std::fs::read_to_string(directory.join("attachment-state")).unwrap();
     assert_eq!(state, "attached");
-    let command = format!("{} detach -force /dev/disk-stub", program.display());
+    let command = format!("{} detach /dev/disk-stub", program.display());
     assert!(message.contains(&command), "{message}");
+    assert!(!message.contains("-force"), "{message}");
     assert!(
         message.contains(&directory.display().to_string()),
         "{message}"
     );
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
+fn a_detach_without_a_retry_window_attempts_only_once() {
+    let (directory, program) = busy_detacher(u32::MAX);
+    detach(
+        &program,
+        "/dev/disk-stub",
+        &directory,
+        std::time::Duration::ZERO,
+    )
+    .unwrap_err();
+    assert_eq!(
+        std::fs::read_to_string(program.with_extension("calls"))
+            .unwrap()
+            .trim(),
+        "1"
+    );
+    assert_eq!(
+        std::fs::read_to_string(directory.join("attachment-state")).unwrap(),
+        "attached"
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
+fn a_nonbusy_detach_error_is_not_retried() {
+    let (directory, program) = busy_detacher(u32::MAX);
+    std::fs::write(
+        &program,
+        "#!/bin/sh\necho called >> \"$0.calls\"\necho 'permission denied' >&2\nexit 1\n",
+    )
+    .unwrap();
+    let message = detach(&program, "/dev/disk-stub", &directory, DETACH_WINDOW).unwrap_err();
+    assert!(message.contains("permission denied"), "{message}");
+    assert_eq!(
+        std::fs::read_to_string(program.with_extension("calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
+fn a_failed_detach_retains_the_image_and_receipt_after_drop() {
+    let (directory, program) = busy_detacher(u32::MAX);
+    let image = Image::sparse(65536, 0);
+    let retained = image.directory.clone();
+    let path = image.path.clone();
+    let length = image.file.metadata().unwrap().len();
+    std::fs::write(retained.join("attachment-state"), "attached").unwrap();
+    std::fs::write(retained.join("attach.plist"), b"this attachment's receipt").unwrap();
+    detach(
+        &program,
+        "/dev/disk-stub",
+        &retained,
+        std::time::Duration::ZERO,
+    )
+    .unwrap_err();
+    drop(image);
+    assert_eq!(std::fs::metadata(path).unwrap().len(), length);
+    assert_eq!(
+        std::fs::read(retained.join("attach.plist")).unwrap(),
+        b"this attachment's receipt"
+    );
+    assert_eq!(
+        std::fs::read_to_string(retained.join("attachment-state")).unwrap(),
+        "attached"
+    );
+    std::fs::remove_dir_all(&retained).unwrap();
     std::fs::remove_dir_all(&directory).unwrap();
 }
 
