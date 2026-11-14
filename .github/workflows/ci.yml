@@ -301,6 +301,13 @@ jobs:
     # The images, manifests and kernel listings go on as one artifact, so
     # each later job reads the same build (#121).
     name: fixtures (harness VM, x86_64 KVM)
+    # images needs both changes and fixtures, and its runner pick is the last
+    # step here. A pick holds its runner for 120 s, so this job must finish
+    # after changes too: under a hosted-runner backlog changes can start
+    # minutes late and end after fixtures, and images then started long
+    # after its hold lapsed (runs 43579976014, 43579981434, 43579989573).
+    # Waiting for changes normally costs about 10 s.
+    needs: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:

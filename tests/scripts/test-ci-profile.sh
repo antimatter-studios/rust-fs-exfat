@@ -150,6 +150,13 @@ for name in gated:
     needs = [needs] if isinstance(needs, str) else needs
     if picker_job not in needs:
         problems.append(f"{name} must need its picker, {picker_job}")
+    if picker_job != "changes":
+        late = jobs.get(picker_job, {}).get("needs", [])
+        late = {late} if isinstance(late, str) else set(late)
+        if not set(needs) - {picker_job} <= late:
+            problems.append(f"{picker_job} picks for {name} but does not need "
+                            f"{sorted(set(needs) - {picker_job} - late)}: the pick must be "
+                            f"the last thing to finish before {name}, or its hold can lapse")
     if picker_job == "changes" and set(needs) != {"changes"}:
         problems.append(f"{name} needs more than changes, so its pick in changes would expire: "
                         "pick it at the end of the job it needs that finishes last")
