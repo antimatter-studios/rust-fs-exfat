@@ -9,9 +9,17 @@
 #   - pushes to main, merge-queue runs and manual dispatches each keep their
 #     verdict: never cancelled, and a group per run and attempt, because
 #     GitHub keeps only one pending run per group even with cancelling off;
-#   - ci-ok runs after every failure and every cancellation, so a failed or
-#     cancelled job fails the required gate rather than skipping it; what it
-#     does in a superseded run is test-ci-cancellation.sh's.
+#   - ci-ok runs after every success and failure of every event, so a failed
+#     or skipped job fails the required gate rather than skipping it; and
+#     after the cancellation of a red:, push, merge-queue or dispatch run,
+#     where test-ci-cancellation.sh holds its cancellation step to failing.
+#     In a cancelled ordinary pull request run alone its condition is false
+#     (#216): GitHub then cancels ci-ok with the rest of the run, without a
+#     runner, so the superseded run completes and the newer head's run starts
+#     at once. Superseded or cancelled by hand with nothing newer, the run's
+#     ci-ok concludes `cancelled` (as the jobs whose implicit success() went
+#     false did in run 43528816818), which never passes a required check. It
+#     is never skipped: the condition is true until the run is cancelled.
 #
 # The expressions are evaluated here as GitHub evaluates them (startsWith
 # ignores case; && and || return an operand; null reads as ''; format fills
@@ -149,12 +157,19 @@ for name in ("ci.yml", "image-safety.yml"):
         if not gate:
             problems.append("ci.yml has no ci-ok job")
             continue
-        for event, title in (("pull_request", fix), ("pull_request", "red: x"), ("push", None),
-                             ("merge_group", None), ("workflow_dispatch", None)):
+        for event, title in (("pull_request", fix), ("pull_request", "red: x"), ("pull_request", "RED: x"),
+                             ("push", None), ("merge_group", None), ("workflow_dispatch", None)):
+            kind = ("%s pull request" % title.split(":")[0]) if title and ":" in title else event
             for status in ("success", "failure", "cancelled"):
-                if not condition(gate.get("if", ""), context(wf, event, title, status=status)):
-                    problems.append("ci-ok is skipped in a %s %s run, and a skipped required check passes" % (
-                        status, "red: pull request" if title == "red: x" else event))
+                runs = condition(gate.get("if", ""), context(wf, event, title, status=status))
+                superseded = event == "pull_request" and title == fix and status == "cancelled"
+                if superseded and runs:
+                    problems.append("ci-ok runs in a cancelled ordinary pull request run, so the superseded run "
+                                    "waits for a runner and holds the newer head's run in the group (#216)")
+                if not superseded and not runs:
+                    problems.append("ci-ok does not run in a %s %s run: %s" % (
+                        status, kind, "a skipped required check passes" if status != "cancelled"
+                        else "a cancelled run that is evidence or gates main must fail ci-ok"))
 
 for group, names in groups.items():
     if len(names) > 1:
@@ -163,4 +178,4 @@ if problems:
     sys.exit("\n".join("FAIL  " + p for p in problems))
 PY
 
-echo "concurrency: superseded pull request runs cancel; red, main and queue runs keep their verdicts"
+echo "concurrency: superseded pull request runs cancel, ci-ok included; red, main and queue runs keep their verdicts"
