@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # test.sh [cargo test args...] — run cargo test as a harness session.
 #
-# THE RUN OWNS THE VM ITS TESTS BOOT. A Linux-oracle test brings the harness
-# VM up from inside its own process (tests/guest_support/mod.rs), and that
-# boot takes the machine-wide slot. `vm.sh session` runs cargo inside a
-# harness session, so the VM comes down and the slot is released when the
-# run ends, passed, failed or killed; a VM held with `chore vm:up`, or a
-# shared guest another suite is using, is left up. In the guest, and on a
+# THE RUN OWNS ITS SESSION, NOT THE SHARED GUEST. A Linux-oracle test joins
+# the harness guest from inside its own process (tests/guest_support/mod.rs).
+# `vm.sh session` runs cargo inside a harness session, so only its own run
+# ends when cargo ends, passed, failed or killed. The guest stays up for the
+# next run and other consumers remain undisturbed. In the guest, and on a
 # host that cannot run the VM, the harness runs cargo as it is.
 #
-# Scratch stays inside the repository (tmp/), the only host directory the
-# guest can see.
+# Scratch stays inside the repository (tmp/), visible under /repo in the
+# run's mount namespace.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"

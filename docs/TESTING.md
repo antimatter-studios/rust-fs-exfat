@@ -12,6 +12,21 @@ the oracle's static-library link test.
 Each test tier uses rust-fs-core's tier.sh, refuses skipped and ignored tests,
 and checks a minimum executed count. Logs stay in tmp/logs/.
 
+## Shared Linux guest
+
+The Linux tiers pin fs-linux-test-harness v0.7.0 and always join the host's
+shared guest. No directory export is needed: each run attaches its own worktree
+at `/repo` and its own share at `/share`. A tier or fixture build ends only its
+own session; the guest stays up for subsequent runs and other consumers.
+The lifecycle reaper handles unfinished boots and abandoned runs without
+stopping another consumer's work. `chore vm:down` stops the guest only when
+nobody is using it. Guest memory, CPUs, disk and idle deadline are host settings
+(`FLTH_SHARED_MEMORY`, `FLTH_SHARED_CPUS`, `FLTH_SHARED_DISK` and
+`FLTH_SHARED_DEADLINE`), not consumer `[vm]` settings.
+A CI runner has no later run to share the guest with, so each CI job that
+boots it ends with `chore vm:down` and then fails if `chore vm:status` still
+finds it running.
+
 ## CI
 
 Every job in `.github/workflows/ci.yml` runs chore tasks, so a green local task is
