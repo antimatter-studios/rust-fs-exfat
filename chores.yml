@@ -231,6 +231,9 @@ tasks:
     # Local macOS includes four useful slow-test notices and absolute
     # CARGO_TARGET_DIR paths; keep them. 566 / 34,300 leaves two lines
     # and 369 bytes above that measurement for timing and diagnostics.
+    # #182 rechecked main 1a9477c and stack 5952c46: 562 / 33,461 with
+    # 19-character worktree-local target paths, which add 325 bytes across
+    # 25 executable banners. macOS CI now exercises that target-path length.
     # CI runs `chore build` first, so the log holds no cold build.
     cmds:
       - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 566 34300 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
