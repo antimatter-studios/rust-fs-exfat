@@ -1,3 +1,4 @@
+use crate::image_support::Image;
 use fs_exfat::primitives::{
     boot_checksum, decode_timestamp, decode_timestamp_with_offset, decode_utc_offset,
     find_bitmap_entry, find_sets, parse_set, set_checksum, stored_boot_checksum, u16_at, u32_at,
@@ -30,19 +31,19 @@ fn formatter_value(sector: u64, label: &str) -> u64 {
         .unwrap_or_else(|| panic!("newfs_exfat omitted {label}"))
 }
 
-fn reference(sector: u64) -> (Vec<u8>, BootSector) {
+fn reference(sector: u64) -> (Image, BootSector) {
     let path = oracle_directory().join(format!("reference-{sector}.dmg"));
     assert!(std::fs::symlink_metadata(&path)
         .unwrap()
         .file_type()
         .is_file());
-    let image = std::fs::read(path).unwrap();
-    let boot = BootSector::parse(&image[..512]).unwrap();
+    let image = Image::open(path);
+    let boot = BootSector::parse(&image.read(0..512)).unwrap();
     (image, boot)
 }
 
 pub(super) fn chain(
-    image: &[u8],
+    image: &Image,
     boot: &BootSector,
     first: u32,
     contiguous_length: Option<u64>,
@@ -54,7 +55,8 @@ pub(super) fn chain(
         assert!((FIRST_CLUSTER..boot.last_cluster_exclusive()).contains(&current));
         assert!(seen.insert(current), "cycle in oracle directory chain");
         let start = boot.heap_offset() + u64::from(current - FIRST_CLUSTER) * boot.cluster_size();
-        bytes.extend_from_slice(&image[start as usize..(start + boot.cluster_size()) as usize]);
+        bytes
+            .extend_from_slice(&image.read(start as usize..(start + boot.cluster_size()) as usize));
         if let Some(length) = contiguous_length {
             if bytes.len() as u64 >= length {
                 break;
@@ -62,7 +64,7 @@ pub(super) fn chain(
             current += 1;
         } else {
             let fat = u64::from(boot.fat_offset) * boot.bytes_per_sector();
-            current = u32_at(image, (fat + u64::from(current) * 4) as usize);
+            current = image.word((fat + u64::from(current) * 4) as usize);
             assert_ne!(current, FAT_BAD);
             if current == FAT_END {
                 break;
@@ -73,7 +75,7 @@ pub(super) fn chain(
 }
 
 fn walk(
-    image: &[u8],
+    image: &Image,
     boot: &BootSector,
     bytes: &[u8],
     prefix: &str,
@@ -133,9 +135,15 @@ fn primitive_boot_fields_and_checksums_match_macos_formatter_and_checker() {
         assert_eq!(boot.number_of_fats, 1);
         assert!(!boot.volume_dirty());
         assert!(boot.percent_in_use <= 100);
-        assert_eq!(boot.volume_serial, u32_at(&image, 100));
-        assert_eq!(boot.volume_flags, u16_at(&image, 106));
-        assert_eq!(boot.volume_length, u64_at(&image, 72));
+        assert_eq!(boot.volume_serial, image.word(100));
+        assert_eq!(
+            boot.volume_flags,
+            u16::from_le_bytes(image.read(106..108).try_into().unwrap())
+        );
+        assert_eq!(
+            boot.volume_length,
+            u64::from_le_bytes(image.read(72..80).try_into().unwrap())
+        );
         for (label, value) in [
             ("FAT offset", u64::from(boot.fat_offset)),
             ("# FAT sectors", u64::from(boot.fat_length)),
@@ -149,7 +157,8 @@ fn primitive_boot_fields_and_checksums_match_macos_formatter_and_checker() {
             assert_eq!(value, formatter_value(sector, label), "{label}");
         }
         for copy in [0, BOOT_REGION_SECTORS * sector] {
-            let region = &image[copy as usize..(copy + BOOT_REGION_SECTORS * sector) as usize];
+            let bytes = image.read(copy as usize..(copy + BOOT_REGION_SECTORS * sector) as usize);
+            let region = bytes.as_slice();
             let stored = stored_boot_checksum(region, sector as usize);
             assert_eq!(boot_checksum(region, sector as usize), stored);
             let raw = BootRegion::parse(region, sector as usize).unwrap();

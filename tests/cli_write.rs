@@ -2,6 +2,9 @@
 
 mod write_support;
 
+#[path = "support/image.rs"]
+mod image_support;
+
 use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -144,8 +147,8 @@ fn mkdir_and_write_change_the_image_and_leave_it_clean() {
     assert!(!run(&image, &["label", "far too long a label"], b"")
         .status
         .success());
-    let bytes = std::fs::read(&image).unwrap();
-    assert_eq!(bytes[106] & 2, 0, "the volume is left clean");
+    let bytes = image_support::Image::open(&image);
+    assert_eq!(bytes.byte(106) & 2, 0, "the volume is left clean");
     let check = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
         .args(["fsck", "-n"])
         .arg(&image)

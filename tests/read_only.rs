@@ -2,8 +2,13 @@ use fs_core::BlockRead;
 use fs_exfat::device::Reader;
 use std::sync::{Arc, Mutex};
 
+#[path = "support/image.rs"]
+mod image_support;
 #[path = "interface_support/mod.rs"]
 mod support;
+
+#[path = "support/image_tests.rs"]
+mod image_tests;
 
 type Calls = Arc<Mutex<Vec<(u64, usize)>>>;
 
