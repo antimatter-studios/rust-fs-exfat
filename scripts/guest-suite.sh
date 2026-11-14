@@ -64,6 +64,6 @@ started=$(date +%s)
 mkdir -p tmp
 mountpoint -q /repo/tmp || mount -t tmpfs -o mode=1777 rust-fs-exfat-tmp /repo/tmp
 export TMPDIR=/repo/tmp
-cargo test --locked --release --no-fail-fast --features cli,test-support "${targets[@]}" "$@"
-cargo test --locked --release --all-features --doc
+cargo test --locked --profile test-opt --no-fail-fast --features cli,test-support "${targets[@]}" "$@"
+cargo test --locked --profile test-opt --all-features --doc
 echo "== in-guest suite: $(( $(date +%s) - started ))s"

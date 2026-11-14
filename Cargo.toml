@@ -115,6 +115,20 @@ required-features = ["cli"]
 [profile.release]
 lto = "thin"
 
+# The profile the slow test tiers build with. [profile.release] is for what
+# this repository ships (the release workflow's binaries and libraries), and
+# a consumer ignores a dependency's profiles anyway, so its link-time
+# optimisation buys the tests nothing and costs memory: a test build makes
+# one binary per tests/*.rs, and LTO works on each of them whole. This
+# keeps release's optimisation level and turns LTO off. Measured on a Mac
+# (2026-11-14), `cargo test --no-run --features cli,test-support` from a
+# clean target peaked at 611 MB with --release and 537 MB with this
+# profile; the images tier ran 7 tests in 25.3 s of CPU under --release,
+# 26.2 s here, and 235 s in the dev profile, so the optimisation stays.
+[profile.test-opt]
+inherits = "release"
+lto = false
+
 [[test]]
 name = "images"
 path = "tests/images.rs"
