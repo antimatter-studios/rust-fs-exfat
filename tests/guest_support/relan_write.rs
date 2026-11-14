@@ -111,8 +111,10 @@ export TZ=UTC
         .zip(paths)
         .map(|(phase, path)| Checkpoint {
             phase,
-            expected: serde_json::from_slice(&std::fs::read(path.with_extension("json")).unwrap())
-                .expect("the producer's complete expected model"),
+            expected: serde_json::from_reader(std::io::BufReader::new(
+                std::fs::File::open(path.with_extension("json")).unwrap(),
+            ))
+            .expect("the producer's complete expected model"),
             path,
         })
         .collect()

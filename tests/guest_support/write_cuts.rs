@@ -17,7 +17,7 @@
 
 use super::{guest, guest_path, quote};
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::Path;
 
 /// Whole sectors by byte offset: what differs from the image before.
@@ -141,16 +141,35 @@ PY
     print!("{}", out.stdout);
 
     let mut reports = BTreeMap::new();
-    let report = std::fs::read_to_string(directory.join("report.txt")).unwrap();
-    for section in report.split("== cut ").skip(1) {
-        let (cut, text) = section.split_once('\n').unwrap();
-        reports.insert(cut.parse::<u64>().unwrap(), text.to_owned());
+    let report =
+        std::io::BufReader::new(std::fs::File::open(directory.join("report.txt")).unwrap());
+    let mut current = None;
+    for line in report.lines() {
+        let line = line.unwrap();
+        if let Some(cut) = line.strip_prefix("== cut ") {
+            let cut = cut.parse::<u64>().unwrap();
+            assert!(reports.insert(cut, String::new()).is_none());
+            current = Some(cut);
+        } else {
+            let text = reports
+                .get_mut(&current.expect("report line before a cut header"))
+                .unwrap();
+            text.push_str(&line);
+            text.push('\n');
+        }
     }
     let mut repairs = BTreeMap::new();
-    let mut source = std::fs::read(directory.join("repairs.bin"))
-        .unwrap()
-        .into_iter();
-    let mut take = |count: usize| -> Vec<u8> { source.by_ref().take(count).collect() };
+    let mut source =
+        std::io::BufReader::new(std::fs::File::open(directory.join("repairs.bin")).unwrap());
+    let mut take = |count: usize| -> Vec<u8> {
+        let mut bytes = vec![0; count];
+        let first = source.read(&mut bytes[..1]).unwrap();
+        if first == 0 {
+            return Vec::new();
+        }
+        source.read_exact(&mut bytes[1..]).unwrap();
+        bytes
+    };
     loop {
         let head = take(12);
         if head.is_empty() {
@@ -168,12 +187,10 @@ PY
     }
 
     let mut verdicts = BTreeMap::new();
-    let mut text = String::new();
-    std::fs::File::open(directory.join("verdicts.txt"))
-        .unwrap()
-        .read_to_string(&mut text)
-        .unwrap();
+    let text =
+        std::io::BufReader::new(std::fs::File::open(directory.join("verdicts.txt")).unwrap());
     for line in text.lines() {
+        let line = line.unwrap();
         let fields: Vec<i64> = line
             .split(' ')
             .map(|field| field.parse().unwrap())

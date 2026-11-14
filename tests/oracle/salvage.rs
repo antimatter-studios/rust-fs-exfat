@@ -3,7 +3,6 @@
 //! (#97). The primitives under them are checked in `primitives.rs`; these
 //! check the verbs a salvage caller sees.
 
-use crate::support::Bytes;
 use fs_core::BlockRead;
 use fs_exfat::salvage::{
     Candidate, CandidateKind, CandidateState, Damage, EntrySetDetail, ExfatSalvage, Extent,
@@ -134,7 +133,7 @@ fn salvage_verbs_rebuild_what_the_read_only_macos_driver_lists_and_reads() {
             .unwrap()
             .file_type()
             .is_file());
-        let source = Bytes(std::fs::read(path).unwrap());
+        let source = crate::image_support::Image::open(path);
         let adapter = ExfatSalvage::probe(&source);
         assert_eq!(adapter.boot().unwrap().bytes_per_sector(), sector);
         assert!(adapter.capabilities().missing.is_empty());

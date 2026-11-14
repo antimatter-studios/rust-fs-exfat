@@ -13,6 +13,8 @@
 //! held before (the kernel's sentinel, macOS's populated tree) must still
 //! read back unchanged at the end, which [`run`] checks itself.
 
+use crate::image_support;
+
 use fs_core::OwnedRwSlice;
 use fs_exfat::interface;
 use fs_exfat::timestamp::Timestamp;
@@ -108,9 +110,9 @@ pub fn run(image: &Path, mut checkpoint: impl FnMut(usize, &str)) {
         volume
             .unmount()
             .unwrap_or_else(|error| panic!("unmount after {}: {error}", kind.name));
-        let flags = std::fs::read(image).unwrap();
+        let flags = image_support::Image::open(image);
         assert_eq!(
-            u16::from_le_bytes([flags[106], flags[107]]) & 2,
+            u16::from_le_bytes([flags.byte(106), flags.byte(107)]) & 2,
             0,
             "VolumeDirty is still set after {}",
             kind.name
