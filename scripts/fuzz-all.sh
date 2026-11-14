@@ -72,8 +72,13 @@ for target in $targets; do
     # that one is throwaway and the committed seeds stay as committed.
     mkdir -p "$scratch/$target"
     before=$(artifacts_of "$target")
+    input_limits=()
+    case "$target" in
+        write_allocations|write_sequence|write_failures) input_limits=(-max_len=292) ;;
+    esac
     if cargo +nightly fuzz run "$target" "$scratch/$target" "$seeds" -- \
         -max_total_time="$budget" -timeout="$input_timeout" -rss_limit_mb=2048 \
+        "${input_limits[@]}" \
         -print_final_stats=1 >"$log" 2>&1; then
         runs=$(sed -n 's/^stat::number_of_executed_units: *//p' "$log" | tail -n 1)
         coverage=$(sed -n 's/.*DONE *cov: *\([0-9]*\).*/\1/p' "$log" | tail -n 1)

@@ -29,6 +29,27 @@ doc = false
 bench = false
 
 [[bin]]
+name = "write_allocations"
+path = "fuzz_targets/write_allocations.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "write_sequence"
+path = "fuzz_targets/write_sequence.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "write_failures"
+path = "fuzz_targets/write_failures.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fat_entry"
 path = "fuzz_targets/fat_entry.rs"
 test = false

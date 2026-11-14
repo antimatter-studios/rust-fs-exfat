@@ -14,9 +14,12 @@
 pub mod support;
 
 mod recovery;
+mod writer;
 // Each cargo-fuzz binary uses one target of the module, and the gate all of them.
 #[allow(unused_imports)]
 pub use recovery::*;
+#[allow(unused_imports)]
+pub use writer::*;
 
 use fs_core::BlockRead;
 use fs_exfat::boot::{boot_checksum, BootSector};

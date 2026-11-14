@@ -15,8 +15,9 @@ request. It also fails when a public `parse` or `decode` has no target, when a
 target stops calling a salvage verb it lists, and when no seed in a corpus gets past
 its decoder's first check.
 
-A crash found by the explorer is a bug. Commit its reproducer to
-`fuzz/corpus/<target>/`, so the gate replays it from then on, and fix the decoder.
+A crash found by the explorer is a bug. Minimize it, file a separate issue with
+the reproducer and failing invariant, and add a regression test in that bug's
+red-first pull request. Do not fix driver bugs inside a fuzz-infrastructure change.
 
 ## Targets
 
@@ -35,6 +36,61 @@ A crash found by the explorer is a bug. Commit its reproducer to
 | `chain_islands` | `primitives::chain_islands` and `compute_stats` over an arbitrary FAT and bitmap |
 | `salvage` | every salvage adapter verb and exFAT extension over a damaged synthetic volume with unreadable sectors |
 | `plan` | arbitrary materialization plans, as JSON or built from bytes, with extents, cluster runs and declared lengths, validated and materialized |
+| `write_allocations` | bounded allocate/extend/shrink/free sequences, allocation ownership and free-space accounting |
+| `write_sequence` | bounded create/mkdir, write/pwrite, truncate, unlink/rmdir, rename, times, attributes, label and flush sequences |
+| `write_failures` | mount and writer operations with injected read, write and flush failures |
+
+## Writer bounds and invariants
+
+The writer targets clone fresh 1 MiB in-memory volumes from specification-built
+templates in `tests/write_support`, with 512- or 4096-byte sectors, 4 KiB clusters
+and one or two FATs. They never open a host path or device. They add no dependency;
+the existing explorer dependency `libfuzzer-sys` 0.4.13 is licensed
+`(MIT OR Apache-2.0) AND NCSA`, all permissive.
+
+Only the first 292 input bytes and at most 32 operations are interpreted. The
+runner also passes `-max_len=292` for these targets. The first byte selects the
+template. Remaining bytes are newline-separated records or packed records: four
+bytes for allocation operations, eight for file operations. The failure target
+uses a four-byte header: template, failure kind modulo three (read/write/flush),
+successful matching calls before failure (low four bits), and whether injection
+starts at mount (low bit) rather than after setup. Injection persists until the
+first refused operation or the end of the bounded sequence, then is disarmed.
+
+Names come from a bounded table containing nested, Unicode, empty/root, illegal,
+255-unit and 256-unit paths. Payloads are at most 8192 bytes. Offsets and lengths
+include sector/cluster boundaries, gaps, beyond-volume requests and `u64::MAX`;
+an accepted file can never exceed the fixed image. Allocation counts include zero,
+the remaining free space, one too many and `u32::MAX`. Invalid timestamps,
+attribute bits and labels exercise refusal paths without allocating from those
+untrusted values. The reader's metadata and chain workspaces are explicitly capped
+at 1 MiB and 256 clusters; the runner retains its 60-second per-input timeout,
+2 GiB RSS cap and 3600-second aggregate fuzz budget.
+
+Allocation operations must keep held clusters distinct, allocated and consistent
+with free-space accounting, and free them before unmount. File operations update a
+bounded model of paths, bytes and attributes only on success; successful time
+updates are read back immediately. A successful clean unmount must reopen through
+the strict reader, pass its allocation audit with no orphaned clusters, preserve
+the backup boot region, keep PercentInUse consistent, and mirror both FAT/bitmap
+copies when present. The file tree and label must match the model after reopening.
+An operation that poisons the mount must refuse subsequent mutations without
+changing the image, fail unmount and leave VolumeDirty set. Failed mounts and
+partially completed operations are not required to produce a clean volume, and no
+crash-recovery or transaction guarantee is inferred.
+
+The same targets replay committed seeds and deterministic mutations in
+`tests/fuzz_decoders.rs` on Rust 1.95.0. Seed reachability checks require every file
+operation to succeed, allocate/extend and every refusable file operation to be
+refused, and all three I/O failure kinds to fire during both mount and operations.
+Shrinking beyond the current cluster count is a successful no-op, and the harness
+checks the exact resulting allocation count. LastAccessed has two-second precision
+and no millisecond field; timestamp expectations retain that distinction. The gate
+also requires both poisoned and recoverable failure paths and checks that input
+past the operation and byte limits is ignored. These are in-process
+self-consistency checks, **not independent oracle evidence**, including the
+two-FAT checks. Linux/macOS/relan interoperability remains the responsibility of
+the sibling validation issues under #133; these targets need no Linux harness VM.
 
 `DirectoryEntry` and `Stream` have no target of their own because they have no
 decoder of their own: their fields are private and only `directory::parse` builds
