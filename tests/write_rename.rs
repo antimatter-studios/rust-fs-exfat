@@ -169,7 +169,7 @@ fn times_attributes_and_the_label_are_set() {
     volume.mkdir("/d").unwrap();
     let created = Timestamp::from_unix_milliseconds(1_000_000_000_990, 345).unwrap();
     let modified = Timestamp::from_unix_milliseconds(1_100_000_001_010, -480).unwrap();
-    let accessed = Timestamp::from_unix_milliseconds(1_200_000_001_500, 0).unwrap();
+    let accessed = Timestamp::from_unix_milliseconds(1_200_000_011_120, 345).unwrap();
     volume
         .set_times(
             "/f",
@@ -185,8 +185,16 @@ fn times_attributes_and_the_label_are_set() {
     assert_eq!(times.modified, modified);
     assert_eq!(
         times.accessed.unix_milliseconds(),
-        Some(1_200_000_000_000),
+        Some(1_200_000_010_000),
         "LastAccessed keeps even seconds only"
+    );
+    assert_eq!(
+        times.accessed,
+        Timestamp {
+            second: accessed.second - accessed.second % 2,
+            millisecond: 0,
+            ..accessed
+        }
     );
     let untouched = entry(volume.reader(), "/d").timestamps().created;
     volume
@@ -230,6 +238,7 @@ fn times_attributes_and_the_label_are_set() {
     volume.unmount().unwrap();
     let reread = Volume::open(Memory::new(device.snapshot())).unwrap();
     assert_eq!(reread.metadata().label.as_deref(), Some("BACKUP"));
+    assert_eq!(*entry(&reread, "/f").timestamps(), times);
 }
 
 #[test]
