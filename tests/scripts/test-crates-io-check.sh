@@ -16,7 +16,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fail() { echo "FAIL  $*" >&2; exit 1; }
 
-SANDBOX="$(mktemp -d)"
+SANDBOX="$(mktemp -d)" || exit 1
 trap 'rm -rf "$SANDBOX"' EXIT HUP INT TERM
 
 # A curl that answers from $CURL_CODES, one status per call (the last one

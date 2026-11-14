@@ -449,13 +449,13 @@ tasks:
     desc: The shell tests (tests/scripts/*.sh), every one by glob
     # By glob, so a test added later needs no edit here -- a guard that has to
     # be registered somewhere else is a guard that gets silently skipped.
-    # BUDGET: measured at 31 lines / 1,777 bytes with the receipt-scoped
-    # detach retry and retained-evidence regression (#176). A new file adds
-    # its `== name` line and a verdict; 33 / 1,950 leaves room for one.
+    # BUDGET: measured at 34 lines / 1,970 bytes with the sandbox-creation
+    # failure regression (#197). A new file adds its `== name` line and a
+    # verdict; 36 / 2,100 leaves room for one.
     cmds:
       - |
         set -eu
-        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 33 1950 -- bash -c '
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 36 2100 -- bash -c '
           set -eu
           for t in tests/scripts/*.sh; do
             echo "== $t"

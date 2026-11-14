@@ -17,7 +17,7 @@ fail() { echo "FAIL  $*" >&2; exit 1; }
 command -v rg >/dev/null ||
     fail "ripgrep (rg) is missing, so the source checks cannot be tested; \`chore tools\` installs it"
 
-SANDBOX="$(mktemp -d)"
+SANDBOX="$(mktemp -d)" || exit 1
 trap 'rm -rf "$SANDBOX"' EXIT HUP INT TERM
 
 # A PATH with the host's tools but no rg: each tool the checks may call,
