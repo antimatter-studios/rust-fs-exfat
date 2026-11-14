@@ -166,6 +166,17 @@ images the tests create. `newfs_exfat -N` reported its chosen cluster sizes from
 formatter chooses 2 MiB. `tests/oracle/mkfs.rs` compares the bytes each
 formatter writes and documents every difference.
 
+For #139, `tests/oracle/linux_mkfs.rs` formats new sparse images with this
+crate's formatter and uses exfatprogs' `fsck.exfat -n` and the Linux kernel's
+exfat driver only as black-box tools in the harness guest. Both sector sizes
+and the three default cluster-size steps from 1 MiB to 40 GiB are covered.
+Only the loop device returned for each staged image is mounted or detached.
+The strict reader checks the bytes the kernel wrote after unmounting, and the
+allocation audit must remain healthy. The guest's Linux 6.1 kernel, like macOS,
+leaves PercentInUse unchanged after writes; only that advisory warning is
+allowed after kernel writes (#175), while empty formatted volumes must have
+no deviations. No implementation source is an input, and no dependency is added.
+
 ## Permissive structure snapshots
 
 For #35, on 2026-11-09 the owner authorized the current Captain Salvage

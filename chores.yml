@@ -264,24 +264,22 @@ tasks:
     # evidence of what was checked, in tmp/logs/oracle.log. scripts/test.sh
     # runs cargo as a harness session, so the VM it boots comes down when
     # the tier ends. tests/test_contract.rs (unit tier) fails the suite if a
-    # test runs a Linux tool on the host.
+    # test runs a Linux tool on the host. The formatter also creates ten
+    # new volumes, from 1 MiB to 40 GiB at both sector sizes, for fsck.
     #
-    # BUDGET: 152 lines / 7,274 bytes in CI (run 43105817721, x86_64 guest,
-    # cold build: 81 of those lines are cargo's), 107 / 5,718 cold and 69 /
-    # 4,553 warm on a macOS host (#123). CI run 43391840746 at c60274f
-    # measured 81 / 5,450 warm, all three tests passing, including #129's
-    # allocation/free cycle at both sector sizes. #130's fixed successful
-    # report adds 11 lines / 691 bytes, measured from the test names and
-    # guest evidence messages, not a guest run. Adding that to 166 / 8,100
-    # and allowing timing digits gives 181 / 9,000. The full new guest run
-    # remains unmeasured locally.
-    # FLOOR: all five tests, including #129's allocation/free cycle, #130's
-    # writer tree and its synthetic producer check (not a guest substitute).
+    # BUDGET: 107 lines / 7,943 bytes for all six tests on 2026-11-13 (#139),
+    # macOS host and HVF guest, incremental build, including #129 and #130.
+    # The historical CI cold/warm difference (#123: 152 / 7,274 in CI run
+    # 43105817721 vs 69 / 4,553 warm) adds 83 lines / 2,721 bytes:
+    # 190 / 10,664 cold. 198 / 11,000 leaves eight lines and 336 bytes.
+    # The formatter's own successful report adds 15 lines / 1,475 bytes.
+    # FLOOR: all six tests, including #129's allocation/free cycle, #130's
+    # writer tree and producer check, and #139's ten formatted volumes.
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 181 9000 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 5
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 198 11000 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 6
   test:kernel:
     desc: 'THE KERNEL is the judge: every fixture loop-mounted read-only and walked in the guest, against the strict reader and salvage'
     # tests/kernel.rs: one `[kernel vm]` guest call per image mounts it with
@@ -290,19 +288,20 @@ tasks:
     # rebuild every file, and a reading with a file's last cluster dropped
     # must be caught. The write direction (#133) uses the same kernel walk.
     #
-    # BUDGET: 104 lines / 5,590 bytes from a cold build on a macOS host, 65 /
-    # 4,358 warm (#124); 135 / 7,300 is about 30% over the cold run. #130's
-    # fixed successful report adds 17 lines / 1,222 bytes (measured from
-    # test names and guest evidence messages with a three-digit entry
-    # count, not a guest run). 156 / 8,800 adds that with timing margin.
-    # The full new guest run remains unmeasured locally. FLOOR:
-    # all six tests, including #129's allocation/free cycle, #130's writer
-    # tree, its creation times and its synthetic producer check.
+    # BUDGET: 114 lines / 8,718 bytes for all seven tests on 2026-11-13 (#139),
+    # macOS host and HVF guest, incremental build, including #129 and #130.
+    # The historical cold/warm difference (#124: 104 / 5,590 vs 65 / 4,358)
+    # adds 39 lines / 1,232 bytes: 153 / 9,950 cold. 162 / 10,300 leaves
+    # nine lines and 350 bytes for timing digits and diagnostics.
+    # The formatter's own successful report adds 15 lines / 1,639 bytes.
+    # FLOOR: all seven tests: the fixture comparisons, #129's allocation/free
+    # cycle, #130's writer tree, creation times and producer check, and #139's
+    # kernel writes to ten formatted volumes, checked after unmounting.
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 156 8800 -- scripts/test.sh --locked --release --features cli,test-support --test kernel -- --show-output'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 6
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 162 10300 -- scripts/test.sh --locked --release --features cli,test-support --test kernel -- --show-output'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 7
   test:third:
     desc: 'CROSS-VALIDATION: relan/exfat, a third implementation built in the guest, reads every fixture as the kernel and this crate do'
     # tests/third.rs: relan/exfat's FUSE driver, exfatattrib and exfatfsck,
