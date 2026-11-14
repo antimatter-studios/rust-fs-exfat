@@ -6,12 +6,15 @@ use crate::fixture_support::{assert_same, strict_listing};
 use fs_exfat::{interface, primitives, write, Error};
 use std::path::Path;
 
+use crate::image_support;
+use image_support::{Image, Snapshot};
+
 pub const GEOMETRIES: [(u32, u32); 2] = [(512, 4096), (4096, 128 * 1024)];
 
 /// Exercise the allocation API on a guest-made image, then return it for
 /// independent checking. Every change must already be visible on disk.
 pub fn allocate_and_free(path: &Path) {
-    let before = std::fs::read(path).unwrap();
+    let before = Snapshot::new(path);
     let reader = interface::open_path(path, 0).unwrap();
     let tree = strict_listing(&reader);
     assert_eq!(tree.len(), 2, "kernel-created sentinel directory and file");
@@ -26,10 +29,13 @@ pub fn allocate_and_free(path: &Path) {
     let mut volume = write::open_path(path, 0).unwrap();
     assert_eq!(volume.free_clusters(), original_free);
     let check_state = |volume: &write::WriteVolume<_>| {
-        let bytes = std::fs::read(path).unwrap();
+        let image = Image::open(path);
+        let bytes = image.read(0..24 * sector);
+        let bitmap_bytes =
+            image.read(bitmap_at..bitmap_at + (boot.cluster_count as usize).div_ceil(8));
         assert_eq!(u16::from_le_bytes([bytes[106], bytes[107]]) & 2, 2);
         assert!(
-            bytes[12 * sector..24 * sector] == before[12 * sector..24 * sector],
+            bytes[12 * sector..24 * sector] == before.read(12 * sector..24 * sector),
             "backup boot region changed while mounted"
         );
         let used = u64::from(boot.cluster_count) - volume.free_clusters();
@@ -45,12 +51,12 @@ pub fn allocate_and_free(path: &Path) {
         for cluster in 2..boot.cluster_count + 2 {
             let bit = (cluster - 2) as usize;
             assert_eq!(
-                bytes[bitmap_at + bit / 8] & (1 << (bit % 8)) != 0,
+                bitmap_bytes[bit / 8] & (1 << (bit % 8)) != 0,
                 volume.reader().bitmap().allocated(cluster).unwrap(),
                 "cluster {cluster}: on-disk bitmap differs from the mount",
             );
         }
-        bytes
+        image
     };
     check_state(&volume);
 
@@ -61,7 +67,10 @@ pub fn allocate_and_free(path: &Path) {
     assert_eq!(volume.free_clusters(), original_free - 5);
     let bytes = check_state(&volume);
     for cluster in volume.clusters(&run).unwrap() {
-        assert_eq!(&bytes[fat_at + cluster as usize * 4..][..4], &[0; 4]);
+        assert_eq!(
+            &bytes.read(fat_at + cluster as usize * 4..fat_at + cluster as usize * 4 + 4),
+            &[0; 4]
+        );
     }
     let blocker = volume.allocate(1).unwrap();
     assert_eq!(blocker.first_cluster(), run.last_cluster() + 1);
@@ -75,7 +84,7 @@ pub fn allocate_and_free(path: &Path) {
     let bytes = check_state(&volume);
     for (index, cluster) in chain.iter().enumerate() {
         let at = fat_at + *cluster as usize * 4;
-        let next = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        let next = bytes.word(at);
         assert_eq!(next, chain.get(index + 1).copied().unwrap_or(0xffff_ffff));
     }
     volume.shrink(&mut run, 5).unwrap();
@@ -111,15 +120,9 @@ pub fn allocate_and_free(path: &Path) {
     );
     let bytes = check_state(&volume);
     let at = fat_at + first.first_cluster() as usize * 4;
-    assert_eq!(
-        u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()),
-        second.first_cluster()
-    );
+    assert_eq!(bytes.word(at), second.first_cluster());
     let at = fat_at + second.first_cluster() as usize * 4;
-    assert_eq!(
-        u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()),
-        0xffff_ffff
-    );
+    assert_eq!(bytes.word(at), 0xffff_ffff);
     volume.free(fragmented).unwrap();
     volume.free(separator).unwrap();
     volume.free(rest).unwrap();
@@ -127,16 +130,14 @@ pub fn allocate_and_free(path: &Path) {
     check_state(&volume);
     volume.unmount().unwrap();
 
-    let after = std::fs::read(path).unwrap();
+    let after_image = Image::open(path);
+    let after = after_image.read(0..24 * sector);
     assert_eq!(u16::from_le_bytes([after[106], after[107]]) & 2, 0);
     assert!(
-        after[12 * sector..24 * sector] == before[12 * sector..24 * sector],
+        after[12 * sector..24 * sector] == before.read(12 * sector..24 * sector),
         "backup boot region changed after unmount"
     );
-    assert!(
-        after[24 * sector..] == before[24 * sector..],
-        "all allocations freed; original FAT, bitmap, directories and data preserved"
-    );
+    image_support::assert_equal_from(&before.path, path, (24 * sector) as u64);
     assert_eq!(
         u64::from(after[112]),
         (u64::from(boot.cluster_count) - original_free) * 100 / u64::from(boot.cluster_count)

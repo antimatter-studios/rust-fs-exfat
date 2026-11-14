@@ -1,3 +1,6 @@
+#[path = "../support/image.rs"]
+mod image_support;
+
 use fs_exfat::capi::*;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
@@ -67,7 +70,7 @@ fn interfaces_match_the_reference_driver_and_check_only_oracle() {
             .unwrap()
             .file_type()
             .is_file());
-        let before = std::fs::read(&image).unwrap();
+        let before = image_support::Snapshot::new(&image);
         let requested_image = CString::new(image.to_str().unwrap()).unwrap();
         let handle = unsafe { fs_exfat_mount(requested_image.as_ptr(), 0) };
         assert!(!handle.is_null());
@@ -226,11 +229,8 @@ fn interfaces_match_the_reference_driver_and_check_only_oracle() {
             serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()["verified"],
             true
         );
-        assert_eq!(
-            std::fs::read(&destination).unwrap(),
-            b"contents of ASCII.txt\n"
-        );
-        assert_eq!(std::fs::read(&image).unwrap(), before);
+        image_support::assert_bytes(&destination, b"contents of ASCII.txt\n");
+        before.assert_unchanged(&image);
         unsafe { fs_exfat_umount(handle) };
     }
 }

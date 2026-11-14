@@ -1,12 +1,14 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+#[path = "../support/image.rs"]
+mod image_support;
+
 use fs_exfat::path::Node;
 use fs_exfat::volume::Volume;
 use fs_exfat::Error;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
-use support::Bytes;
 
 #[test]
 fn case_insensitive_lookup_and_failures_match_the_read_only_macos_driver() {
@@ -19,7 +21,7 @@ fn case_insensitive_lookup_and_failures_match_the_read_only_macos_driver() {
             .unwrap()
             .file_type()
             .is_file());
-        let volume = Volume::open(Bytes(std::fs::read(image).unwrap())).unwrap();
+        let volume = Volume::open(image_support::Image::open(image)).unwrap();
         let expected =
             std::fs::read_to_string(directory.join(format!("lookup-{sector}.txt"))).unwrap();
         assert_eq!(expected.lines().count(), 11);
