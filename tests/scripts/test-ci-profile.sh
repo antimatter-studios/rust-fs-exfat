@@ -9,7 +9,10 @@
 #   1. ci.yml runs on every pull request, whatever its base (every layer of
 #      the stack is based on the one below it), in the merge queue and on
 #      main.
-#   2. ci-ok carries `if: always()`, needs every other job, and its verdict,
+#   2. ci-ok carries the condition rust-fs-core's ci-gate declares for a
+#      superseded pull request run (false only when an ordinary pull
+#      request's run is cancelled; test-red-runs-uncancelled.sh evaluates
+#      it, #216), needs every other job, and its verdict,
 #      scripts/ci-ok.sh, judges exactly those jobs: a job missing from
 #      either is a job that gates nothing.
 #   3. EVERY JOB RUNS CHORE TASKS: each job runs the tasks its header line
@@ -106,8 +109,10 @@ ok = jobs.get("ci-ok")
 if not ok:
     problems.append("ci.yml has no ci-ok job")
 else:
-    if str(ok.get("if", "")).replace("${{", "").replace("}}", "").strip() != "always()":
-        problems.append("ci-ok does not carry `if: always()`")
+    superseded = ("!(cancelled() && github.event_name == 'pull_request' && "
+                  "!startsWith(github.event.pull_request.title, 'red:'))")
+    if str(ok.get("if", "")).replace("${{", "").replace("}}", "").strip() != superseded:
+        problems.append("ci-ok does not carry ci-gate's superseded-run condition `if: ${{ %s }}`" % superseded)
     needs = ok.get("needs") or []
     needs = [needs] if isinstance(needs, str) else needs
     others = sorted(j for j in jobs if j != "ci-ok")

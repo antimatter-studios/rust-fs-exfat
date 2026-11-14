@@ -65,9 +65,11 @@ name: ci
 #                 which hold this file, its verdict and the repository's own
 #                 scripts to what they say. No toolchain.
 #   ci-ok         the one required check: green only when every job above
-#                 ran and succeeded (failed, cancelled OR skipped fails it;
-#                 a run cancelled because a newer one superseded it passes
-#                 it, scripts/ci-superseded.sh, #208).
+#                 ran and succeeded (failed, cancelled OR skipped fails it).
+#                 In a cancelled ordinary pull request run GitHub cancels it
+#                 too, without a runner, so a superseded run frees the
+#                 group at once (#216); the check reads cancelled, never
+#                 passing.
 #
 # THE OUTPUT BUDGET IS IN THE TASKS, so it is in this workflow too. Each
 # tier writes its full output to tmp/logs/<tier>.log and prints a verdict; a
@@ -85,8 +87,9 @@ name: ci
 # THE LAYOUT. Each job checks this repository out into rust-fs-exfat/ and
 # rust-fs-core into rust-fs-core/ beside it, at chores.yml's FS_CORE_REF,
 # because chores.yml runs rust-fs-core's scripts in place from
-# ../rust-fs-core. That tooling ref is v0.4.5, the first release whose
-# agents-core-check.sh expects agent-core v10; the crate dependency in
+# ../rust-fs-core. That tooling ref is v0.4.6, whose ci-gate accepts the
+# cancelled ordinary-PR condition and whose agents-core-check.sh expects
+# agent-core v10; the crate dependency in
 # Cargo.toml is pinned separately. `chore siblings` (#120) replaces that second checkout.
 # Every `run:` runs in rust-fs-exfat/ (`defaults` below).
 
@@ -105,8 +108,8 @@ on:
 
 # CONCURRENCY (#208). An ordinary pull request's runs share one group per
 # workflow and pull request number, and a newer head cancels the run it
-# supersedes, its queued jobs included (ci-ok alone still runs, a few
-# seconds, to say the run was superseded): a superseded run holds runners
+# supersedes, its queued jobs and ci-ok included (ci-ok's condition below,
+# #216): a superseded run holds runners
 # that every other repository's required checks are waiting for, and its
 # verdict judges a commit nobody will land. Everything else keeps its
 # evidence, in a group of its own (run id and attempt, so even a pending run
@@ -153,7 +156,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Plan the profile
@@ -246,7 +249,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Stock runner tools
@@ -407,7 +410,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Stock runner tools
@@ -464,7 +467,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -607,7 +610,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -674,7 +677,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore
@@ -731,7 +734,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Stock runner tools
@@ -785,7 +788,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Stock runner tools
@@ -867,7 +870,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Stock runner tools
@@ -921,7 +924,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Stock runner tools
@@ -991,7 +994,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.5
+          ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
       - name: Stock runner tools
@@ -1020,9 +1023,19 @@ jobs:
 
   ci-ok:
     name: ci-ok
-    # Always, so a failed, skipped or cancelled job fails the gate instead of
-    # skipping it: GitHub counts a skipped required check as passing.
-    if: always()
+    # As always(), so a failed, skipped or cancelled job fails the gate
+    # instead of skipping it (GitHub counts a skipped required check as
+    # passing), with one exception rust-fs-core's ci-gate declares (#216):
+    # the condition is false only in a cancelled ordinary pull request run.
+    # GitHub re-evaluates it when it cancels the run and cancels ci-ok with
+    # the rest, so ci-ok concludes `cancelled` (never passing, never skipped)
+    # without waiting for a runner, and the newer head's run, held by the
+    # concurrency group until this one completes, starts at once. That holds
+    # for a run cancelled by hand with nothing newer too: its ci-ok reads
+    # cancelled and the pull request stays blocked. A cancelled red:, push,
+    # merge-queue or dispatch run still runs ci-ok, and the step below fails
+    # it. tests/scripts/test-red-runs-uncancelled.sh evaluates this per event.
+    if: ${{ !(cancelled() && github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:')) }}
     # Every job above. scripts/ci-ok.sh judges the same list, and
     # tests/scripts/test-ci-profile.sh holds the two equal.
     needs: [changes, unit, fixtures, images, test, suite-in-vm, test-arm64, oracle-macos, package, semver, msrv, wasm, cli, provenance, scripts]
@@ -1030,29 +1043,18 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      # scripts/ci-superseded.sh lists this workflow's runs.
-      actions: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
-      # A cancelled run fails the gate, unless a newer run of the same pull
-      # request superseded it (the concurrency block above): that run's ci-ok
-      # reports the verdict, and a failed one here would sit beside it when
-      # both ran for one commit (#167). Cancelled by hand with nothing newer,
-      # or a red:, main or merge-queue run: it fails.
-      - name: A cancelled workflow fails unless a newer run superseded it
+      # A cancelled run that still reaches ci-ok (red:, push, merge queue,
+      # dispatch; the condition above) fails the gate.
+      - name: A cancelled workflow fails
         if: cancelled()
         env:
           CANCELLED: "true"
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          EVENT: ${{ github.event_name }}
-          TITLE: ${{ github.event.pull_request.title }}
-          PR: ${{ github.event.pull_request.number }}
-        run: bash scripts/ci-superseded.sh || bash scripts/ci-ok.sh < /dev/null
+        run: bash scripts/ci-ok.sh < /dev/null
       # Not after a cancellation: the step above decided that run.
       - name: Every job ran and succeeded
         if: ${{ !cancelled() }}
