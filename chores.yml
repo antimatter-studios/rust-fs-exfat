@@ -261,7 +261,7 @@ tasks:
     # FLOOR: seven tests, every one of them.
     cmds:
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 98 3500 -- cargo test --locked --release --features cli,test-support --test images'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 98 3500 -- cargo test --locked --profile test-opt --features cli,test-support --test images'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored images 7
   test:oracle:
     desc: 'exfatprogs judges every fixture: fsck.exfat -n and dump.exfat, every call made inside the harness VM'
@@ -297,7 +297,7 @@ tasks:
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 220 13150 -- scripts/test.sh --locked --release --features cli,test-support --test exfatprogs -- --show-output'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored oracle oracle 220 13150 -- scripts/test.sh --locked --profile test-opt --features cli,test-support --test exfatprogs -- --show-output'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored oracle 8
   test:kernel:
     desc: 'THE KERNEL is the judge: every fixture loop-mounted read-only and walked in the guest, against the strict reader and salvage'
@@ -326,7 +326,7 @@ tasks:
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 186 14150 -- scripts/test.sh --locked --release --features cli,test-support --test kernel -- --show-output'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored kernel kernel 186 14150 -- scripts/test.sh --locked --profile test-opt --features cli,test-support --test kernel -- --show-output'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored kernel 9
   test:third:
     desc: 'CROSS-VALIDATION: pinned guest-built relan/exfat checks fixtures and both write directions at both sector geometries'
@@ -350,7 +350,7 @@ tasks:
     cmds:
       - scripts/tools.sh --check
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored third third 320 27000 -- scripts/test.sh --locked --release --features cli,test-support --test third -- --show-output'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored third third 320 27000 -- scripts/test.sh --locked --profile test-opt --features cli,test-support --test third -- --show-output'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored third 9
   test:oracle-macos:
     desc: 'macOS newfs_exfat, fsck_exfat -n and the read-only macOS driver, on a Mac host'
