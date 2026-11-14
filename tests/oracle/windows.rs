@@ -1,4 +1,5 @@
-use super::{primitives::chain, support::Bytes};
+use super::primitives::chain;
+use crate::image_support::Image;
 use fs_exfat::{
     boot::BootRegions,
     device::Reader,
@@ -14,9 +15,9 @@ fn directory() -> PathBuf {
         .into()
 }
 
-fn reference(sector: usize) -> (Vec<u8>, BootSector) {
-    let image = std::fs::read(directory().join(format!("windows-{sector}.dmg"))).unwrap();
-    let boot = BootSector::parse(&image[..512]).unwrap();
+fn reference(sector: usize) -> (Image, BootSector) {
+    let image = Image::open(directory().join(format!("windows-{sector}.dmg")));
+    let boot = BootSector::parse(&image.read(0..512)).unwrap();
     (image, boot)
 }
 
@@ -24,7 +25,7 @@ fn reference(sector: usize) -> (Vec<u8>, BootSector) {
 fn windows_layout_boot_matches_the_independent_reader_and_both_checksums() {
     for sector in [512, 4096] {
         let (image, independent) = reference(sector);
-        let report = BootRegions::read(&Reader::new(Bytes(image.clone()))).unwrap();
+        let report = BootRegions::read(&Reader::new(image.clone())).unwrap();
         let boot = report.strict().unwrap();
         assert_eq!(boot.bytes_per_sector(), sector as u64);
         assert_eq!(boot.cluster_size(), 32768);
@@ -51,7 +52,8 @@ fn windows_layout_boot_matches_the_independent_reader_and_both_checksums() {
         assert_eq!(boot.percent_in_use, independent.percent_in_use);
         assert!(report.differences.is_empty());
         for copy in [0, 12 * sector] {
-            let region = &image[copy..copy + 12 * sector];
+            let bytes = image.read(copy..copy + 12 * sector);
+            let region = bytes.as_slice();
             let checksum = boot_checksum(region, sector);
             for offset in (11 * sector..12 * sector).step_by(4) {
                 assert_eq!(u32_at(region, offset), checksum);
@@ -65,7 +67,7 @@ fn windows_layout_system_streams_match_independent_raw_metadata() {
     for sector in [512, 4096] {
         let (image, boot) = reference(sector);
         let root = chain(&image, &boot, boot.root_cluster, None);
-        let volume = Volume::open(Bytes(image.clone())).unwrap();
+        let volume = Volume::open(image.clone()).unwrap();
         assert_eq!(&root[..96], &volume.root_bytes()[..96]);
         assert_eq!((root[0], root[32], root[64]), (0x83, 0x81, 0x82));
         let label: Vec<_> = (0..usize::from(root[1]))
@@ -123,7 +125,7 @@ fn windows_layout_system_streams_match_independent_raw_metadata() {
 fn windows_layout_every_file_hash_matches_the_read_only_macos_driver() {
     for sector in [512, 4096] {
         let (image, _) = reference(sector);
-        let volume = Volume::open(Bytes(image)).unwrap();
+        let volume = Volume::open(image).unwrap();
         let report = fs_exfat::check::check(&volume).unwrap();
         assert!(report.healthy());
         assert_eq!((report.files, report.directories), (4, 1));

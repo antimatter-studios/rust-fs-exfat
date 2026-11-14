@@ -1,12 +1,14 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+#[path = "../support/image.rs"]
+mod image_support;
+
 use fs_core::BlockRead;
 use fs_exfat::directory::DirectoryEntry;
 use fs_exfat::volume::Volume;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use support::Bytes;
 use unicode_normalization::UnicodeNormalization;
 
 fn walk<Device: BlockRead>(
@@ -50,7 +52,7 @@ fn every_directory_path_and_file_size_match_the_read_only_macos_driver() {
             .unwrap()
             .file_type()
             .is_file());
-        let volume = Volume::open(Bytes(std::fs::read(image).unwrap())).unwrap();
+        let volume = Volume::open(image_support::Image::open(image)).unwrap();
         let mut records = BTreeSet::new();
         walk(&volume, volume.root_directory().unwrap(), "", &mut records);
         assert!(records.len() > 185);

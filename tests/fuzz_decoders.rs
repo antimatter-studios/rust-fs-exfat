@@ -201,6 +201,10 @@ fn seeds_of(target: &str) -> Vec<(String, Vec<u8>)> {
         .map(|entry| {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(
+                std::fs::metadata(&path).unwrap().len() < 1 << 20,
+                "seed {name} exceeds the small-file limit"
+            );
             (name, std::fs::read(&path).unwrap())
         })
         .collect();

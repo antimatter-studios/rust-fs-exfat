@@ -9,7 +9,9 @@ use fs_core::BlockRead;
 use fs_exfat::boot::BootSector;
 use fs_exfat::metadata::SystemStream;
 use fs_exfat::volume::Volume;
-use shared::support::Bytes;
+#[path = "../support/image.rs"]
+mod image_support;
+use image_support::Image;
 use std::path::{Path, PathBuf};
 
 /// Keeps the seed small enough for the fuzzer to change usefully: the leading part of
@@ -33,13 +35,13 @@ fn whole_sets(directory: &[u8], limit: usize) -> &[u8] {
 
 fn stream<Device: BlockRead>(
     volume: &Volume<Device>,
-    image: &[u8],
+    image: &Image,
     system: SystemStream,
 ) -> Vec<u8> {
     let mut bytes = Vec::new();
     for cluster in volume.cluster_chain(system.first_cluster).unwrap() {
         let start = volume.boot().cluster_offset(cluster).unwrap() as usize;
-        bytes.extend_from_slice(&image[start..start + volume.boot().cluster_size() as usize]);
+        bytes.extend_from_slice(&image.read(start..start + volume.boot().cluster_size() as usize));
     }
     bytes.truncate(system.length as usize);
     bytes
@@ -67,18 +69,23 @@ fn seeds_cut_from_reference_images_reach_past_each_decoders_first_check() {
         write(target, name, bytes);
     };
     for sector in [512, 4096] {
-        let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
+        let image = Image::open(directory.join(format!("reference-{sector}.dmg")));
         let name = format!("newfs-{sector}.bin");
-        let volume = Volume::open(Bytes(image.clone())).unwrap();
+        let volume = Volume::open(image.clone()).unwrap();
         let boot: &BootSector = volume.boot();
         let metadata = volume.metadata();
 
-        emit("boot_sector", &name, &image[..512], shared::boot_sector);
+        emit(
+            "boot_sector",
+            &name,
+            &image.read(0..512),
+            shared::boot_sector,
+        );
 
         let fat = (u64::from(boot.fat_offset) * boot.bytes_per_sector()) as usize;
         for cluster in [boot.root_cluster, metadata.upcase.first_cluster] {
             let at = fat + cluster as usize * 4;
-            let seed = prefixed(&image[at..at + 4], &boot.cluster_count.to_le_bytes());
+            let seed = prefixed(&image.read(at..at + 4), &boot.cluster_count.to_le_bytes());
             emit(
                 "fat_entry",
                 &format!("newfs-{sector}-{cluster}.bin"),
@@ -122,7 +129,8 @@ fn seeds_cut_from_reference_images_reach_past_each_decoders_first_check() {
         let start = boot
             .cluster_offset(nested.stream().first_cluster())
             .unwrap() as usize;
-        let children = &image[start..start + nested.stream().data_length() as usize];
+        let children_bytes = image.read(start..start + nested.stream().data_length() as usize);
+        let children = children_bytes.as_slice();
         let seed = prefixed(&[0], whole_sets(children, 4096));
         emit(
             "directory",
