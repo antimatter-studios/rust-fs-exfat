@@ -122,6 +122,111 @@ else:
     if not re.search(r"(?i)tojson\(\s*needs\s*\)", text) or "scripts/ci-ok.sh" not in text:
         problems.append("ci-ok does not hand toJSON(needs) to scripts/ci-ok.sh")
 
+# Runner routing: only light x64 Linux work may use the runner gate.
+gated = "unit msrv package provenance scripts semver cli wasm images".split()
+# A pick reserves a runner slot for 120 s. A gated job that also needs a
+# long job (images needs fixtures) is picked as the last step of that long
+# job instead, and reads its runners with an empty-object fallback.
+late_pickers = {"images": "fixtures"}
+hosted = {
+    "changes": "ubuntu-latest", "fixtures": "ubuntu-24.04",
+    "test": "ubuntu-24.04", "test-arm64": "ubuntu-24.04-arm",
+    "oracle-macos": "macos-26", "suite-in-vm": "ubuntu-24.04",
+    "ci-ok": "ubuntu-latest",
+}
+for name, label in hosted.items():
+    if jobs.get(name, {}).get("runs-on") != label:
+        problems.append(f"{name} must stay hosted on {label}")
+for name in gated:
+    job = jobs.get(name, {})
+    picker_job = late_pickers.get(name, "changes")
+    expected = ("${{ fromJSON(needs." + picker_job + ".outputs.runners || '{}')['" + name
+                + "'] || 'ubuntu-24.04' }}" if picker_job != "changes" else
+                "${{ fromJSON(needs.changes.outputs.runners)['" + name + "'] || 'ubuntu-24.04' }}")
+    if job.get("runs-on") != expected:
+        problems.append(f"{name} must use the runner gate with ubuntu-24.04 fallback, "
+                        f"reading needs.{picker_job}.outputs.runners")
+    needs = job.get("needs", [])
+    needs = [needs] if isinstance(needs, str) else needs
+    if picker_job not in needs:
+        problems.append(f"{name} must need its picker, {picker_job}")
+    if picker_job == "changes" and set(needs) != {"changes"}:
+        problems.append(f"{name} needs more than changes, so its pick in changes would expire: "
+                        "pick it at the end of the job it needs that finishes last")
+    if job.get("strategy", {}).get("matrix"):
+        problems.append(f"{name}: matrix legs need separate runner picks")
+    st = steps(job)
+    install = next((i for i, s in enumerate(st) if s.get("name") == "Install chore"), -1)
+    tools = next((i for i, s in enumerate(st) if s.get("name") == "Stock runner tools"), -1)
+    if not 0 <= tools < install:
+        problems.append(f"{name} must install stock runner tools before chore's checksum check")
+    else:
+        run = st[tools].get("run", "")
+        packages = {"perl"}
+        if name not in ("provenance", "scripts"):
+            packages.add("build-essential")
+        if name in ("unit", "scripts"):
+            packages.update(("python3-venv", "ripgrep"))
+            if not any("pip\" install --quiet PyYAML==6.0.3" in s.get("run", "") for s in st):
+                problems.append(f"{name} must install PyYAML")
+        if name == "provenance":
+            packages.add("ripgrep")
+        if name == "wasm":
+            packages.update(("pkg-config", "libssl-dev"))
+            if not any("actions/setup-node@" in s.get("uses", "") for s in st):
+                problems.append("wasm must install Node explicitly")
+        if "sudo apt-get update" not in run or not packages <= set(run.split()):
+            problems.append(f"{name} must refresh apt and install {sorted(packages)}")
+    if name not in ("provenance", "scripts") and not any(
+        "dtolnay/rust-toolchain@" in s.get("uses", "")
+        and str(s.get("with", {}).get("toolchain")) == "1.95.0" for s in st
+    ):
+        problems.append(f"{name} must bootstrap the pinned Rust toolchain explicitly")
+
+def check_picker(picker_name, picked):
+    job = jobs.get(picker_name, {})
+    picker_steps = [s for s in steps(job) if s.get("name") == "Pick runners"]
+    if len(picker_steps) != 1 or steps(job)[-1] != picker_steps[0]:
+        problems.append(f"{picker_name} must pick runners exactly once, as its last step")
+    else:
+        picker = picker_steps[0]
+        if picker.get("id") != "runners" or picker.get("if"):
+            problems.append(f"the runner picker in {picker_name} must unconditionally publish runners")
+        if (picker.get("env", {}).get("JOBS") or "").split() != picked:
+            problems.append(f"the picker in {picker_name} must choose once for each of {picked}")
+        for key, expression in {
+            "ORG": "github.repository_owner", "ACTOR": "github.triggering_actor",
+            "AUTHOR": "github.event.pull_request.user.login", "SENDER": "github.event.sender.login",
+            "GH_ACTOR": "github.actor",
+        }.items():
+            if picker.get("env", {}).get(key) != "${{ " + expression + " }}":
+                problems.append(f"runner picker in {picker_name} must pass {key} from {expression}")
+        run = picker.get("run", "")
+        for required_text in (
+            'for who in "$ACTOR" "$GH_ACTOR" "$SENDER" "$AUTHOR"; do',
+            '[ -z "$who" ] || [ "$who" = christhomas ] || ours=false',
+            '$ours || { echo ubuntu-24.04; return; }',
+            'curl -fsS --max-time 10 --get https://runner-gate.antimatter-studios.com/pick',
+            '--data-urlencode "org=$ORG"', '--data-urlencode prefer=antimatter-vps-linux-x64',
+            '--data-urlencode fallback=ubuntu-24.04', '--data-urlencode "actor=$ACTOR"',
+            '--data-urlencode "author=$AUTHOR"', '--data-urlencode "run=${{ github.run_id }}"',
+            '--data-urlencode "attempt=${{ github.run_attempt }}"', '--data-urlencode "job=$1"',
+            ') || r=ubuntu-24.04',
+            'case "$r" in antimatter-vps-linux-x64|ubuntu-24.04) echo "$r" ;; *) echo ubuntu-24.04 ;; esac',
+            'tee -a "$GITHUB_STEP_SUMMARY"', 'echo "runners=$runners" >> "$GITHUB_OUTPUT"',
+        ):
+            if required_text not in run:
+                problems.append(f"runner picker in {picker_name} is missing contract text: {required_text}")
+    if job.get("outputs", {}).get("runners") != "${{ steps.runners.outputs.runners || '{}' }}":
+        problems.append(f"{picker_name} must publish runners with an empty-object fallback")
+
+check_picker("changes", [n for n in gated if n not in late_pickers])
+for picker_name in sorted(set(late_pickers.values())):
+    check_picker(picker_name, [n for n in gated if late_pickers.get(n) == picker_name])
+for name, job in (load(".github/workflows/image-safety.yml").get("jobs") or {}).items():
+    if job.get("runs-on") != "ubuntu-latest":
+        problems.append(f"image-safety {name} must stay on ubuntu-latest")
+
 # 3. Every job runs chore tasks: the ones its header line names.
 required = {
     "unit": ["build", "test:unit", "lint"],
