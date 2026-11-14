@@ -57,12 +57,12 @@ jobs:
         with:
           persist-credentials: false
           path: rust-fs-exfat
-      # rust-fs-core at the version Cargo.toml pins, for the tier runner;
+      # rust-fs-core at chores.yml's FS_CORE_REF, for the tier runner;
       # `chore siblings` (#120) takes this over, as in ci.yml.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
-          ref: v0.4.3
+          ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
       - name: Install chore

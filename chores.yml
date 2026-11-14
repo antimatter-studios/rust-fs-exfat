@@ -86,9 +86,12 @@ vars:
   # The sibling pins. One place, read by `chore siblings`. URL as well as
   # ref, as rust-fs-ext4 has them.
   FS_CORE_URL: https://github.com/antimatter-studios/rust-fs-core.git
-  # The tiers run ../rust-fs-core/scripts/tier.sh and test-floor.sh in place;
-  # v0.4.3 is the release Cargo.toml depends on and CI checks out.
-  FS_CORE_REF: v0.4.3
+  # The tiers and lint run ../rust-fs-core's scripts in place, and every CI
+  # job checks rust-fs-core out at this ref. v0.4.5 is the first release
+  # whose agents-core-check.sh expects agent-core v10, so it is the floor
+  # `chore siblings` holds a local sibling to. Cargo.toml's crate dependency
+  # is pinned separately.
+  FS_CORE_REF: v0.4.5
   LINUX_HARNESS_URL: https://github.com/antimatter-studios/fs-linux-test-harness.git
   # v0.6.2: the release whose guest-run.sh the family's shared guest
   # (FLTH_SHARED_ROOT) was booted with, so this consumer can join it.
