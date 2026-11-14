@@ -138,11 +138,12 @@ env:
 jobs:
   changes:
     name: changes (which profile, and does it need the full pipeline?)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       code: ${{ steps.c.outputs.code }}
       profile: ${{ steps.plan.outputs.profile }}
+      runners: ${{ steps.runners.outputs.runners || '{}' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -199,10 +200,39 @@ jobs:
           fi
           echo "code=$code ($EVENT${range:+ $range})"
           echo "code=$code" >> "$GITHUB_OUTPUT"
+      - name: Pick runners
+        id: runners
+        env:
+          ORG: ${{ github.repository_owner }}
+          ACTOR: ${{ github.triggering_actor }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          SENDER: ${{ github.event.sender.login }}
+          GH_ACTOR: ${{ github.actor }}
+          JOBS: unit msrv package provenance scripts semver cli wasm images
+        run: |
+          set -euo pipefail
+          ours=true
+          for who in "$ACTOR" "$GH_ACTOR" "$SENDER" "$AUTHOR"; do
+            [ -z "$who" ] || [ "$who" = christhomas ] || ours=false
+          done
+          pick() {
+            $ours || { echo ubuntu-latest; return; }
+            r=$(curl -fsS --max-time 10 --get https://runner-gate.antimatter-studios.com/pick \
+                  --data-urlencode "org=$ORG" --data-urlencode prefer=antimatter-vps-linux-x64 \
+                  --data-urlencode fallback=ubuntu-latest --data-urlencode "actor=$ACTOR" --data-urlencode "author=$AUTHOR" \
+                  --data-urlencode "run=${{ github.run_id }}" --data-urlencode "attempt=${{ github.run_attempt }}" \
+                  --data-urlencode "job=$1") || r=ubuntu-latest
+            case "$r" in antimatter-vps-linux-x64|ubuntu-latest) echo "$r" ;; *) echo ubuntu-latest ;; esac
+          }
+          runners='{}'
+          for job in $JOBS; do runners=$(jq -c --arg j "$job" --arg r "$(pick "$job")" '. + {($j): $r}' <<<"$runners"); done
+          echo "$runners" | jq . | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "runners=$runners" >> "$GITHUB_OUTPUT"
 
   unit:
     name: unit (no tools, no fixtures)
-    runs-on: ubuntu-24.04
+    needs: changes
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['unit'] || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -215,6 +245,10 @@ jobs:
           ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl build-essential python3-venv ripgrep
       - name: Install chore
         # Pinned (CHORE_VERSION) and checked against the release's checksums.
         run: scripts/ci-install-chore.sh
@@ -227,7 +261,6 @@ jobs:
         # and check-provenance.sh. `chore tools` (#120) takes this over.
         run: |
           set -euo pipefail
-          sudo apt-get install -y --no-install-recommends ripgrep >/dev/null
           python3 -m venv "$RUNNER_TEMP/python"
           "$RUNNER_TEMP/python/bin/pip" install --quiet PyYAML==6.0.3
           echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
@@ -325,8 +358,8 @@ jobs:
     # artifact present. No VM and no exfatprogs; test-arm64 and oracle-macos
     # run the same tier on their architectures.
     name: images (x86_64, fixtures artifact, no VM)
-    needs: fixtures
-    runs-on: ubuntu-24.04
+    needs: [changes, fixtures]
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['images'] || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -339,6 +372,10 @@ jobs:
           ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl build-essential
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
@@ -645,7 +682,8 @@ jobs:
 
   package:
     name: package (the crate as published)
-    runs-on: ubuntu-24.04
+    needs: changes
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['package'] || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -658,6 +696,10 @@ jobs:
           ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl build-essential
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
@@ -684,7 +726,8 @@ jobs:
 
   semver:
     name: semver (public API against its baseline)
-    runs-on: ubuntu-24.04
+    needs: changes
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['semver'] || 'ubuntu-latest' }}
     timeout-minutes: 30
     env:
       # The version rust-fs-core's semver-check.sh expects. A prebuilt binary,
@@ -707,6 +750,10 @@ jobs:
           ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl build-essential
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
@@ -738,15 +785,23 @@ jobs:
 
   msrv:
     name: msrv (Cargo.toml rust-version)
-    runs-on: ubuntu-24.04
+    needs: changes
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['msrv'] || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl build-essential
       - name: Install chore
         run: scripts/ci-install-chore.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
       - name: Cache cargo
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -763,7 +818,8 @@ jobs:
 
   wasm:
     name: wasm32 (browser build, tests under Node)
-    runs-on: ubuntu-24.04
+    needs: changes
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['wasm'] || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -776,12 +832,19 @@ jobs:
           ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl build-essential pkg-config libssl-dev
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - name: Install Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
+        with:
+          toolchain: 1.95.0
       - name: Cache cargo
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -809,7 +872,8 @@ jobs:
 
   cli:
     name: cli (the installed tools, on PATH)
-    runs-on: ubuntu-24.04
+    needs: changes
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['cli'] || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -822,6 +886,10 @@ jobs:
           ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl build-essential
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
@@ -855,25 +923,27 @@ jobs:
 
   provenance:
     name: provenance (no copyleft exFAT source named)
-    runs-on: ubuntu-24.04
+    needs: changes
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['provenance'] || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl ripgrep
       - name: Install chore
         run: scripts/ci-install-chore.sh
-      - name: Host tools
-        # ripgrep, which check-provenance.sh searches with. `chore tools`
-        # (#120) takes this over.
-        run: sudo apt-get install -y --no-install-recommends ripgrep >/dev/null
       - name: chore check:provenance
         run: chore check:provenance
 
   scripts:
     name: scripts (the shell tests)
-    runs-on: ubuntu-24.04
+    needs: changes
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['scripts'] || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -886,6 +956,10 @@ jobs:
           ref: v0.4.5
           persist-credentials: false
           path: rust-fs-core
+      - name: Stock runner tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl python3-venv ripgrep
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - name: PyYAML
@@ -895,10 +969,6 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/python"
           "$RUNNER_TEMP/python/bin/pip" install --quiet PyYAML==6.0.3
           echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
-      - name: ripgrep
-        # tests/scripts/test-source-checks.sh runs the source checks, which
-        # fail without rg (#138).
-        run: sudo apt-get install -y --no-install-recommends ripgrep >/dev/null
       - name: chore test:scripts
         id: tier
         run: chore test:scripts
