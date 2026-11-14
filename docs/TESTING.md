@@ -59,7 +59,7 @@ measured 34,300-byte cap covers this case without another budget increase.
 |---|---|---|---|
 | unit | 2026-11-13 (#178), 3ed71ee: 406 passing tests, 567 lines / 33768 bytes with three slow-test notices; earlier c60274f (#173), 402 tests: local macOS 564 lines / 33931 bytes, CI Linux 560 / 32902 and macOS 560 / 32903 | 570 lines, 34300 bytes; three lines above the 406-test measurement for timing diagnostics, with the byte cap retained | 150 |
 | images | CI run 43105817721, ubuntu, cold build: 95 lines, 3328 bytes; 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 98 lines, 3500 bytes | 7 |
-| oracle | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 107 lines, 7943 bytes, 6 tests; the historical CI cold/warm difference adds 83 lines, 2721 bytes: 190 lines, 10664 bytes cold; the formatter alone adds 15 lines, 1475 bytes; 2026-11-14 (#185), the same host, release build with 39 Compiling lines: 149 lines, 9566 bytes, 7 tests; the write-kind checkpoints add 10 lines, 1135 bytes: 200 lines, 11799 bytes cold | 208 lines, 12150 bytes | 7 |
+| oracle | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 107 lines, 7943 bytes, 6 tests; the historical CI cold/warm difference adds 83 lines, 2721 bytes: 190 lines, 10664 bytes cold; the formatter alone adds 15 lines, 1475 bytes; 2026-11-14 (#185), the same host, release build with 39 Compiling lines: 149 lines, 9566 bytes, 7 tests; the write-kind checkpoints add 10 lines, 1135 bytes: 200 lines, 11799 bytes cold; 2026-11-14 (#188), the same host, warm release build with one Compiling line: 123 lines, 9379 bytes, 8 tests; the block-cut matrix adds 12 lines, 967 bytes: 212 lines, 12766 bytes cold | 220 lines, 13150 bytes | 8 |
 | kernel | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 114 lines, 8718 bytes, 7 tests; the historical cold/warm difference adds 39 lines, 1232 bytes: 153 lines, 9950 bytes cold; the formatter alone adds 15 lines, 1639 bytes; 2026-11-14 (#186), the same host, release build with 1 Compiling line: 136 lines, 12319 bytes, 9 tests; the write matrix adds 24 lines, 3834 bytes: 177 lines, 13784 bytes cold | 186 lines, 14150 bytes | 9 |
 | third | 2026-11-11 relan/exfat (#125), local macOS HVF guest, warm: 95 lines, 7084 bytes, 3 tests; a cold build adds about 38 lines, 1165 bytes | 175 lines, 10700 bytes | 3 |
 | vm | 2026-11-11 the whole suite in the guest (#126), local macOS HVF guest, warm: 625 lines, 38742 bytes, 411 tests with the write layers; CI's fresh guest adds the toolchain install and a whole build, about 60 lines, 3.5 KB | 860 lines, 51000 bytes | 388 |
@@ -281,6 +281,78 @@ exfatprogs' `exfatlabel` sets and clears the label in the kernel direction.
 The label in the crate direction is left to the #185 checkers. Allocation
 without an entry has no kernel interface. No crash safety or TexFAT behaviour
 is inferred.
+
+### Block-cut crash matrix (#188)
+
+The writer's recovery contract, decided by the owner on #188 (option (b),
+"other files are safe"): after a write is cut off at any block boundary,
+
+- every file and directory the interrupted operation was not changing is
+  intact: the same names, sizes, attributes, times and bytes as before the
+  operation;
+- the file or directory being changed may be left in its old state,
+  partially updated, or missing, but must not corrupt anything else;
+- the volume may be left dirty, and the only inconsistencies allowed are
+  ones `fsck.exfat` repairs without touching unrelated files, such as
+  clusters marked allocated that nothing references (leaked space).
+
+Nothing more is claimed: no operation is atomic or transactional, nothing
+is journalled, there is no production repair mode (this crate's
+`fsck.exfat` stays check-only), and no TexFAT behaviour is established
+(#154).
+
+The model is a device that persists writes in the order the writer issues
+them, one whole volume sector at a time, and loses power after some number
+of sectors. `CutDevice` in `tests/write_support/cuts.rs` is that device: it
+counts sectors rather than calls, so a multi-sector write is cut inside
+itself, and it refuses every write after the cut. Reordering inside a
+device between flushes, and a sector torn part-way, are not modelled.
+
+`tests/write_support/cuts.rs` holds a bounded script of 22 steps, each one
+writer operation on a mount of its own: allocate, extend and free; mkdir at
+the root and nested; create an empty file; write_file three files; pwrite
+to append, to overwrite in place and to grow a file into a FAT chain;
+truncate to grow and to shrink; rename across directories, case-only,
+replacing a file, and of a directory with contents; set times; set
+attributes; set the label; unlink a file with clusters and an empty one;
+and rmdir. One uncut run counts the sectors each step writes. Then, for
+every cut position from zero sectors to all of them, the script is replayed
+onto a fresh copy of a guest-formatted image (8 MiB, with the kernel-made
+`/keep/sentinel.bin`) through a `CutDevice` that stops there; the replay
+must stop inside the step the count predicts, after exactly that many
+sectors. Before the interrupted step, the strict reader records a manifest
+of every path the step does not change (the step's own paths and, for a
+directory, everything under it are left out; their parents' own times may
+change).
+
+`chore test:oracle` runs the matrix at both geometries: 512-byte sectors
+with 4 KiB clusters, and 4096-byte sectors with 128 KiB clusters. Every cut image crosses the share as the
+sectors in which it differs from the cut before it, in one file,
+`deltas.bin`, and `tests/guest_support/write_cuts.rs` rebuilds them in order
+on the guest's disk. exfatprogs' `fsck.exfat -n` judges each image as the
+cut left it; one it refuses is repaired on a private copy with
+`fsck.exfat -y`, which must report success, and the repaired copy must then
+pass `fsck.exfat -n`. The sectors the repair changed come back, and the
+host reads the judged image (as cut, or repaired) with the strict reader:
+every path in the manifest must be there with the same fields and bytes, no
+other path may appear beside them, and this crate's allocation audit must
+find no stream using a free or shared cluster. A cut at a step boundary,
+and the uncut end, must pass `fsck.exfat -n` as they stand. A control
+changes one byte of the sentinel's data in the final image and requires the
+same check to refuse it, so the matrix cannot pass vacuously.
+
+On 2026-11-14 the matrix judged 167 cut positions at 512-byte sectors and
+335 at 4096-byte sectors, the uncut end included. `fsck.exfat -n` (exfatprogs 1.2.0) refused two at each
+geometry, both inside a rename, where the new entry and the old one briefly
+share clusters; `fsck.exfat -y` truncated the renamed entry, a path the
+step was changing, and every other file was intact. 67 and 176 cuts leave
+leaked clusters. exfatprogs 1.2.0 neither reports nor reclaims those, so
+they are counted by this crate's audit, not by the checker. No cut broke
+the contract. A cut that does is a writer ordering defect: it fails the
+tier, names the step, the sectors of it written and the byte offset of the
+first lost sector, and retains the fresh image, `deltas.bin`, the checker's
+report and the first failing images beside them; it is filed red-first and
+fixed in the write order, never by weakening the contract.
 
 Windows formatting is additional evidence only if the Windows harness can
 provide it.
