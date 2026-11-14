@@ -1,6 +1,9 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+#[path = "../support/image.rs"]
+mod image_support;
+
 mod mkfs;
 mod primitives;
 mod salvage;
@@ -11,8 +14,8 @@ mod windows;
 mod fixtures;
 
 use fs_exfat::{boot::BootRegions, device::Reader};
+use image_support::Image;
 use std::path::PathBuf;
-use support::Bytes;
 
 /// Volumes that newfs_exfat formatted and the macOS driver wrote break none
 /// of the rules in docs/spec-rules.md: an independent writer's structures
@@ -24,8 +27,8 @@ fn macos_formatted_and_written_volumes_break_no_specification_rule() {
             .expect("run chore test:oracle-macos on macOS to create independent reference images"),
     );
     for sector in [512, 4096] {
-        let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
-        let report = fs_exfat::check::spec_deviations(Bytes(image));
+        let image = Image::open(directory.join(format!("reference-{sector}.dmg")));
+        let report = fs_exfat::check::spec_deviations(image);
         // macOS 26 writers leave PercentInUse stale after writing files (spec
         // 3.1.18 asks for an update or FFh). That is a Warning the runner shows
         // and this test records; every other rule must hold.
@@ -54,7 +57,7 @@ fn macos_formatter_and_checker_agree_with_both_boot_regions() {
             .unwrap()
             .file_type()
             .is_file());
-        let report = BootRegions::read(&Reader::new(Bytes(std::fs::read(image).unwrap()))).unwrap();
+        let report = BootRegions::read(&Reader::new(Image::open(image))).unwrap();
         let boot = report.strict().unwrap();
         assert_eq!(boot.bytes_per_sector(), sector);
         assert_eq!(boot.cluster_size(), 4096);

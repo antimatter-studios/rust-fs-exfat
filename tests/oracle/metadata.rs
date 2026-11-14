@@ -1,11 +1,14 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+#[path = "../support/image.rs"]
+mod image_support;
+
 use fs_exfat::primitives::RawUpcaseTable;
 use fs_exfat::salvage::ExfatSalvage;
 use fs_exfat::volume::Volume;
+use image_support::Image;
 use std::path::PathBuf;
-use support::Bytes;
 
 #[test]
 fn macos_formatter_system_metadata_is_readable() {
@@ -18,7 +21,7 @@ fn macos_formatter_system_metadata_is_readable() {
             .unwrap()
             .file_type()
             .is_file());
-        let volume = Volume::open(Bytes(std::fs::read(image).unwrap())).unwrap();
+        let volume = Volume::open(Image::open(image)).unwrap();
         assert_eq!(volume.metadata().label.as_deref(), Some("M1ORACLE"));
         assert_eq!(volume.metadata().upcase_checksum, 0xe619_d30d);
         assert_eq!(volume.upcase().map(u16::from(b'z')), u16::from(b'Z'));
@@ -37,9 +40,10 @@ fn macos_formatter_system_metadata_is_readable() {
             guid[14],
             guid[15]
         );
-        let driver =
-            std::fs::read_to_string(directory.join(format!("driver-{sector}.txt"))).unwrap();
-        assert_eq!(driver, format!("M1ORACLE\n{guid_text}\nread-only\n"));
+        image_support::assert_bytes(
+            &directory.join(format!("driver-{sector}.txt")),
+            format!("M1ORACLE\n{guid_text}\nread-only\n").as_bytes(),
+        );
         let formatter =
             std::fs::read_to_string(directory.join(format!("format-{sector}.txt"))).unwrap();
         for (label, expected) in [
@@ -83,12 +87,14 @@ fn macos_formatter_writes_the_compressed_recommended_upcase_table() {
         std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
     );
     for sector in [512, 4096] {
-        let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
-        let source = Bytes(image.clone());
+        let image = Image::open(directory.join(format!("reference-{sector}.dmg")));
+        let source = image.clone();
         let report = ExfatSalvage::probe(&source).upcase_table(&source).unwrap();
         let mut table = Vec::new();
         for extent in &report.extents {
-            table.extend_from_slice(&image[extent.offset as usize..extent.end().unwrap() as usize]);
+            table.extend_from_slice(
+                &image.read(extent.offset as usize..extent.end().unwrap() as usize),
+            );
         }
         assert_eq!(table.len(), 5836, "{sector}");
         let raw = RawUpcaseTable::parse(&table, 0xe619_d30d);

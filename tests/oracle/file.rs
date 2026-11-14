@@ -1,13 +1,17 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+#[path = "../support/image.rs"]
+mod image_support;
+
 use fs_core::BlockRead;
 use fs_exfat::directory::DirectoryEntry;
 use fs_exfat::volume::Volume;
+use image_support::{Image, Snapshot};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use support::{put64, seal_set, Bytes};
+use support::{put64, seal_set};
 use unicode_normalization::UnicodeNormalization;
 
 fn walk<Device: BlockRead>(
@@ -84,8 +88,8 @@ fn every_file_hash_length_and_timestamp_match_the_read_only_macos_driver() {
             .unwrap()
             .file_type()
             .is_file());
-        let image_bytes = std::fs::read(image).unwrap();
-        let volume = Volume::open(Bytes(image_bytes.clone())).unwrap();
+        let image_bytes = Image::open(image);
+        let volume = Volume::open(image_bytes.clone()).unwrap();
         let entries = volume.root_directory().unwrap();
         let tail = entries
             .iter()
@@ -98,7 +102,8 @@ fn every_file_hash_length_and_timestamp_match_the_read_only_macos_driver() {
         };
         assert_eq!(volume.boot().cluster_size(), 4096);
         let physical = volume.boot().cluster_offset(tail_cluster).unwrap() as usize;
-        assert!(image_bytes[physical..physical + 4096]
+        assert!(image_bytes
+            .read(physical..physical + 4096)
             .iter()
             .all(|byte| *byte == b'U'));
         let mut observed = BTreeMap::new();
@@ -135,8 +140,8 @@ fn an_unaligned_valid_length_is_exact_here_and_the_macos_driver_rounds_it_or_agr
         std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
     );
     for sector in [512u64, 4096] {
-        let mut image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
-        let volume = Volume::open(Bytes(image.clone())).unwrap();
+        let image = Snapshot::new(&directory.join(format!("reference-{sector}.dmg")));
+        let volume = Volume::open(image.clone()).unwrap();
         let boot = volume.boot();
         let root = volume.root_bytes();
         let chain = volume.cluster_chain(boot.root_cluster).unwrap();
@@ -158,10 +163,10 @@ fn an_unaligned_valid_length_is_exact_here_and_the_macos_driver_rounds_it_or_agr
             let at = start + index;
             let physical =
                 boot.cluster_offset(chain[at / cluster_size]).unwrap() as usize + at % cluster_size;
-            image[physical] = *byte;
+            image.patch(physical, &[*byte]);
         }
 
-        let volume = Volume::open(Bytes(image)).unwrap();
+        let volume = Volume::open(image.clone()).unwrap();
         let entries = volume.root_directory().unwrap();
         let entry = entries
             .iter()
@@ -246,12 +251,12 @@ fn cluster_plans_rebuild_every_file_as_the_read_only_macos_driver_reads_it() {
         std::env::var("EXFAT_ORACLE_DIR").expect("run chore test:oracle-macos on macOS"),
     );
     for sector in [512, 4096] {
-        let image = std::fs::read(directory.join(format!("reference-{sector}.dmg"))).unwrap();
-        let volume = Volume::open(Bytes(image.clone())).unwrap();
+        let image = Image::open(directory.join(format!("reference-{sector}.dmg")));
+        let volume = Volume::open(image.clone()).unwrap();
         let mut planned = BTreeMap::new();
         plans(&volume, volume.root_directory().unwrap(), "", &mut planned);
 
-        let source = Bytes(image);
+        let source = image;
         let adapter = ExfatSalvage::probe(&source);
         let mut observed = BTreeMap::new();
         for (path, plan) in planned {

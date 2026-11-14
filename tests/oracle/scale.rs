@@ -161,8 +161,7 @@ fn a_detach_that_clears_within_its_window_records_the_image_detached() {
         std::time::Duration::from_secs(10),
     )
     .unwrap();
-    let state = std::fs::read_to_string(directory.join("attachment-state")).unwrap();
-    assert_eq!(state, "detached");
+    crate::image_support::assert_bytes(&directory.join("attachment-state"), b"detached");
     std::fs::remove_dir_all(&directory).unwrap();
 }
 
@@ -176,8 +175,7 @@ fn a_detach_that_stays_busy_names_the_command_that_releases_the_image() {
         std::time::Duration::from_millis(500),
     )
     .unwrap_err();
-    let state = std::fs::read_to_string(directory.join("attachment-state")).unwrap();
-    assert_eq!(state, "attached");
+    crate::image_support::assert_bytes(&directory.join("attachment-state"), b"attached");
     let command = format!("{} detach /dev/disk-stub", program.display());
     assert!(message.contains(&command), "{message}");
     assert!(!message.contains("-force"), "{message}");
@@ -204,10 +202,7 @@ fn a_detach_without_a_retry_window_attempts_only_once() {
             .trim(),
         "1"
     );
-    assert_eq!(
-        std::fs::read_to_string(directory.join("attachment-state")).unwrap(),
-        "attached"
-    );
+    crate::image_support::assert_bytes(&directory.join("attachment-state"), b"attached");
     std::fs::remove_dir_all(&directory).unwrap();
 }
 
@@ -249,14 +244,11 @@ fn a_failed_detach_retains_the_image_and_receipt_after_drop() {
     .unwrap_err();
     drop(image);
     assert_eq!(std::fs::metadata(path).unwrap().len(), length);
-    assert_eq!(
-        std::fs::read(retained.join("attach.plist")).unwrap(),
-        b"this attachment's receipt"
+    crate::image_support::assert_bytes(
+        &retained.join("attach.plist"),
+        b"this attachment's receipt",
     );
-    assert_eq!(
-        std::fs::read_to_string(retained.join("attachment-state")).unwrap(),
-        "attached"
-    );
+    crate::image_support::assert_bytes(&retained.join("attachment-state"), b"attached");
     std::fs::remove_dir_all(&retained).unwrap();
     std::fs::remove_dir_all(&directory).unwrap();
 }

@@ -2,6 +2,9 @@
 
 mod write_support;
 
+#[path = "support/image.rs"]
+mod image_support;
+
 use fs_exfat::capi::*;
 use std::ffi::{c_int, c_void, CStr, CString};
 use std::path::PathBuf;
@@ -66,7 +69,7 @@ fn a_path_mount_for_writing_is_dirty_until_a_checked_unmount() {
         let handle = fs_exfat_mount_rw(path.as_ptr(), 0);
         assert!(!handle.is_null(), "{}", last_error());
         assert_eq!(volume_flags(handle), 2);
-        assert_eq!(std::fs::read(&scratch.image).unwrap()[106], 2);
+        assert_eq!(image_support::Image::open(&scratch.image).byte(106), 2);
         let root = CString::new("/").unwrap();
         let mut metadata = FsExfatStat::default();
         assert_eq!(fs_exfat_stat(handle, root.as_ptr(), &mut metadata), 0);
@@ -74,7 +77,7 @@ fn a_path_mount_for_writing_is_dirty_until_a_checked_unmount() {
         assert_eq!(fs_exfat_flush(handle), 0, "{}", last_error());
         assert_eq!(fs_exfat_umount_checked(handle), 0, "{}", last_error());
     }
-    assert_eq!(std::fs::read(&scratch.image).unwrap(), image);
+    image_support::assert_bytes(&scratch.image, &image);
 }
 
 #[test]
@@ -105,7 +108,7 @@ fn a_dirty_volume_and_an_unaligned_offset_are_refused() {
         assert!(fs_exfat_mount_rw(path.as_ptr(), 1).is_null());
         assert!(fs_exfat_mount_rw(ptr::null(), 0).is_null());
     }
-    assert_eq!(std::fs::read(&scratch.image).unwrap(), image);
+    image_support::assert_bytes(&scratch.image, &image);
 }
 
 struct Source {
@@ -312,10 +315,18 @@ fn truncate_unlink_and_rmdir_report_errno() {
         assert_eq!(fs_exfat_rmdir(handle, directory.as_ptr()), 0);
         assert_eq!(fs_exfat_umount_checked(handle), 0, "{}", last_error());
     }
-    let after = std::fs::read(&scratch.image).unwrap();
+    let after = image_support::Image::open(&scratch.image);
     assert!(
-        geometry.bitmap_bytes(&after, 0) == geometry.bitmap_bytes(&image, 0)
-            && geometry.fat_bytes(&after, 0) == geometry.fat_bytes(&image, 0),
+        after.read(
+            geometry.cluster_offset(geometry.bitmaps[0])
+                ..geometry.cluster_offset(geometry.bitmaps[0])
+                    + (geometry.cluster_count as usize).div_ceil(8)
+        ) == geometry.bitmap_bytes(&image, 0)
+            && after.read(
+                geometry.fat_offset * geometry.sector
+                    ..geometry.fat_offset * geometry.sector
+                        + (geometry.cluster_count as usize + 2) * 4
+            ) == geometry.fat_bytes(&image, 0),
         "every cluster made was freed"
     );
 }

@@ -1,5 +1,10 @@
 mod interface_support;
 
+#[path = "support/image.rs"]
+mod image_support;
+
+use image_support::{Image, Snapshot};
+
 use serde_json::Value;
 use std::process::{Command, Output};
 
@@ -41,7 +46,7 @@ fn listing_stat_and_cat_preserve_metadata_and_zero_filling() {
 #[test]
 fn verified_export_reports_digest_and_never_replaces_the_source() {
     let fixture = interface_support::Temp::new();
-    let original = std::fs::read(&fixture.image).unwrap();
+    let original = Snapshot::new(&fixture.image);
     let destination = fixture.directory.join("result.bin");
     let output = run(
         &fixture.image,
@@ -59,10 +64,7 @@ fn verified_export_reports_digest_and_never_replaces_the_source() {
     );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["verified"], true);
-    assert_eq!(
-        std::fs::read(&destination).unwrap(),
-        interface_support::expected()
-    );
+    image_support::assert_bytes(&destination, &interface_support::expected());
     assert!(!run(
         &fixture.image,
         &[
@@ -104,7 +106,7 @@ fn verified_export_reports_digest_and_never_replaces_the_source() {
             .code(),
         Some(2)
     );
-    assert_eq!(std::fs::read(&fixture.image).unwrap(), original);
+    original.assert_unchanged(&fixture.image);
 }
 
 #[test]
@@ -141,7 +143,7 @@ fn errors_are_structured_and_read_only_modes_are_explicit() {
 #[test]
 fn check_only_checker_reports_clean_and_dirty_without_changing_bytes() {
     let fixture = interface_support::Temp::new();
-    let mut bytes = std::fs::read(&fixture.image).unwrap();
+    let image = Image::open(&fixture.image);
     let check = || {
         Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
             .arg("fsck")
@@ -159,8 +161,8 @@ fn check_only_checker_reports_clean_and_dirty_without_changing_bytes() {
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["check_only"], true);
     assert_eq!(report["files"], 3);
-    bytes[106] |= 2;
-    std::fs::write(&fixture.image, &bytes).unwrap();
+    image.patch(106, &[image.byte(106) | 2]);
+    let dirty_snapshot = Snapshot::new(&fixture.image);
     let dirty = check();
     assert_eq!(dirty.status.code(), Some(4));
     assert_eq!(
@@ -174,13 +176,13 @@ fn check_only_checker_reports_clean_and_dirty_without_changing_bytes() {
         .output()
         .unwrap();
     assert_eq!(repair.status.code(), Some(16));
-    assert_eq!(std::fs::read(&fixture.image).unwrap(), bytes);
+    dirty_snapshot.assert_unchanged(&fixture.image);
 }
 
 #[test]
 fn fsck_counts_uninterpreted_entries_apart_from_its_verdict() {
     let fixture = interface_support::Temp::new();
-    let mut bytes = std::fs::read(&fixture.image).unwrap();
+    let image = Image::open(&fixture.image);
     // A Vendor Extension entry (specification section 7.8) after the name
     // entry of Sub/Child.bin, which a reader may ignore.
     let mut child = interface_support::base::file_set("Child.bin", 0x20, 9, 7, true);
@@ -191,8 +193,7 @@ fn fsck_counts_uninterpreted_entries_apart_from_its_verdict() {
     child.extend_from_slice(&vendor);
     interface_support::base::seal_set(&mut child);
     let sub = 38 * 512;
-    bytes[sub..sub + child.len()].copy_from_slice(&child);
-    std::fs::write(&fixture.image, &bytes).unwrap();
+    image.patch(sub, &child);
     let output = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
         .arg("fsck")
         .arg(&fixture.image)
@@ -284,13 +285,16 @@ fn the_cli_tiers_sample_volume_is_the_one_these_tests_build() {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cli/sample.img.sha256");
-    let recorded = std::fs::read_to_string(path).unwrap();
-    assert_eq!(
-        recorded.trim(),
-        digest,
-        "tests/cli/sample.img.gz and its .sha256 are stale: regenerate them from \
-         tests/interface_support::image()"
-    );
+    let expected = format!("{digest}\n");
+    let recorded = std::fs::File::open(path).unwrap();
+    let length = recorded.metadata().unwrap().len();
+    image_support::compare(recorded, expected.as_bytes(), length, expected.len() as u64)
+        .unwrap_or_else(|error| {
+            panic!(
+                "tests/cli/sample.img.gz and its .sha256 are stale ({error}): regenerate them \
+                 from tests/interface_support::image()"
+            )
+        });
 }
 
 fn mkfs(arguments: &[&str], target: &std::path::Path) -> Output {
@@ -390,12 +394,12 @@ fn mkfs_dry_runs_and_refusals_write_nothing() {
         assert_eq!(output.status.code(), Some(2), "{arguments:?}");
         assert!(!target.exists(), "{arguments:?}");
     }
-    let original = std::fs::read(&fixture.image).unwrap();
+    let original = Snapshot::new(&fixture.image);
     let output = mkfs(&["-n"], &fixture.image);
     assert!(output.status.success());
     let output = mkfs(&["--size", "1T"], &fixture.image);
     assert_eq!(output.status.code(), Some(2));
-    assert_eq!(std::fs::read(&fixture.image).unwrap(), original);
+    original.assert_unchanged(&fixture.image);
     let help = Command::new(env!("CARGO_BIN_EXE_rust-fs-exfat"))
         .args(["mkfs.exfat", "--version"])
         .output()

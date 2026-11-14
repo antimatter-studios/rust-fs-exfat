@@ -30,6 +30,8 @@
 //! [`Manifest::check`] then reads the judged image with this crate's strict
 //! reader.
 
+use crate::image_support;
+
 use fs_core::{BlockDevice, BlockRead};
 use fs_exfat::interface;
 use fs_exfat::timestamp::{Timestamp, Timestamps};
@@ -45,7 +47,7 @@ type Change = fn(&mut Writer) -> fs_exfat::Result<()>;
 /// every later write, as if power were lost there.
 #[derive(Clone)]
 pub struct CutDevice {
-    bytes: Arc<Mutex<Vec<u8>>>,
+    bytes: Arc<Mutex<Image>>,
     sector: u64,
     /// Sectors still accepted; `u64::MAX` never cuts.
     left: Arc<AtomicU64>,
@@ -55,7 +57,7 @@ pub struct CutDevice {
 }
 
 impl CutDevice {
-    pub fn new(bytes: Vec<u8>, sector: u64, budget: u64) -> Self {
+    pub fn new(bytes: Image, sector: u64, budget: u64) -> Self {
         Self {
             bytes: Arc::new(Mutex::new(bytes)),
             sector,
@@ -65,7 +67,7 @@ impl CutDevice {
         }
     }
 
-    pub fn snapshot(&self) -> Vec<u8> {
+    pub fn snapshot(&self) -> Image {
         self.bytes.lock().unwrap().clone()
     }
 
@@ -80,21 +82,11 @@ impl CutDevice {
 
 impl BlockRead for CutDevice {
     fn read_at(&self, offset: u64, output: &mut [u8]) -> fs_core::Result<()> {
-        let bytes = self.bytes.lock().unwrap();
-        let start = offset as usize;
-        let source = bytes
-            .get(start..start + output.len())
-            .ok_or(fs_core::Error::OutOfBounds {
-                offset,
-                len: output.len() as u64,
-                size: bytes.len() as u64,
-            })?;
-        output.copy_from_slice(source);
-        Ok(())
+        self.bytes.lock().unwrap().read_at(offset, output)
     }
 
     fn size_bytes(&self) -> u64 {
-        self.bytes.lock().unwrap().len() as u64
+        self.bytes.lock().unwrap().size_bytes()
     }
 }
 
@@ -120,15 +112,7 @@ impl BlockDevice for CutDevice {
             if left != u64::MAX {
                 self.left.store(left - 1, Ordering::SeqCst);
             }
-            let start = at as usize;
-            bytes
-                .get_mut(start..start + chunk.len())
-                .ok_or(fs_core::Error::OutOfBounds {
-                    offset: at,
-                    len: chunk.len() as u64,
-                    size: 0,
-                })?
-                .copy_from_slice(chunk);
+            bytes.write(at, chunk)?;
             self.written.fetch_add(1, Ordering::SeqCst);
         }
         Ok(())
@@ -272,8 +256,8 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub fn measure(base: &[u8], sector: u64) -> Self {
-        let device = CutDevice::new(base.to_vec(), sector, u64::MAX);
+    pub fn measure(base: &Image, sector: u64) -> Self {
+        let device = CutDevice::new(base.clone(), sector, u64::MAX);
         let mut blocks = Vec::new();
         let mut starts = Vec::new();
         for step in &STEPS {
@@ -286,7 +270,7 @@ impl Plan {
             assert!(device.written() > before, "{} wrote nothing", step.name);
         }
         let final_image = device.snapshot();
-        let volume = interface::open_device(Image(final_image), 0).unwrap();
+        let volume = interface::open_device(final_image, 0).unwrap();
         assert_eq!(volume.metadata().label.as_deref(), Some("CUTS"));
         Self { blocks, starts }
     }
@@ -316,7 +300,7 @@ pub struct Cut {
     pub done: u64,
     /// Where the first refused sector would have gone.
     pub refused_at: Option<u64>,
-    pub image: Vec<u8>,
+    pub image: Image,
     pub manifest: Manifest,
 }
 
@@ -340,9 +324,9 @@ impl Cut {
 }
 
 /// Replay the script onto a fresh copy of `base`, cut after `cut` sectors.
-pub fn replay(base: &[u8], sector: u64, plan: &Plan, cut: u64) -> Cut {
+pub fn replay(base: &Image, sector: u64, plan: &Plan, cut: u64) -> Cut {
     let (index, done) = plan.locate(cut);
-    let device = CutDevice::new(base.to_vec(), sector, cut);
+    let device = CutDevice::new(base.clone(), sector, cut);
     let mut manifest = None;
     for (position, step) in STEPS.iter().enumerate().take(index + 1) {
         if position == index {
@@ -378,26 +362,67 @@ pub fn replay(base: &[u8], sector: u64, plan: &Plan, cut: u64) -> Cut {
     }
 }
 
-/// An image in memory for the strict reader.
-pub struct Image(pub Vec<u8>);
+/// A file-backed image with copy-on-write sectors for each crash cut.
+#[derive(Clone)]
+pub struct Image {
+    base: Arc<image_support::Image>,
+    sectors: Arc<BTreeMap<u64, [u8; 512]>>,
+}
+
+impl Image {
+    pub fn open(path: &std::path::Path) -> Self {
+        Self {
+            base: Arc::new(image_support::Image::open(path)),
+            sectors: Arc::new(BTreeMap::new()),
+        }
+    }
+
+    fn write(&mut self, offset: u64, bytes: &[u8]) -> fs_core::Result<()> {
+        if offset
+            .checked_add(bytes.len() as u64)
+            .is_none_or(|end| end > self.size_bytes())
+        {
+            return Err(fs_core::Error::OutOfBounds {
+                offset,
+                len: bytes.len() as u64,
+                size: self.size_bytes(),
+            });
+        }
+        let mut position = 0;
+        while position < bytes.len() {
+            let at = offset + position as u64;
+            let sector = at / 512 * 512;
+            let within = (at % 512) as usize;
+            let count = (512 - within).min(bytes.len() - position);
+            let mut data = [0; 512];
+            self.read_at(sector, &mut data)?;
+            data[within..within + count].copy_from_slice(&bytes[position..position + count]);
+            Arc::make_mut(&mut self.sectors).insert(sector, data);
+            position += count;
+        }
+        Ok(())
+    }
+
+    pub fn store(&self, path: &std::path::Path) {
+        image_support::sparse_copy_device(self, path);
+    }
+}
 
 impl BlockRead for Image {
     fn read_at(&self, offset: u64, output: &mut [u8]) -> fs_core::Result<()> {
-        let start = offset as usize;
-        let source =
-            self.0
-                .get(start..start + output.len())
-                .ok_or(fs_core::Error::OutOfBounds {
-                    offset,
-                    len: output.len() as u64,
-                    size: self.0.len() as u64,
-                })?;
-        output.copy_from_slice(source);
+        self.base.read_at(offset, output)?;
+        let end = offset + output.len() as u64;
+        for (&at, bytes) in self.sectors.range(offset.saturating_sub(511)..end) {
+            let start = at.max(offset);
+            let finish = (at + 512).min(end);
+            output[(start - offset) as usize..(finish - offset) as usize]
+                .copy_from_slice(&bytes[(start - at) as usize..(finish - at) as usize]);
+        }
         Ok(())
     }
 
     fn size_bytes(&self) -> u64 {
-        self.0.len() as u64
+        self.base.size_bytes()
     }
 }
 
@@ -442,12 +467,8 @@ impl Manifest {
             .any(|change| change.rsplit_once('/').map(|(parent, _)| parent) == Some(&path))
     }
 
-    fn walk(
-        &self,
-        bytes: Vec<u8>,
-        mut visit: impl FnMut(&str, Node),
-    ) -> Result<(), fs_exfat::Error> {
-        let volume = interface::open_device(Image(bytes), 0)?;
+    fn walk(&self, bytes: Image, mut visit: impl FnMut(&str, Node)) -> Result<(), fs_exfat::Error> {
+        let volume = interface::open_device(bytes, 0)?;
         let mut pending = vec![(String::new(), None)];
         while let Some((path, entry)) = pending.pop() {
             let entries = match &entry {
@@ -508,14 +529,14 @@ impl Manifest {
     }
 
     /// The tree before the step, without the paths the step changes.
-    pub fn read(image: &[u8], changes: &[&str]) -> Self {
+    pub fn read(image: &Image, changes: &[&str]) -> Self {
         let mut manifest = Self {
             nodes: BTreeMap::new(),
             changes: changes.iter().map(|change| key(change)).collect(),
         };
         let mut nodes = BTreeMap::new();
         manifest
-            .walk(image.to_vec(), |path, node| {
+            .walk(image.clone(), |path, node| {
                 nodes.insert(path.to_owned(), node);
             })
             .unwrap_or_else(|error| panic!("the strict reader refuses a step's start: {error}"));
@@ -525,7 +546,7 @@ impl Manifest {
 
     /// Every unchanged path, read from `image` with the strict reader, must
     /// equal what was recorded; nothing may be added beside them.
-    pub fn check(&self, image: Vec<u8>) -> Result<(), String> {
+    pub fn check(&self, image: Image) -> Result<(), String> {
         let mut found = BTreeMap::new();
         self.walk(image, |path, node| {
             found.insert(path.to_owned(), node);
@@ -553,20 +574,34 @@ impl Manifest {
 }
 
 /// The sectors where `next` differs from `previous`.
-pub fn delta(previous: &[u8], next: &[u8], sector: usize) -> Vec<(u64, Vec<u8>)> {
-    previous
-        .chunks(sector)
-        .zip(next.chunks(sector))
-        .enumerate()
-        .filter(|(_, (old, new))| old != new)
-        .map(|(index, (_, new))| ((index * sector) as u64, new.to_vec()))
-        .collect()
+pub fn delta(previous: &Image, next: &Image, sector: usize) -> Vec<(u64, Vec<u8>)> {
+    assert_eq!(previous.size_bytes(), next.size_bytes());
+    assert!(image_support::CHUNK.is_multiple_of(sector));
+    let mut left = vec![0; image_support::CHUNK];
+    let mut right = vec![0; image_support::CHUNK];
+    let mut result = Vec::new();
+    let mut offset = 0;
+    while offset < previous.size_bytes() {
+        let count = (previous.size_bytes() - offset).min(left.len() as u64) as usize;
+        previous.read_at(offset, &mut left[..count]).unwrap();
+        next.read_at(offset, &mut right[..count]).unwrap();
+        for (index, (old, new)) in left[..count]
+            .chunks(sector)
+            .zip(right[..count].chunks(sector))
+            .enumerate()
+        {
+            if old != new {
+                result.push((offset + (index * sector) as u64, new.to_vec()));
+            }
+        }
+        offset += count as u64;
+    }
+    result
 }
 
-pub fn apply(image: &mut [u8], changes: &[(u64, Vec<u8>)]) {
+pub fn apply(image: &mut Image, changes: &[(u64, Vec<u8>)]) {
     for (offset, bytes) in changes {
-        let start = *offset as usize;
-        image[start..start + bytes.len()].copy_from_slice(bytes);
+        image.write(*offset, bytes).unwrap();
     }
 }
 
@@ -574,8 +609,8 @@ pub fn apply(image: &mut [u8], changes: &[(u64, Vec<u8>)]) {
 /// uses must be allocated and used once. Clusters allocated and used by
 /// nothing are leaked space, which the contract allows; their count is
 /// returned.
-pub fn audit(image: Vec<u8>) -> Result<u64, String> {
-    let volume = interface::open_device(Image(image), 0)
+pub fn audit(image: Image) -> Result<u64, String> {
+    let volume = interface::open_device(image, 0)
         .map_err(|error| format!("the strict reader refuses the volume: {error}"))?;
     let report = fs_exfat::check::check(&volume)
         .map_err(|error| format!("the allocation audit refuses the volume: {error}"))?;
@@ -591,17 +626,20 @@ impl Manifest {
 /// The control that keeps the matrix from passing vacuously: the same
 /// check must refuse `image` once one byte of the kernel-made sentinel's
 /// data, which no step touches, is changed.
-pub fn assert_check_sees_a_changed_sentinel(manifest: &Manifest, image: &[u8]) {
+pub fn assert_check_sees_a_changed_sentinel(manifest: &Manifest, image: &Image) {
     const SENTINEL: &str = "/keep/sentinel.bin";
     assert!(manifest.contains(SENTINEL), "the manifest omits {SENTINEL}");
-    let mut changed = image.to_vec();
+    let mut changed = image.clone();
     let at = {
-        let volume = interface::open_device(Image(image.to_vec()), 0).unwrap();
+        let volume = interface::open_device(image.clone(), 0).unwrap();
         let found = volume.lookup(SENTINEL).unwrap();
         let first = found.entry().unwrap().stream().first_cluster();
         volume.boot().cluster_offset(first).unwrap() as usize
     };
-    changed[at] ^= 0xff;
+    let mut byte = [0];
+    changed.read_at(at as u64, &mut byte).unwrap();
+    byte[0] ^= 0xff;
+    changed.write(at as u64, &byte).unwrap();
     let refused = manifest
         .check(changed)
         .expect_err("the contract check accepts a changed byte in an untouched file");

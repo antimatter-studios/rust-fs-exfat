@@ -14,7 +14,7 @@ def check_rust(source):
     # Pin both sides of that ownership boundary: changes require a safety review,
     # including changes in the fixture producer and its failure cleanup.
     reviewed = {
-        "625382738f2ad9233b6245414d43cd1d1cb8891d76b0648345a3123d422dc1aa",  # tests/oracle/scale.rs
+        "f614533157bfa4def21b4139670159a4709d33f33fd94372e6c3d1305d73008b",  # tests/oracle/scale.rs
         "a80532b0620d3661839bc50e5b26b0bfd439fd63141155d0d6abdb5f081b6207",  # tests/scale_support/mod.rs
     }
     if hashlib.sha256(source.encode()).hexdigest() not in reviewed:

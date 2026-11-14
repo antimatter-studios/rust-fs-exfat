@@ -42,6 +42,8 @@ mod allocation_support;
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "support/image.rs"]
+mod image_support;
 #[path = "guest_support/relan_write.rs"]
 mod relan_write;
 #[path = "walk_support/mod.rs"]

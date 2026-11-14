@@ -4,6 +4,9 @@
 //! with `fsck_exfat -n` and compares the record with what the read-only
 //! mounted macOS driver lists.
 
+#[path = "../support/image.rs"]
+mod image_support;
+
 mod listing;
 
 use fs_exfat::interface;
@@ -375,10 +378,16 @@ fn allocations_leave_the_tree_alone(target: &Path) {
 
     let (after, _) = bitmap(&target);
     assert_eq!(after, before, "the Allocation Bitmap is as macOS left it");
-    let image = std::fs::read(&target).unwrap();
-    assert_eq!(u16::from_le_bytes([image[106], image[107]]) & 2, 0);
+    let image = image_support::Image::open(&target);
+    assert_eq!(
+        u16::from_le_bytes([image.byte(106), image.byte(107)]) & 2,
+        0
+    );
     let used = before.iter().filter(|bit| **bit).count() as u64;
-    assert_eq!(u64::from(image[112]), used * 100 / u64::from(cluster_count));
+    assert_eq!(
+        u64::from(image.byte(112)),
+        used * 100 / u64::from(cluster_count)
+    );
     let reread = listing(&interface::open_path(&target, 0).unwrap());
     assert_eq!(reread, tree);
 }
