@@ -263,7 +263,7 @@ guest, a Debian 12 VM that `scripts/vm-setup.sh` provisions.
 | `chore test:images` | the fixtures | the strict reader, the allocation audit and salvage on every kernel-made image, against the kernel's own listing captured when it was built |
 | `chore test:oracle` | the VM | exfatprogs in the guest: `fsck.exfat -n` accepts every undamaged fixture and this crate's newly formatted volumes and refuses structural damage; `dump.exfat` agrees with this crate field for field |
 | `chore test:kernel` | the VM | the Linux kernel loop-mounts every fixture read-only, and its walk agrees with the strict reader on every path, size, attribute, time and SHA-256; salvage rebuilds every file it reads; the kernel writes files and a directory to this crate's newly formatted volumes, then exfatprogs and this crate check them and the strict reader returns every byte |
-| `chore test:third` | the VM | relan/exfat, a third implementation built in the guest at a pinned commit, reads every fixture as the kernel and this crate do |
+| `chore test:third` | the VM | pinned relan/exfat reads every fixture and this crate's writes; this crate reads relan's writes, comparing complete trees, hashes and supported metadata at both sector sizes |
 | `chore test:oracle-macos` | a Mac | macOS `newfs_exfat`, `fsck_exfat -n` and the read-only macOS driver on newly created images |
 | `chore test:vm` | the VM | every Linux tier above, compiled and run inside the guest |
 | `chore test:package`, `chore test:scripts` | nothing | the packaged crate, and the repository's own shell scripts |
@@ -306,6 +306,16 @@ fixture as the strict reader does: every path, size, attribute, time and file
 SHA-256. relan/exfat, built in the guest at a pinned commit, must read them the
 same way. Where relan departs from the specification, as `tests/third.rs` lists,
 the kernel and this crate agree.
+
+Fresh single-FAT images also check both write directions through relan: allocation,
+creation and data writes, truncation and removal, renames, times, four attribute
+flags and labels. Every path and file hash is compared after each operation family,
+without attribute sampling on these writer images. relan's FUSE interface exposes
+whole-second modification/access times and no birth time; its CLI tools supply all
+four flags and the label. A separate exact assertion records the Linux 6.1
+truncate-growth divergence (#207): the kernel returns only the ValidDataLength
+prefix, while relan and this crate agree on the complete DataLength and zero-filled
+extension. These checks do not independently verify TexFAT.
 
 The formatter's Linux checks create sparse volumes from 1 MiB to 40 GiB at
 512- and 4096-byte sectors, covering the 4, 32 and 128 KiB default cluster
