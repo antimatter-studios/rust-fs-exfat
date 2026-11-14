@@ -30,7 +30,7 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [dependencies]
-rust-fs-core = "=0.4.3"
+rust-fs-core = "=0.4.5"
 serde = { version = "=1.0.229", features = ["derive"] }
 sha2 = "=0.10.9"
 
