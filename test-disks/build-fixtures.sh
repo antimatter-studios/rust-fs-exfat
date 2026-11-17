@@ -17,8 +17,8 @@
 # images, manifests and kernel listings into the shared directory, and this
 # script moves them into test-disks/.
 #
-# The VM comes down when this script exits, unless it is held, shared with
-# another live session, or FLTH_KEEP_VM=1 keeps it.
+# This script ends only its own session; the shared guest stays up for the
+# next run and other consumers remain undisturbed.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
