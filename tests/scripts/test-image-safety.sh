@@ -27,10 +27,35 @@ mutations = {
     'unowned-retry': source.replace("attached=0\n", "attached=0\ndetach_receipt\n", 1),
     'masked-retry': source.replace('    detach_receipt\n', '    detach_receipt || true\n', 1),
     'enumeration': source + '\n/usr/bin/hdiutil info\n',
+    'holder-enumeration': source.replace('/usr/sbin/lsof -nP +c 0 -- "$device" "$raw"', '/usr/sbin/lsof -nP +c 0'),
+    'foreign-holder-node': source.replace('/usr/sbin/lsof -nP +c 0 -- "$device" "$raw"', '/usr/sbin/lsof -nP +c 0 -- /dev/not-owned'),
+    'foreign-raw-node': source.replace('local raw="/dev/r${device#/dev/}"', 'local raw="/dev/not-owned"'),
 }
 
 with tempfile.TemporaryDirectory(prefix='image-safety-176-') as temporary:
     root = Path(temporary)
+    scale = Path('tests/oracle/scale.rs').read_text()
+    image = Path('tests/scale_support/mod.rs').read_text()
+    rust_mutations = {
+        'forced-retry': scale.replace('.args(["detach", device])', '.args(["detach", "-force", device])'),
+        'foreign-detach': scale.replace('.args(["detach", device])', '.args(["detach", "/dev/not-owned"])'),
+        'foreign-image': scale.replace('command.arg(&image.path)', 'command.arg("/tmp/foreign.img")'),
+        'stale-receipt': scale.replace('plistlib.loads(sys.stdin.buffer.read())', 'plistlib.load(open("/tmp/stale.plist", "rb"))'),
+        'unbounded-window': scale.replace('&& std::time::Instant::now() < deadline', '&& true'),
+        'false-detached-state': scale.replace('"attached"', '"detached"'),
+        'forced-recommendation': scale.replace('detach {device}', 'detach -force {device}'),
+        'extra-device-command': scale + '\nfn unowned() { Command::new("hdiutil").args(["detach", "/dev/not-owned"]).output().unwrap(); }\n',
+        'nonfresh-image': image.replace('.create_new(true)', '.create(true)'),
+        'foreign-image-binding': image.replace('directory.join("generated.img")', 'PathBuf::from("/tmp/foreign.img")'),
+        'lost-image-evidence': image.replace('.is_ok_and(|state| state == "attached")', '.is_ok_and(|_| false)'),
+    }
+    for name, contents in rust_mutations.items():
+        assert contents not in (scale, image), 'ineffective Rust mutation: ' + name
+        mutated = root / (name + '.rs')
+        mutated.write_text(contents)
+        checked = subprocess.run(['bash', 'scripts/check-image-safety.sh', str(mutated)], capture_output=True)
+        assert checked.returncode != 0, 'unsafe Rust mutation accepted: ' + name
+
     for name, contents in mutations.items():
         assert contents != source, 'ineffective mutation: ' + name
         mutated = root / (name + '.sh')
@@ -73,8 +98,9 @@ hdiutil() {
     esac
 }
 sleep() { [ "$#" -eq 1 ] && [ "$1" = 1 ] || exit 98; }
+lsof() { return 1; }
 '''
-        harness += ''.join(functions.values()).replace('/usr/bin/hdiutil', 'hdiutil')
+        harness += ''.join(functions.values()).replace('/usr/bin/hdiutil', 'hdiutil').replace('/usr/sbin/lsof', 'lsof')
         harness += '''trap cleanup EXIT
 accept_receipt
 if [ "$mode" = prior-failure ]; then exit 23; fi

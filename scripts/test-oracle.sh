@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 bash scripts/check-image-safety.sh "$0"
+bash scripts/test-image-safety.sh
 [ "$(uname -s)" = Darwin ] || { echo 'oracle: macOS is required; run chore test:oracle-macos on macOS' >&2; exit 1; }
-for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil; do
+for tool in /usr/bin/hdiutil /sbin/newfs_exfat /sbin/fsck_exfat /usr/bin/python3 /usr/sbin/diskutil /usr/sbin/lsof; do
     [ -x "$tool" ] || { echo "oracle: $tool is required by chore test:oracle-macos" >&2; exit 1; }
 done
 # From macOS 27 the disk image tool prints a notice on every create, attach and
@@ -47,6 +48,11 @@ detach_receipt() {
         fi
     done
     echo "oracle: detach retry exhausted; retained receipt and image in $directory" >&2
+    local raw="/dev/r${device#/dev/}"
+    echo "oracle: process holders of receipt-owned nodes $device and $raw:" >&2
+    if ! /usr/sbin/lsof -nP +c 0 -- "$device" "$raw" >&2; then
+        echo 'oracle: could not identify a holder of the receipt-owned nodes; detach still failed' >&2
+    fi
     return 1
 }
 accept_receipt() {

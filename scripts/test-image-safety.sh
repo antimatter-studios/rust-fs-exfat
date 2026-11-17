@@ -20,6 +20,11 @@ if bash scripts/check-image-safety.sh "$directory/foreign-device.sh" > "$directo
     exit 1
 fi
 bash scripts/check-image-safety.sh
+python3 - <<'PY'
+from pathlib import Path
+source = Path('tests/oracle/scale.rs').read_text().split('/// A directory holding a stand-in')[0]
+assert '-force' not in source, 'image-safety: scale oracle must never force detach or recommend it'
+PY
 python3 - "$directory" <<'PY'
 from pathlib import Path
 import sys
