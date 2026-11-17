@@ -24,7 +24,7 @@ crash recovery and two-FAT interoperability are not established by those gates.
 
 | Feature | State | Since | Tracking | Checked by |
 |---|---|---|---|---|
-| Two-FAT writing (TexFAT interoperability) | Independently unverified; mirroring both FATs and Allocation Bitmaps is checked only on specification-built images with this crate's own reader; macOS, the Linux kernel and exfatprogs do not implement TexFAT, and no TexFAT-capable harness oracle has been validated; no transactional or crash-recovery guarantee | | #154 | Synthetic only: `tests/write.rs`; [oracle review](texfat-validation.md) |
+| Two-FAT writing (TexFAT interoperability) | Independently unverified; mirrored-copy writer checks remain synthetic; Sleuth Kit 4.11.1 lists mirrored copies but fails the ActiveFat-1 content and allocation controls; no suitable TexFAT-capable harness oracle or transactional/crash-recovery guarantee | | #154, #178 | Synthetic writer checks: `tests/write.rs`; [negative guest-only Sleuth Kit evaluation](sleuthkit-evaluation.md); [oracle review](texfat-validation.md) |
 
 ## Interfaces
 

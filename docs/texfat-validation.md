@@ -27,12 +27,15 @@ transaction protocol.
   was read or copied. It is not a TexFAT-capable alternative to the other
   harness oracles.
 - **Sleuth Kit:** its [public API reference][tsk] describes a TexFAT padding
-  directory entry. This is a potential forensic-reader candidate, not proof
-  of correct two-FAT or ActiveFat readback. Its CLI is not installed in this
-  environment, no pinned guest integration was validated, and the harness VM
-  is mounted for another worktree. [Follow-up #178][tsk-followup] records the
-  black-box evaluation needed. Its mixed IPL/CPL/GPL package licensing means
-  it must remain an external oracle, not a linked dependency or source input.
+  directory entry, but the [pinned guest-only evaluation](sleuthkit-evaluation.md)
+  for [#178][tsk-followup] found that version 4.11.1 is unsuitable as an
+  ActiveFat-aware oracle. Mirrored two-FAT images list and extract, but a stale
+  inactive First FAT produces incorrect, truncated extraction with exit 0 when
+  ActiveFat selects the Second FAT; a stale inactive First Allocation Bitmap
+  likewise produces the wrong allocation verdict. The symmetric ActiveFat-0
+  controls pass. Its mixed IPL/CPL/GPL package licensing means it remains an
+  external CLI oracle candidate, not a linked dependency or source input; no
+  implementation source was inspected.
 - **FatFs R0.16:** this portable C implementation is a plausible permissively
   licensed candidate, but its exFAT mount path requires exactly one FAT and
   returns `FR_NO_FILESYSTEM` otherwise (`source/ff.c`, lines 3541–3542 in the
@@ -46,11 +49,12 @@ transaction protocol.
   is not a runnable oracle; a generic Windows exFAT reader is not evidence
   of TexFAT support.
 
-No independent TexFAT-capable oracle was established as runnable in the
-current harness. This is a bounded review, not a claim that no such
-implementation exists or that the Sleuth Kit candidate cannot work. No
-two-FAT image was submitted to an independent implementation, so this review
-supplies no new interoperability verdict.
+No suitable independent TexFAT-capable oracle was established in the current
+harness. Sleuth Kit 4.11.1 was run on newly created two-FAT images and rejected
+as an ActiveFat-aware oracle on the evidence above. This is not a claim that
+no such implementation exists, nor a verdict about every Sleuth Kit version.
+The negative capability result does not supply positive interoperability
+evidence for this crate's writer.
 
 For reproducibility, the downloaded R0.16 archive's SHA-256 is
 `99f7dc1f7e095356e4a9e3dbe29959090d8b948afe2bbc5441e52fdf4b85449e`;

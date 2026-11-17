@@ -42,7 +42,7 @@ measured 34,300-byte cap covers this case without another budget increase.
 
 | Tier | Measured output | Budget | Executed floor |
 |---|---|---|---|
-| unit | c60274f (#173), 402 tests: 2026-11-13 local macOS 564 lines, 33931 bytes including four slow-test notices and absolute CARGO_TARGET_DIR paths; CI run 43391840746 Linux unit job 560 lines, 32902 bytes, macOS job 560 lines, 32903 bytes | 566 lines, 34300 bytes, allowing two more lines and 369 bytes above local macOS for timing and diagnostics | 150 |
+| unit | 2026-11-13 (#178), 3ed71ee: 406 passing tests, 567 lines / 33768 bytes with three slow-test notices; earlier c60274f (#173), 402 tests: local macOS 564 lines / 33931 bytes, CI Linux 560 / 32902 and macOS 560 / 32903 | 570 lines, 34300 bytes; three lines above the 406-test measurement for timing diagnostics, with the byte cap retained | 150 |
 | images | CI run 43105817721, ubuntu, cold build: 95 lines, 3328 bytes; 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 98 lines, 3500 bytes | 7 |
 | oracle | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 107 lines, 7943 bytes, 6 tests; the historical CI cold/warm difference adds 83 lines, 2721 bytes: 190 lines, 10664 bytes cold; the formatter alone adds 15 lines, 1475 bytes | 198 lines, 11000 bytes | 6 |
 | kernel | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 114 lines, 8718 bytes, 7 tests; the historical cold/warm difference adds 39 lines, 1232 bytes: 153 lines, 9950 bytes cold; the formatter alone adds 15 lines, 1639 bytes | 162 lines, 10300 bytes | 7 |
