@@ -30,6 +30,95 @@ real disk. Known limits:
   unaligned ValidDataLength. This reader returns zeros from the exact length, as the
   specification requires, so the two differ on such a file.
 
+## API layers
+
+The crate is read in three layers, named as in `rust-fs-fat`. Every layer takes
+`fs_core::BlockRead` only, so none of them can write to a source by type.
+
+- **VolumeAPI** reads the bytes of a volume and opens it as a strict exFAT
+  volume. `interface::open_device` and `interface::open_path` build a
+  `volume::Volume`; `Volume::open` (or `open_with_limits`, with `ReadLimits`)
+  accepts a volume only when its main boot region, root directory, allocation
+  bitmap and up-case table check out, and then offers `boot()`, `metadata()`,
+  `bitmap()`, `upcase()`, `fat_entry` and `cluster_chain`. Below it, the raw
+  part works on any source: `device::Reader` makes bounded, positioned reads of
+  any byte range (aligned to 512 bytes inside, `Error::Bounds` past the end),
+  and `boot::BootRegions::read` reads the main and backup boot regions with
+  their checksums and differences, and `strict()` demands a valid one.
+- **PrimitiveAPI** is `fs_exfat::primitives`: decoders that keep damaged values
+  and validity flags instead of refusing them. It decodes boot sectors and
+  regions, FAT words and windows, entry sets (`RawEntrySet`, `parse_set`,
+  `find_sets`, the set checksum and name hash), the allocation bitmap
+  (`RawAllocationBitmap`), the up-case table (`RawUpcaseTable`) and root system
+  entries (`RawRootMetadata`), and walks FAT chains best-effort: it stops at
+  broken links, special values, loops and caller-supplied limits
+  (`walk_fat_chain`, `chain_islands`, `stale_chains`, `StreamCursor`). It also
+  compares the two FATs and bitmaps of a TexFAT volume and lists entries the
+  driver does not interpret. The strict readers delegate their decoding to it
+  and keep their rejection policy.
+- **FileAPI** lists valid directories and opens files for bounded random-access
+  reads: `Volume::root_directory`, `read_directory`, `read_directory_path`,
+  `lookup` and `open_file`, giving `directory::DirectoryEntry` and
+  `file::File` (`len`, `valid_data_length`, `read_at`, which returns zeros past
+  the ValidDataLength). It lists only valid entry sets and skips deleted ones.
+  The recovery counterpart, which does not need a strict mount, is
+  [`salvage`](docs/convention.md): candidates, extent walks, parent claims and
+  plans, built on the primitives alone.
+
+```rust
+use fs_core::FileDevice;
+use fs_exfat::boot::BootRegions;
+use fs_exfat::device::Reader;
+use fs_exfat::interface::open_path;
+use fs_exfat::primitives::{find_sets, Limits};
+use std::path::Path;
+
+fn main() -> fs_exfat::Result<()> {
+    let path = Path::new("disk.img");
+    // VolumeAPI and FileAPI, strict.
+    let volume = open_path(path, 0)?;
+    for entry in volume.root_directory()? {
+        println!("{} {}", entry.name(), entry.stream().data_length());
+        if !entry.is_directory() {
+            let file = volume.open_file(&entry)?;
+            let mut head = vec![0u8; 16.min(file.len() as usize)];
+            file.read_at(0, &mut head)?;
+        }
+    }
+    // The raw part of VolumeAPI: bounded reads and both boot regions, even when the main one is damaged.
+    let reader = Reader::new(FileDevice::open(path)?);
+    let regions = BootRegions::read(&reader)?;
+    let _boot = regions.strict()?;
+    // PrimitiveAPI: entry sets found in bytes the caller read, damaged or not.
+    let mut sector = vec![0u8; 4096];
+    reader.read_at(0, &mut sector)?;
+    let _sets = find_sets(&sector, sector.len(), Limits { cluster_count: 1000, cluster_size: 4096 });
+    Ok(())
+}
+```
+
+**Source-write policy.** The strict reader, the primitives and the salvage
+adapter take `BlockRead` and nothing else, and hold their source behind
+`fs_core::ReadOnlyDevice`, which has no way to write it. Writing is a different module,
+`write::WriteVolume` (and the formatter `mkfs`), over a writable `BlockDevice`;
+`scripts/check-read-only.sh` keeps writable device types out of every other
+module. A caller recovering from a damaged disk uses the three layers above and
+cannot reach the writer.
+
+**Gaps.** There is no `RawVolume` as in `rust-fs-fat`: `Volume::open` refuses a
+volume whose main boot region is invalid, so a damaged volume is read through
+`device::Reader`, `boot::BootRegions` and the primitives, or through `salvage`.
+A raw device with 4096-byte sectors cannot be read
+([#20](https://github.com/antimatter-studios/rust-fs-exfat/issues/20)).
+
+**At the revision Captain Salvage uses (`1dae694`).** The layers above are all
+present, with the same names: that revision has `volume`, `interface`, `device`,
+`boot`, `file`, `directory`, `path`, `primitives` and `salvage`. It has no
+`write` or `mkfs` modules and none of the later salvage extensions (cross-links,
+plans). Captain Salvage uses the primitives (`parse_set`, `Limits`,
+`BootSector`, `bitmap_location`, `decode_timestamp`, the FAT constants), the
+boot decoders and the strict `Volume::open`; it does not use `salvage`.
+
 ## Architecture
 
 The library is `fs_exfat`. Strict entry points accept `fs_core::BlockRead` only;
