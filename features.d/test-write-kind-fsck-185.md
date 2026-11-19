@@ -1,0 +1,3 @@
+## Validation
+
+| Write-kind checker checkpoints | After each kind of write on its own mount (allocation, creation, truncate grow/shrink/zero/fragmented chain, unlink, rmdir, case-only/cross-directory/replacing rename, timestamps, attributes, label set and clear), the clean unmounted image passes exfatprogs `fsck.exfat -n` in the Linux guest and macOS `fsck_exfat -n` on the host, at 512 and 4096 bytes per sector; a refused checkpoint is retained named for its kind; clean unmounts only, establishing no crash recovery or TexFAT interoperability | Unreleased (#185) | #185 | `tests/write_support/kinds.rs`, `tests/exfatprogs.rs`, `tests/guest_support/write_image.rs`, `tests/oracle/write.rs`, `scripts/test-oracle.sh` |
