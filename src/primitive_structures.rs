@@ -5,7 +5,13 @@ use super::{
 use crate::Error;
 use std::{fmt, io};
 
-const SECTOR: u64 = 512;
+/// The smallest sector size the format allows (section 3.1.14). Every offset
+/// is computed from the volume's own sector size; this only sizes the first
+/// read, which holds the boot sector that says what that size is.
+const MIN_SECTOR: u64 = 512;
+const MAX_SECTOR: u64 = 4096;
+/// Where the boot sector holds BytesPerSectorShift (section 3.1.13).
+const BYTES_PER_SECTOR_SHIFT: usize = 108;
 
 /// Raw structures in read order, without interpreting or repairing their bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,7 +23,8 @@ pub struct StructureCopy {
     pub root: Vec<u8>,
 }
 
-/// Decoded fixed-sector geometry and boot diagnostics for an existing snapshot.
+/// Decoded geometry and boot diagnostics for an existing snapshot, at the
+/// volume's own sector size.
 ///
 /// Invalid trailers, checksums, reserved fields and broken FAT links are not
 /// rejected. `boot.signature_ok`, `backup_boot.signature_ok` and `boot_check`
@@ -99,13 +106,20 @@ fn parse_boot(bytes: &[u8], region: &'static str) -> Result<BootSector, Structur
     BootSector::parse(bytes).map_err(|source| StructureError::Boot { region, source })
 }
 
-fn cluster_size(boot: &BootSector) -> Result<u64, StructureError> {
+/// The volume's sector size, from its boot sector. The boot parser accepts
+/// 512, 1024, 2048 and 4096; a size outside that range is refused here too, so
+/// no offset is ever computed from a size the format does not allow.
+fn sector_size(boot: &BootSector) -> Result<u64, StructureError> {
     let sector = 1u64
         .checked_shl(u32::from(boot.bytes_per_sector_shift))
         .ok_or(StructureError::Bounds)?;
-    if sector != SECTOR {
+    if !(MIN_SECTOR..=MAX_SECTOR).contains(&sector) {
         return Err(StructureError::UnsupportedSectorSize(sector));
     }
+    Ok(sector)
+}
+
+fn cluster_size(boot: &BootSector, sector: u64) -> Result<u64, StructureError> {
     boot.cluster_count
         .checked_add(FIRST_CLUSTER)
         .ok_or(StructureError::Bounds)?;
@@ -118,6 +132,7 @@ fn cluster_size(boot: &BootSector) -> Result<u64, StructureError> {
 fn cluster_position(
     boot: &BootSector,
     cluster: u32,
+    sector: u64,
     cluster_size: u64,
 ) -> Result<u64, StructureError> {
     let index = cluster
@@ -125,7 +140,7 @@ fn cluster_position(
         .ok_or(StructureError::Bounds)?;
     u64::from(index)
         .checked_mul(cluster_size)
-        .and_then(|offset| offset.checked_add(u64::from(boot.cluster_heap_offset) * SECTOR))
+        .and_then(|offset| offset.checked_add(u64::from(boot.cluster_heap_offset) * sector))
         .ok_or(StructureError::Bounds)
 }
 
@@ -160,11 +175,16 @@ pub fn bitmap_location(boot: &BootSector, root: &[u8]) -> Result<BitmapLocation,
     })
 }
 
-/// Reads both fixed-512-byte boot regions, FAT, partial root chain and bitmap.
+/// Reads both boot regions, FAT, partial root chain and bitmap, at the sector
+/// size the main boot sector declares (512, 1024, 2048 or 4096 bytes).
 ///
 /// The callback reads exactly the requested bytes, with no device alignment,
-/// geometry policy or strict-reader validation added around it. The main boot
-/// name, fixed sector size and bitmap's minimum declared size must be usable;
+/// geometry policy or strict-reader validation added around it. The first read
+/// is the 6144 bytes that hold twelve 512-byte sectors, which always contain the
+/// boot sector; a volume with larger sectors then has the rest of its main boot
+/// region read, so a callback over a raw device with larger logical sectors
+/// must itself align the first read. The main boot
+/// name, sector size and bitmap's minimum declared size must be usable;
 /// damaged boot trailers/checksums, backup contents and incomplete root chains
 /// remain available for inspection. The bitmap is read contiguously at its
 /// declared location and length, without walking its FAT or clamping its size.
@@ -176,15 +196,33 @@ pub fn read_structures(
     let mut read = |offset, output: &mut [u8], operation| {
         read_exact_at(offset, output).map_err(|source| StructureError::Read { operation, source })
     };
-    let region_bytes = BOOT_REGION_SECTORS * SECTOR;
-    let mut main = buffer(region_bytes)?;
-    let mut backup = buffer(region_bytes)?;
+    let first_bytes = BOOT_REGION_SECTORS * MIN_SECTOR;
+    let mut main = buffer(first_bytes)?;
     read(0, &mut main, "reading main boot region")?;
+    // The boot sector says how large the sectors are. A shift it cannot hold
+    // is left to the parse below, which names it.
+    let declared = main
+        .get(BYTES_PER_SECTOR_SHIFT)
+        .map_or(MIN_SECTOR, |&shift| match shift {
+            9..=12 => 1 << shift,
+            _ => MIN_SECTOR,
+        });
+    let region_bytes = BOOT_REGION_SECTORS * declared;
+    if region_bytes > first_bytes {
+        main.resize(region_bytes as usize, 0);
+        read(
+            first_bytes,
+            &mut main[first_bytes as usize..],
+            "reading main boot region",
+        )?;
+    }
+    let mut backup = buffer(region_bytes)?;
     read(region_bytes, &mut backup, "reading backup boot region")?;
     let boot = parse_boot(&main, "main")?;
-    let cluster_size = cluster_size(&boot)?;
-    let mut fat = buffer(u64::from(boot.fat_length) * SECTOR)?;
-    read(u64::from(boot.fat_offset) * SECTOR, &mut fat, "reading FAT")?;
+    let sector = sector_size(&boot)?;
+    let cluster_size = cluster_size(&boot, sector)?;
+    let mut fat = buffer(u64::from(boot.fat_length) * sector)?;
+    read(u64::from(boot.fat_offset) * sector, &mut fat, "reading FAT")?;
     let root_clusters = root_chain(&boot, &decode_fat(&fat, &boot));
     let root_length = (root_clusters.len() as u64)
         .checked_mul(cluster_size)
@@ -193,7 +231,7 @@ pub fn read_structures(
     let cluster_bytes = usize::try_from(cluster_size).map_err(|_| StructureError::Bounds)?;
     for (&cluster, output) in root_clusters.iter().zip(root.chunks_mut(cluster_bytes)) {
         read(
-            cluster_position(&boot, cluster, cluster_size)?,
+            cluster_position(&boot, cluster, sector, cluster_size)?,
             output,
             "reading root directory",
         )?;
@@ -201,7 +239,7 @@ pub fn read_structures(
     let location = bitmap_location(&boot, &root)?;
     let mut bitmap = buffer(location.length)?;
     read(
-        cluster_position(&boot, location.first_cluster, cluster_size)?,
+        cluster_position(&boot, location.first_cluster, sector, cluster_size)?,
         &mut bitmap,
         "reading allocation bitmap",
     )?;
@@ -216,20 +254,21 @@ pub fn read_structures(
 
 /// Decodes saved structures without re-reading or imposing strict validity.
 ///
-/// Both boot names and minimum lengths, the main fixed sector size and the
+/// Both boot names and minimum lengths, the main sector size and the
 /// root-copy length must match. Bitmap sizing is deliberately not rechecked:
 /// this is an inspection of an existing snapshot, not a fresh structure read.
-/// Boot regions need eleven fixed-size sectors and the first stored checksum
+/// Boot regions need eleven sectors of the volume's size and the first stored checksum
 /// word; a partial checksum sector remains inspectable.
 pub fn inspect_structures(copy: &StructureCopy) -> Result<StructureGeometry, StructureError> {
     let boot = parse_boot(&copy.main, "main")?;
     let backup_boot = parse_boot(&copy.backup, "backup")?;
-    let cluster_size = cluster_size(&boot)?;
-    let checksum_bytes = (SECTOR * 11) as usize + std::mem::size_of::<u32>();
+    let sector = sector_size(&boot)?;
+    let cluster_size = cluster_size(&boot, sector)?;
+    let checksum_bytes = (sector * 11) as usize + std::mem::size_of::<u32>();
     if copy.main.len() < checksum_bytes || copy.backup.len() < checksum_bytes {
         return Err(StructureError::Bounds);
     }
-    let boot_check = boot_check(&copy.main, &copy.backup, SECTOR as usize);
+    let boot_check = boot_check(&copy.main, &copy.backup, sector as usize);
     let fat = decode_fat(&copy.fat, &boot);
     let root_clusters = root_chain(&boot, &fat);
     let root_length = (root_clusters.len() as u64)

@@ -39,7 +39,7 @@
 //! FAT, bitmap and predecessor slices must cover every indexed cluster; malformed
 //! geometry and undersized slices retain unchecked arithmetic/index preconditions.
 //!
-//! [`read_structures`] loads raw fixed-512-byte-sector snapshots through a
+//! [`read_structures`] loads raw snapshots, at the volume's own sector size, through a
 //! read-only callback. [`inspect_structures`] decodes saved copies and reports
 //! boot checksums and signatures without enforcing strict-reader validity.
 //! [`bitmap_location`] checks only the declared bitmap's minimum byte length.
