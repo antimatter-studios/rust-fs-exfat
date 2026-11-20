@@ -23,9 +23,8 @@ stopping another consumer's work. `chore vm:down` stops the guest only when
 nobody is using it. Guest memory, CPUs, disk and idle deadline are host settings
 (`FLTH_SHARED_MEMORY`, `FLTH_SHARED_CPUS`, `FLTH_SHARED_DISK` and
 `FLTH_SHARED_DEADLINE`), not consumer `[vm]` settings.
-A CI runner has no later run to share the guest with, so each CI job that
-boots it ends with `chore vm:down` and then fails if `chore vm:status` still
-finds it running.
+A CI runner is thrown away when its job ends, and the guest ends with it, so
+no CI job stops the guest or checks that it is down.
 
 ## CI
 
