@@ -40,6 +40,7 @@ use crate::primitives::{
     UpcaseIssue, VolumeState, BOOT_REGION_SECTORS, ENTRY_SIZE, FIRST_CLUSTER,
 };
 use crate::Error;
+use fs_core::layers::salvage as shared;
 use fs_core::BlockRead;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -184,6 +185,153 @@ impl SalvageAdapter for ExfatSalvage {
         &self,
         source: &dyn BlockRead,
         range: Extent,
+        sink: &mut dyn Sink<Candidate<Self::Detail>>,
+    ) -> Result<ScanReport, SalvageError> {
+        self.find_candidates_impl(source, range, sink)
+    }
+
+    fn walk_extents(
+        &self,
+        source: &dyn BlockRead,
+        candidate: &Candidate<Self::Detail>,
+    ) -> Result<ExtentWalk, SalvageError> {
+        self.walk_extents_impl(source, candidate.size, &candidate.detail)
+    }
+
+    fn rebuild_tree(
+        &self,
+        source: &dyn BlockRead,
+        candidates: &[Candidate<Self::Detail>],
+    ) -> Result<Tree, SalvageError> {
+        self.rebuild_tree_impl(
+            source,
+            candidates.iter().map(|candidate| {
+                (
+                    candidate.kind,
+                    candidate.location.offset,
+                    candidate.size,
+                    &candidate.detail,
+                )
+            }),
+        )
+    }
+
+    fn report_damage(
+        &self,
+        source: &dyn BlockRead,
+        sink: &mut dyn Sink<Damage>,
+    ) -> Result<DamageReport, SalvageError> {
+        self.report_damage_impl(source, sink)
+    }
+
+    fn read_extent(
+        &self,
+        source: &dyn BlockRead,
+        extent: Extent,
+        offset: u64,
+        output: &mut [u8],
+    ) -> Result<usize, SalvageError> {
+        self.read_extent_impl(source, extent, offset, output)
+    }
+
+    fn cluster_layout(&self) -> Result<ClusterLayout, SalvageError> {
+        self.cluster_layout_impl()
+    }
+}
+
+impl shared::SalvageAdapter for ExfatSalvage {
+    type Detail = EntrySetDetail;
+
+    fn capabilities(&self) -> shared::Capabilities {
+        shared::Capabilities {
+            missing: vec![
+                shared::Feature::EncodedExtents,
+                shared::Feature::GeometryHypotheses,
+            ],
+        }
+    }
+
+    fn find_candidates(
+        &self,
+        source: &dyn BlockRead,
+        range: shared::Extent,
+        sink: &mut dyn shared::Sink<shared::Candidate<Self::Detail>>,
+    ) -> Result<shared::ScanReport, shared::SalvageError> {
+        self.find_candidates_impl(source, range.into(), &mut |candidate: Candidate<_>| {
+            sink.accept(candidate.into())
+        })
+        .map(Into::into)
+        .map_err(Into::into)
+    }
+
+    fn walk_extents(
+        &self,
+        source: &dyn BlockRead,
+        candidate: &shared::Candidate<Self::Detail>,
+    ) -> Result<shared::ExtentWalk, shared::SalvageError> {
+        self.walk_extents_impl(source, candidate.size, &candidate.detail)
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+
+    fn rebuild_tree(
+        &self,
+        source: &dyn BlockRead,
+        candidates: &[shared::Candidate<Self::Detail>],
+    ) -> Result<shared::Tree, shared::SalvageError> {
+        let mut tree = shared::Tree::from(self.rebuild_tree_impl(
+            source,
+            candidates.iter().map(|candidate| {
+                (
+                    candidate.kind.into(),
+                    candidate.location.offset,
+                    candidate.size,
+                    &candidate.detail,
+                )
+            }),
+        )?);
+        for (node, candidate) in tree.nodes.iter_mut().zip(candidates) {
+            for claim in &mut node.parents {
+                claim.name = candidate.name.as_ref().map(|name| name.as_bytes().to_vec());
+                claim.state = candidate.state;
+            }
+        }
+        Ok(tree)
+    }
+
+    fn report_damage(
+        &self,
+        source: &dyn BlockRead,
+        sink: &mut dyn shared::Sink<shared::Damage>,
+    ) -> Result<shared::DamageReport, shared::SalvageError> {
+        self.report_damage_impl(source, &mut |damage: Damage| sink.accept(damage.into()))
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+
+    fn read_extent(
+        &self,
+        source: &dyn BlockRead,
+        extent: shared::Extent,
+        offset: u64,
+        output: &mut [u8],
+    ) -> Result<usize, shared::SalvageError> {
+        self.read_extent_impl(source, extent.into(), offset, output)
+            .map_err(Into::into)
+    }
+
+    fn cluster_layout(&self) -> Result<shared::ClusterLayout, shared::SalvageError> {
+        self.cluster_layout_impl()
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+}
+
+impl ExfatSalvage {
+    fn find_candidates_impl(
+        &self,
+        source: &dyn BlockRead,
+        range: Extent,
         sink: &mut dyn Sink<Candidate<EntrySetDetail>>,
     ) -> Result<ScanReport, SalvageError> {
         let size = source.size_bytes();
@@ -242,17 +390,18 @@ impl SalvageAdapter for ExfatSalvage {
         Ok(report)
     }
 
-    fn walk_extents(
+    fn walk_extents_impl(
         &self,
         source: &dyn BlockRead,
-        candidate: &Candidate<EntrySetDetail>,
+        size: Option<u64>,
+        detail: &EntrySetDetail,
     ) -> Result<ExtentWalk, SalvageError> {
         let geometry = self.geometry()?;
-        let claimed = candidate.size.unwrap_or(0);
+        let claimed = size.unwrap_or(0);
         let chain = Mapper::new(geometry, source).chain(
-            candidate.detail.first_cluster,
+            detail.first_cluster,
             claimed.div_ceil(geometry.cluster),
-            candidate.detail.no_fat_chain,
+            detail.no_fat_chain,
         );
         Ok(ExtentWalk {
             extents: geometry.extents(&chain.runs, claimed),
@@ -271,10 +420,10 @@ impl SalvageAdapter for ExfatSalvage {
     /// set: the root chain, and every directory candidate's claimed clusters,
     /// deleted or damaged ones included. Directory claims are followed up to
     /// the specification's 256 MiB directory limit.
-    fn rebuild_tree(
+    fn rebuild_tree_impl<'a>(
         &self,
         source: &dyn BlockRead,
-        candidates: &[Candidate<EntrySetDetail>],
+        candidates: impl Iterator<Item = (CandidateKind, u64, Option<u64>, &'a EntrySetDetail)> + Clone,
     ) -> Result<Tree, SalvageError> {
         let geometry = self.geometry()?;
         let mut mapper = Mapper::new(geometry, source);
@@ -282,28 +431,23 @@ impl SalvageAdapter for ExfatSalvage {
         let mut owners: HashMap<u32, Vec<Parent>> = HashMap::new();
         let root = mapper.chain(geometry.boot.root_cluster, directory_clusters, false);
         claim(&mut owners, &root.runs, Parent::Root);
-        for directory in candidates
-            .iter()
-            .filter(|candidate| candidate.kind == CandidateKind::Directory)
+        for (_, offset, size, detail) in candidates
+            .clone()
+            .filter(|(kind, ..)| *kind == CandidateKind::Directory)
         {
-            let clusters = directory.size.unwrap_or(0).div_ceil(geometry.cluster);
+            let clusters = size.unwrap_or(0).div_ceil(geometry.cluster);
             let chain = mapper.chain(
-                directory.detail.first_cluster,
+                detail.first_cluster,
                 clusters.min(directory_clusters),
-                directory.detail.no_fat_chain,
+                detail.no_fat_chain,
             );
-            claim(
-                &mut owners,
-                &chain.runs,
-                Parent::Candidate(directory.location.offset),
-            );
+            claim(&mut owners, &chain.runs, Parent::Candidate(offset));
         }
         let nodes = candidates
-            .iter()
-            .map(|candidate| TreeNode {
-                candidate: candidate.location.offset,
+            .map(|(_, offset, _, _)| TreeNode {
+                candidate: offset,
                 parents: geometry
-                    .cluster_at(candidate.location.offset)
+                    .cluster_at(offset)
                     .and_then(|cluster| owners.get(&cluster))
                     .cloned()
                     .unwrap_or_default(),
@@ -314,7 +458,7 @@ impl SalvageAdapter for ExfatSalvage {
 
     /// Checks both boot copies and their agreement, the volume flags, the root
     /// directory chain, and the root's allocation-bitmap and upcase entries.
-    fn report_damage(
+    fn report_damage_impl(
         &self,
         source: &dyn BlockRead,
         sink: &mut dyn Sink<Damage>,
@@ -327,7 +471,7 @@ impl SalvageAdapter for ExfatSalvage {
         })
     }
 
-    fn read_extent(
+    fn read_extent_impl(
         &self,
         source: &dyn BlockRead,
         extent: Extent,
@@ -346,7 +490,7 @@ impl SalvageAdapter for ExfatSalvage {
 
     /// Clusters 2 onward of the Cluster Heap, as the boot copy in use
     /// describes it.
-    fn cluster_layout(&self) -> Result<ClusterLayout, SalvageError> {
+    fn cluster_layout_impl(&self) -> Result<ClusterLayout, SalvageError> {
         let geometry = self.geometry()?;
         Ok(ClusterLayout {
             first: FIRST_CLUSTER.into(),

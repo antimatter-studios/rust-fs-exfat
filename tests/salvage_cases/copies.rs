@@ -4,6 +4,8 @@
 //! `Spec`, a reader written here from the specification alone, which shares no
 //! code with the crate's decoders.
 
+#![allow(deprecated)]
+
 use super::support::{put16, put32, seal_boot, Bytes};
 use super::{position, Failing};
 use fs_core::BlockRead;

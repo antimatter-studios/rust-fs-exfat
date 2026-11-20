@@ -3,6 +3,8 @@
 //! (#97). The primitives under them are checked in `primitives.rs`; these
 //! check the verbs a salvage caller sees.
 
+#![allow(deprecated)]
+
 use fs_core::BlockRead;
 use fs_exfat::salvage::{
     Candidate, CandidateKind, CandidateState, Damage, EntrySetDetail, ExfatSalvage, Extent,

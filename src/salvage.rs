@@ -2,13 +2,15 @@
 //!
 //! Salvage is a peer of the strict volume and file APIs, not a mode of them.
 //! It sits on [`crate::primitives`], needs no successful strict mount, and
-//! returns evidence rather than trusted files. [`adapter`] defines the
-//! format-neutral trait; [`ExfatSalvage`] implements it for exFAT.
+//! returns evidence rather than trusted files. [`ExfatSalvage`] implements
+//! [`fs_core::layers::salvage::SalvageAdapter`] for exFAT. The old [`adapter`]
+//! API remains available for one release.
 //!
 //! ```
-//! use fs_exfat::salvage::{Candidate, EntrySetDetail, Extent, ExfatSalvage, SalvageAdapter};
+//! use fs_core::layers::salvage::{Candidate, Extent, SalvageAdapter, SalvageError};
+//! use fs_exfat::salvage::{EntrySetDetail, ExfatSalvage};
 //!
-//! # fn scan(source: &dyn fs_core::BlockRead) -> Result<(), fs_exfat::salvage::SalvageError> {
+//! # fn scan(source: &dyn fs_core::BlockRead) -> Result<(), SalvageError> {
 //! let adapter = ExfatSalvage::probe(source);
 //! let mut candidates: Vec<Candidate<EntrySetDetail>> = Vec::new();
 //! let whole = Extent::new(0, source.size_bytes());
@@ -20,6 +22,8 @@
 //! # Ok(())
 //! # }
 //! ```
+
+#![allow(deprecated)]
 
 #[path = "salvage_adapter.rs"]
 pub mod adapter;

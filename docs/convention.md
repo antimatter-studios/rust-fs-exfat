@@ -268,10 +268,16 @@ to #52. That issue
 expects no missing exFAT capabilities in the first version; this is a target,
 not an implemented fact.
 
-The salvage trait stays in each driver crate until **both ext4 and NTFS
-implement it**; only then does it move to rust-fs-core. Rule of three means
-three drivers: exFAT, ext4 and NTFS. The owner settled this in the comments on
-#51 and #52, replacing the original second-driver threshold.
+The salvage trait was to stay in each driver crate until both ext4 and NTFS
+implemented it (#51, #52). The owner moved it earlier, on 2026-11-20
+(antimatter-studios/captainsalvage#289): the trait, its evidence and plan
+types and the conformance set now live in rust-fs-core 0.5.0 as
+`fs_core::layers`, beside the shared volume and file layers that every
+rust-fs driver implements, and ext4 and EROFS shaped them before release.
+This crate's `salvage::adapter` and `conformance` keep the original API shapes
+under their old paths for one release. New code uses `fs_core::layers`.
+Legacy evidence and plans convert to the shared types; conversion back is
+fallible where the old API cannot express the new value, such as a sparse walk.
 
 The proving order is squashfs first for the read-only-format case (section 5a),
 then ext4 as the second implementation, testing a different on-disk design
@@ -417,7 +423,7 @@ that exFAT is an inherently read-only format.
 | 3. Salvage is read-only by type, separate, and returns evidence rather than trusted files. | partial | [src/device.rs](../src/device.rs) has the read-only type boundary; [src/primitives.rs](../src/primitives.rs) returns candidate entry sets. There is no complete salvage surface for orphans and conflicts among the exports in [src/lib.rs](../src/lib.rs). Implement [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) and prove it with [#53](https://github.com/antimatter-studios/rust-fs-exfat/issues/53). |
 | 4. Each driver implements the six-verb common salvage trait, with capabilities. | not met | No adapter trait or capability surface is exported by [src/lib.rs](../src/lib.rs). [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) defines and implements it. |
 | 5. Only universal verbs are common; everything else is a flagged extension. | not met | No common trait or extension flags exist in [src/lib.rs](../src/lib.rs). [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) establishes that boundary. Format evidence work is tracked by [#40](https://github.com/antimatter-studios/rust-fs-exfat/issues/40), [#41](https://github.com/antimatter-studios/rust-fs-exfat/issues/41), [#42](https://github.com/antimatter-studios/rust-fs-exfat/issues/42), [#43](https://github.com/antimatter-studios/rust-fs-exfat/issues/43) and [#44](https://github.com/antimatter-studios/rust-fs-exfat/issues/44), with current support described in section 5. |
-| 6. The salvage trait stays in driver crates until exFAT, ext4 and NTFS implement it, then moves to rust-fs-core. | met | exFAT format helpers remain in [src/primitives.rs](../src/primitives.rs), [src/primitive_chains.rs](../src/primitive_chains.rs) and [src/primitive_structures.rs](../src/primitive_structures.rs); there is no extracted salvage trait. No current gap. [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) keeps the trait local until both ext4 and NTFS implement it. |
+| 6. The salvage trait moves to rust-fs-core once the drivers that shape it implement it. | met | The trait, its evidence and plan types and the conformance set are rust-fs-core 0.5.0's `fs_core::layers`, decided early by the owner (antimatter-studios/captainsalvage#289) with ext4 and EROFS as the shaping drivers. [src/salvage_adapter.rs](../src/salvage_adapter.rs) and [src/conformance.rs](../src/conformance.rs) preserve the deprecated API; the exFAT format helpers stay in [src/primitives.rs](../src/primitives.rs), [src/primitive_chains.rs](../src/primitive_chains.rs) and [src/primitive_structures.rs](../src/primitive_structures.rs). |
 | 7. Read-only images get salvage minus deletion-specific parts. | not met | The shared capability surface needed to express this case does not exist yet. exFAT's live/deleted parser in [src/primitives.rs](../src/primitives.rs) does not demonstrate an inherently read-only format. Squashfs is the first proving format. Define the contract in [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52) and its capability tests in [#53](https://github.com/antimatter-studios/rust-fs-exfat/issues/53). |
 | 8. Each driver runs a conformance set against its adapter. | not met | [tests/primitives.rs](../tests/primitives.rs), [tests/read_only.rs](../tests/read_only.rs) and [tests/check.rs](../tests/check.rs) test existing APIs, not a common adapter. [#53](https://github.com/antimatter-studios/rust-fs-exfat/issues/53) supplies the reusable module and exFAT runner after [#52](https://github.com/antimatter-studios/rust-fs-exfat/issues/52). |
 

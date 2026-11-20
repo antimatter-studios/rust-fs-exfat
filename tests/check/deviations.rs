@@ -6,6 +6,8 @@
 //! table's "Strict layer" column says, with the same verdict it gives
 //! without the report.
 
+#![allow(deprecated)]
+
 use super::interface_support;
 use super::support::{self, Bytes};
 use fs_exfat::check::{check_device, spec_deviations, CheckReport, DeviationReport, Rule};

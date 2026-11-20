@@ -2,7 +2,9 @@
 //! strict volume API. Images are synthetic; healthy forms of their structures
 //! are checked against macOS by the oracle tests.
 
-use fs_core::BlockRead;
+#![allow(deprecated)]
+
+use fs_core::{layers::conformance::salvage as shared, BlockRead};
 use fs_exfat::conformance::{self, Damaged, Driver, Evidence};
 use fs_exfat::salvage::{DamageKind, ExfatSalvage, Extent, StaleEnd};
 use fs_exfat::volume::Volume;
@@ -150,7 +152,29 @@ impl Driver for Exfat {
 
 #[test]
 fn the_exfat_driver_conforms() {
+    shared::run(&Exfat).assert_conforms();
     conformance::run(&Exfat).assert_conforms();
+}
+
+impl shared::Driver for Exfat {
+    type Adapter = ExfatSalvage;
+    type StrictError = fs_exfat::Error;
+
+    fn salvage(&self, source: &dyn BlockRead) -> ExfatSalvage {
+        Driver::salvage(self, source)
+    }
+
+    fn strict(&self, source: &dyn BlockRead) -> Result<(), fs_exfat::Error> {
+        Driver::strict(self, source)
+    }
+
+    fn healthy(&self) -> Vec<u8> {
+        Driver::healthy(self)
+    }
+
+    fn damaged(&self) -> Vec<shared::Damaged> {
+        Driver::damaged(self).into_iter().map(Into::into).collect()
+    }
 }
 
 #[test]

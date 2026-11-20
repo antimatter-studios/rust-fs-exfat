@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use super::{chain, find_bitmap_entry, formatter_value, oracle_directory, reference, walk};
 use crate::image_support::{Image, Snapshot};
 use fs_core::BlockRead;
