@@ -642,6 +642,12 @@ jobs:
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: C toolchain for the gated runner
+        # Only a self-hosted Linux runner lacks it; the hosted image has it.
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            sudo apt-get update && sudo apt-get install -y build-essential
+          fi
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
@@ -1092,6 +1098,12 @@ jobs:
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: C toolchain for the gated runner
+        # Only a self-hosted Linux runner lacks it; the hosted image has it.
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            sudo apt-get update && sudo apt-get install -y build-essential
+          fi
       - name: Stock runner tools
         run: |
           sudo apt-get update
@@ -1123,6 +1135,12 @@ jobs:
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: C toolchain for the gated runner
+        # Only a self-hosted Linux runner lacks it; the hosted image has it.
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            sudo apt-get update && sudo apt-get install -y build-essential
+          fi
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
@@ -1155,7 +1173,7 @@ jobs:
 
   ci-ok-gate:
     needs: [changes-gate, changes, unit-gate, unit, fixtures-gate, fixtures, images-gate, images, test-gate, test, suite-in-vm-gate, suite-in-vm, test-arm64-gate, test-arm64, oracle-macos-gate, oracle-macos, package-gate, package, semver-gate, semver, msrv-gate, msrv, wasm-gate, wasm, cli-gate, cli, provenance-gate, provenance, scripts-gate, scripts]
-    if: always()
+    if: ${{ !(cancelled() && github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:')) }}
     runs-on: antimatter-vps-gate
     defaults:
       run:
