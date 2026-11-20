@@ -14,8 +14,18 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  image-safety-gate:
+    runs-on: antimatter-vps-gate
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   image-safety:
-    runs-on: ubuntu-latest
+    needs: image-safety-gate
+    runs-on: ${{ needs.image-safety-gate.outputs.runner }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
