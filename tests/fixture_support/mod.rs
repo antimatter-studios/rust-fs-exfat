@@ -291,7 +291,13 @@ pub fn salvage(source: &dyn BlockRead) -> Salvaged {
         for _ in 0..64 {
             let candidate = &candidates[current];
             parts.push(candidate.name.clone().unwrap_or_default());
-            match tree.nodes[current].parents.as_slice() {
+            match tree.nodes[current]
+                .parents
+                .iter()
+                .map(|claim| claim.parent)
+                .collect::<Vec<_>>()
+                .as_slice()
+            {
                 [Parent::Root] => {
                     parts.reverse();
                     return Some(parts.join("/"));
@@ -382,14 +388,14 @@ fn read_candidate(
     let mut hash = Sha256::new();
     let mut position = 0u64;
     let mut buffer = vec![0; 1 << 20];
-    for extent in &walk.extents {
+    for extent in walk.sources() {
         let mut within = 0;
         while within < extent.length && position < size {
             let want = (extent.length - within)
                 .min(buffer.len() as u64)
                 .min(size - position) as usize;
             let count = adapter
-                .read_extent(source, *extent, within, &mut buffer[..want])
+                .read_extent(source, extent, within, &mut buffer[..want])
                 .map_err(|error| format!("{error:?}"))?;
             if count == 0 {
                 return Err(format!("short read at {position}"));

@@ -504,7 +504,13 @@ pub fn salvage(data: &[u8]) -> bool {
     let extents: Vec<Extent> = candidates
         .iter()
         .take(4)
-        .flat_map(|candidate| adapter.walk_extents(&source, candidate).unwrap().extents)
+        .flat_map(|candidate| {
+            adapter
+                .walk_extents(&source, candidate)
+                .unwrap()
+                .sources()
+                .collect::<Vec<_>>()
+        })
         .collect();
     reads(&adapter, &source, &extents);
     if let Some(candidate) = candidates.first() {
@@ -544,8 +550,7 @@ fn rebuild(adapter: &ExfatSalvage, source: &Faulty, candidate: &Candidate<EntryS
     let walk = adapter.walk_extents(source, candidate).unwrap();
     let size = boot.cluster_size();
     let mut steps: Vec<PlanStep> = walk
-        .extents
-        .iter()
+        .sources()
         .map(|extent| PlanStep::Clusters {
             first: (extent.offset - boot.heap_offset()) / size + u64::from(FIRST_CLUSTER),
             count: extent.length.div_ceil(size),
@@ -848,14 +853,15 @@ fn walk(adapter: &ExfatSalvage, source: &Faulty, candidate: &Candidate<EntrySetD
     );
     let heap = boot.heap_offset();
     let heap_end = heap + u64::from(boot.cluster_count) * boot.cluster_size();
-    for pair in walk.extents.windows(2) {
+    let sources: Vec<Extent> = walk.sources().collect();
+    for pair in sources.windows(2) {
         assert_ne!(
             pair[0].end(),
             Some(pair[1].offset),
             "adjacent extents not merged"
         );
     }
-    for extent in &walk.extents {
+    for extent in &sources {
         assert!(extent.length > 0, "{walk:?}");
         assert!(
             extent.offset >= heap && extent.end().unwrap() <= heap_end,
@@ -863,7 +869,7 @@ fn walk(adapter: &ExfatSalvage, source: &Faulty, candidate: &Candidate<EntrySetD
         );
         assert!((extent.offset - heap).is_multiple_of(boot.cluster_size()));
     }
-    let clusters = clusters_of(boot, &walk.extents);
+    let clusters = clusters_of(boot, &sources);
     if let Some(first) = clusters.first() {
         assert_eq!(*first, candidate.detail.first_cluster);
     }
@@ -911,7 +917,11 @@ fn tree(adapter: &ExfatSalvage, source: &Faulty, candidates: &[Candidate<EntrySe
         directory.size = Some(size);
         directory.detail.first_cluster = first;
         directory.detail.no_fat_chain = contiguous;
-        adapter.walk_extents(source, &directory).unwrap().extents
+        adapter
+            .walk_extents(source, &directory)
+            .unwrap()
+            .sources()
+            .collect::<Vec<_>>()
     };
     // A cluster is in a claim when its first byte lies in one of the claim's
     // extents, which start on cluster boundaries.
@@ -937,7 +947,7 @@ fn tree(adapter: &ExfatSalvage, source: &Faulty, candidates: &[Candidate<EntrySe
         .collect();
     for (node, candidate) in tree.nodes.iter().zip(candidates) {
         assert_eq!(node.candidate, candidate.location.offset);
-        let unique: HashSet<_> = node.parents.iter().collect();
+        let unique: HashSet<_> = node.parents.iter().map(|claim| &claim.parent).collect();
         assert_eq!(unique.len(), node.parents.len(), "a parent claim repeats");
         let heap = boot.heap_offset();
         let cluster = candidate
@@ -1603,6 +1613,9 @@ fn plan_lengths(plan: &Plan, size: u64, layout: Option<&ClusterLayout>) -> Optio
                 extent.end().filter(|end| *end <= size)?;
                 extent.length
             }
+            // exFAT stores nothing encoded, so its plans never hold an
+            // encoded step; this model has no meaning to give one.
+            _ => return None,
         };
         if length > 0 {
             last_start = total;
@@ -1645,6 +1658,7 @@ fn plan_output(plan: &Plan, layout: Option<&ClusterLayout>, length: u64, valid: 
                 let count = extent.length.min(remaining);
                 output.extend((extent.offset..extent.offset + count).map(Want::Source));
             }
+            _ => unreachable!("plan_lengths refuses a step this model does not know"),
         }
     }
     assert_eq!(output.len() as u64, length);
@@ -1682,7 +1696,9 @@ fn materialize(adapter: &ExfatSalvage, source: &Faulty, plan: &Plan) -> bool {
         PlanStep::Extent(extent) => total.checked_add(extent.length),
         PlanStep::Zeros(length) => total.checked_add(*length),
         PlanStep::Bytes(bytes) => total.checked_add(bytes.len() as u64),
+        PlanStep::Encoded { encoding, .. } => total.checked_add(encoding.length),
         PlanStep::Clusters { .. } => None,
+        _ => None,
     });
     assert_eq!(plan.length(), plan.length.or(steps_total));
 

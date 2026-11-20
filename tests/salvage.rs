@@ -405,7 +405,7 @@ fn walks_follow_contiguous_and_fat_claims() {
         .walk_extents(&source, named(&found, "keep.mp3"))
         .unwrap();
     assert_eq!(
-        keep.extents,
+        keep.sources().collect::<Vec<_>>(),
         [Extent::new(position(10), 2 * CLUSTER as u64)]
     );
     assert_eq!(keep.end, WalkEnd::Complete);
@@ -414,7 +414,7 @@ fn walks_follow_contiguous_and_fat_claims() {
         .walk_extents(&source, named(&found, "track.mp3"))
         .unwrap();
     assert_eq!(
-        track.extents,
+        track.sources().collect::<Vec<_>>(),
         [
             Extent::new(position(30), 2 * CLUSTER as u64),
             Extent::new(position(33), CLUSTER as u64 - 100),
@@ -447,14 +447,17 @@ fn broken_walks_keep_what_they_reached() {
     let short = adapter
         .walk_extents(&source, named(&found, "short.bin"))
         .unwrap();
-    assert_eq!(short.extents, [Extent::new(position(70), CLUSTER as u64)]);
+    assert_eq!(
+        short.sources().collect::<Vec<_>>(),
+        [Extent::new(position(70), CLUSTER as u64)]
+    );
     assert_eq!(short.end, WalkEnd::Broken);
 
     let cycle = adapter
         .walk_extents(&source, named(&found, "track.mp3"))
         .unwrap();
     assert_eq!(
-        cycle.extents,
+        cycle.sources().collect::<Vec<_>>(),
         [Extent::new(position(30), 2 * CLUSTER as u64)]
     );
     assert_eq!(cycle.end, WalkEnd::Cycle);
@@ -464,7 +467,7 @@ fn broken_walks_keep_what_they_reached() {
     reserved.size = Some(3 * CLUSTER as u64);
     let walk = adapter.walk_extents(&source, &reserved).unwrap();
     assert_eq!(
-        walk.extents,
+        walk.sources().collect::<Vec<_>>(),
         [Extent::new(position(40), 2 * CLUSTER as u64)]
     );
     assert_eq!(walk.end, WalkEnd::Broken);
@@ -474,7 +477,7 @@ fn broken_walks_keep_what_they_reached() {
     edge.size = Some(4 * CLUSTER as u64);
     let walk = adapter.walk_extents(&source, &edge).unwrap();
     assert_eq!(
-        walk.extents,
+        walk.sources().collect::<Vec<_>>(),
         [Extent::new(position(200), 2 * CLUSTER as u64)]
     );
     assert_eq!(walk.end, WalkEnd::OutOfRange);
@@ -484,7 +487,10 @@ fn broken_walks_keep_what_they_reached() {
     let walk = ExfatSalvage::from_boot(boot)
         .walk_extents(&source, named(&found, "short.bin"))
         .unwrap();
-    assert_eq!(walk.extents, [Extent::new(position(70), CLUSTER as u64)]);
+    assert_eq!(
+        walk.sources().collect::<Vec<_>>(),
+        [Extent::new(position(70), CLUSTER as u64)]
+    );
     assert_eq!(
         walk.end,
         WalkEnd::OutOfRange,
@@ -512,7 +518,10 @@ fn walks_stop_at_unreadable_fat_sectors() {
     let walk = adapter
         .walk_extents(&source, named(&found, "track.mp3"))
         .unwrap();
-    assert_eq!(walk.extents, [Extent::new(position(30), CLUSTER as u64)]);
+    assert_eq!(
+        walk.sources().collect::<Vec<_>>(),
+        [Extent::new(position(30), CLUSTER as u64)]
+    );
     assert_eq!(walk.end, WalkEnd::Unreadable(fat_word(30)));
 }
 
@@ -562,7 +571,10 @@ fn the_tree_keeps_parents_orphans_and_conflicts() {
             .iter()
             .find(|node| node.candidate == offset)
             .unwrap();
-        node.parents.clone()
+        node.parents
+            .iter()
+            .map(|claim| claim.parent)
+            .collect::<Vec<_>>()
     };
     let id = |name: &str| Parent::Candidate(named(&found, name).location.offset);
 
@@ -957,17 +969,20 @@ fn plans_materialize_with_provenance() {
             MaterializedRange {
                 output: Extent::new(0, 4),
                 source: None,
-                readable: true
+                readable: true,
+                encoded: false
             },
             MaterializedRange {
                 output: Extent::new(4, 70_030),
                 source: Some(Extent::new(start, 70_030)),
-                readable: true
+                readable: true,
+                encoded: false
             },
             MaterializedRange {
                 output: Extent::new(70_034, 70_004),
                 source: None,
-                readable: true
+                readable: true,
+                encoded: false
             },
         ]
     );

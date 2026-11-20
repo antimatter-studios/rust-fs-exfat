@@ -47,13 +47,13 @@ fn driver_records(
 fn path_of(
     offset: u64,
     candidates: &HashMap<u64, &Candidate<EntrySetDetail>>,
-    tree: &HashMap<u64, &[Parent]>,
+    tree: &HashMap<u64, Vec<Parent>>,
     depth: usize,
 ) -> String {
     assert!(depth < 64, "a cycle of parent claims at byte {offset}");
     let candidate = candidates[&offset];
     let name: String = candidate.name.as_deref().unwrap().nfc().collect();
-    match tree[&offset] {
+    match tree[&offset].as_slice() {
         [Parent::Root] => name,
         [Parent::Candidate(parent)] => {
             assert_eq!(candidates[parent].kind, CandidateKind::Directory);
@@ -171,7 +171,10 @@ fn salvage_verbs_rebuild_what_the_read_only_macos_driver_lists_and_reads() {
         let parents: HashMap<_, _> = tree
             .nodes
             .iter()
-            .map(|node| (node.candidate, node.parents.as_slice()))
+            .map(|node| {
+                let parents = node.parents.iter().map(|claim| claim.parent).collect();
+                (node.candidate, parents)
+            })
             .collect();
         let orphans: Vec<_> = tree.orphans().collect();
         let conflicts: Vec<_> = tree.conflicts().collect();
@@ -199,11 +202,21 @@ fn salvage_verbs_rebuild_what_the_read_only_macos_driver_lists_and_reads() {
                 let valid = candidate.detail.valid_data_length;
                 let mut output = Vec::new();
                 let rebuilt = adapter
-                    .materialize(&source, &plan(&walk.extents, length, valid), &mut output)
+                    .materialize(
+                        &source,
+                        &plan(&walk.sources().collect::<Vec<_>>(), length, valid),
+                        &mut output,
+                    )
                     .unwrap();
                 assert_eq!(rebuilt.length, length, "{sector}: {path}");
                 assert_eq!(rebuilt.unreadable().count(), 0, "{sector}: {path}");
-                let pieces = read_through_extents(&adapter, &source, &walk.extents, length, valid);
+                let pieces = read_through_extents(
+                    &adapter,
+                    &source,
+                    &walk.sources().collect::<Vec<_>>(),
+                    length,
+                    valid,
+                );
                 assert_eq!(digest(&pieces), digest(&output), "{sector}: {path}");
                 assert!(contents.insert(path.clone(), digest(&output)).is_none());
             }

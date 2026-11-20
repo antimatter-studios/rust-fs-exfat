@@ -104,7 +104,13 @@ fn a_set_split_across_distant_root_clusters_is_found_with_its_continuation() {
         .iter()
         .find(|node| node.candidate == head)
         .unwrap();
-    assert_eq!(node.parents, [Parent::Root]);
+    assert_eq!(
+        node.parents
+            .iter()
+            .map(|claim| claim.parent)
+            .collect::<Vec<_>>(),
+        [Parent::Root]
+    );
 
     // A scan of the record's own bytes finds it first, and a scan stopped
     // after it resumes where its record ends.

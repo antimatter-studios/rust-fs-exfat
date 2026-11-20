@@ -30,8 +30,8 @@
 
 use super::adapter::{
     Candidate, CandidateKind, CandidateState, Capabilities, ClusterLayout, Damage, DamageKind,
-    DamageReport, Extent, ExtentWalk, Integrity, Parent, SalvageAdapter, SalvageError, ScanReport,
-    Severity, Sink, Tree, TreeNode, WalkEnd,
+    DamageReport, Extent, ExtentWalk, Integrity, Parent, ParentClaim, SalvageAdapter, SalvageError,
+    ScanReport, Severity, Sink, Tree, TreeNode, WalkEnd,
 };
 use crate::device::AlignedDevice;
 use crate::primitives::{
@@ -254,17 +254,18 @@ impl SalvageAdapter for ExfatSalvage {
             claimed.div_ceil(geometry.cluster),
             candidate.detail.no_fat_chain,
         );
-        Ok(ExtentWalk {
-            extents: geometry.extents(&chain.runs, claimed),
+        // A cluster chain holds the file back to back, with no holes.
+        Ok(ExtentWalk::contiguous(
+            geometry.extents(&chain.runs, claimed),
             claimed,
-            end: match chain.end {
+            match chain.end {
                 ChainEnd::Covered => WalkEnd::Complete,
                 ChainEnd::Terminated | ChainEnd::Link(_) => WalkEnd::Broken,
                 ChainEnd::OutOfRange => WalkEnd::OutOfRange,
                 ChainEnd::Cycle => WalkEnd::Cycle,
                 ChainEnd::Unreadable(extent) => WalkEnd::Unreadable(extent),
             },
-        })
+        ))
     }
 
     /// A candidate's parents are the directories whose clusters hold its entry
@@ -302,11 +303,19 @@ impl SalvageAdapter for ExfatSalvage {
             .iter()
             .map(|candidate| TreeNode {
                 candidate: candidate.location.offset,
+                // The entry set names the candidate and says whether it is
+                // deleted, so every claim on it carries both.
                 parents: geometry
                     .cluster_at(candidate.location.offset)
                     .and_then(|cluster| owners.get(&cluster))
-                    .cloned()
-                    .unwrap_or_default(),
+                    .into_iter()
+                    .flatten()
+                    .map(|parent| ParentClaim {
+                        parent: *parent,
+                        name: candidate.name.clone().map(String::into_bytes),
+                        state: candidate.state,
+                    })
+                    .collect(),
             })
             .collect();
         Ok(Tree { nodes })

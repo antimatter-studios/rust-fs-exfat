@@ -61,11 +61,13 @@ fn cluster_steps_rejoin_a_broken_chain_through_the_volume_geometry() {
                     output: Extent::new(0, C),
                     source: Some(Extent::new(position(70), C)),
                     readable: true,
+                    encoded: false
                 },
                 MaterializedRange {
                     output: Extent::new(C, C),
                     source: Some(Extent::new(position(75), C)),
                     readable: true,
+                    encoded: false
                 },
             ]
         );
@@ -159,11 +161,13 @@ fn a_final_length_cuts_the_last_cluster_and_bytes_past_the_valid_length_are_neve
                 output: Extent::new(0, valid),
                 source: Some(Extent::new(position(30), valid)),
                 readable: true,
+                encoded: false
             },
             MaterializedRange {
                 output: Extent::new(valid, length - valid),
                 source: None,
                 readable: true,
+                encoded: false
             },
         ]
     );
@@ -321,6 +325,7 @@ fn clipped(ranges: &[MaterializedRange], offset: u64, length: u64) -> Vec<Materi
                     Extent::new(source.offset + start - range.output.offset, stop - start)
                 }),
                 readable: range.readable,
+                encoded: false,
             }
         })
         .collect()

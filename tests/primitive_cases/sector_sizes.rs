@@ -93,11 +93,9 @@ fn listing(image: &[u8]) -> Vec<(String, bool, u64, String)> {
     {
         let walk = adapter.walk_extents(&source, candidate).unwrap();
         let mut hash = Sha256::new();
-        for extent in &walk.extents {
+        for extent in walk.sources() {
             let mut bytes = vec![0; extent.length as usize];
-            adapter
-                .read_extent(&source, *extent, 0, &mut bytes)
-                .unwrap();
+            adapter.read_extent(&source, extent, 0, &mut bytes).unwrap();
             hash.update(&bytes);
         }
         listing.push((
