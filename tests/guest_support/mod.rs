@@ -36,6 +36,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
+pub mod write_cuts;
 pub mod write_image;
 
 /// Linux's limit on one command-line argument on a kernel with 4 KiB pages.
