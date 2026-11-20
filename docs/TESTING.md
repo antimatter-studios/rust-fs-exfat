@@ -61,13 +61,13 @@ measured 34,300-byte cap covers this case without another budget increase.
 | images | CI run 43105817721, ubuntu, cold build: 95 lines, 3328 bytes; 2026-11-11 (#122), local macOS, cold build: 53 lines, 2025 bytes, 7 tests over 14 fixtures; 14 lines warm | 98 lines, 3500 bytes | 7 |
 | oracle | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 107 lines, 7943 bytes, 6 tests; the historical CI cold/warm difference adds 83 lines, 2721 bytes: 190 lines, 10664 bytes cold; the formatter alone adds 15 lines, 1475 bytes; 2026-11-14 (#185), the same host, release build with 39 Compiling lines: 149 lines, 9566 bytes, 7 tests; the write-kind checkpoints add 10 lines, 1135 bytes: 200 lines, 11799 bytes cold; 2026-11-14 (#188), the same host, warm release build with one Compiling line: 123 lines, 9379 bytes, 8 tests; the block-cut matrix adds 12 lines, 967 bytes: 212 lines, 12766 bytes cold | 220 lines, 13150 bytes | 8 |
 | kernel | 2026-11-13 (#139), macOS host and HVF guest, incremental build including #129 and #130: 114 lines, 8718 bytes, 7 tests; the historical cold/warm difference adds 39 lines, 1232 bytes: 153 lines, 9950 bytes cold; the formatter alone adds 15 lines, 1639 bytes; 2026-11-14 (#186), the same host, release build with 1 Compiling line: 136 lines, 12319 bytes, 9 tests; the write matrix adds 24 lines, 3834 bytes: 177 lines, 13784 bytes cold | 186 lines, 14150 bytes | 9 |
-| third | 2026-11-11 relan/exfat (#125), local macOS HVF guest, warm: 95 lines, 7084 bytes, 3 tests; a cold build adds about 38 lines, 1165 bytes | 175 lines, 10700 bytes | 3 |
+| third | 2026-11-13 (#187), local macOS/HVF guest, nine passing tests, incremental build: 253 lines, 21408 bytes; historical cold-build addition 38 lines, 1165 bytes gives 291 lines, 22573 bytes; 2026-11-14 on top of #188, cold release build with 39 Compiling lines: 289 lines, 22370 bytes | 320 lines, 27000 bytes | 9 |
 | vm | 2026-11-11 the whole suite in the guest (#126), local macOS HVF guest, warm: 625 lines, 38742 bytes, 411 tests with the write layers; CI's fresh guest adds the toolchain install and a whole build, about 60 lines, 3.5 KB | 860 lines, 51000 bytes | 388 |
 | oracle-macos | 2026-11-13 detach safety gates (#202, #200), local macOS: 318 lines, 14123 bytes, 50 tests. The change adds 13 lines: 9 image-safety verdicts, 3 detach regressions and 1 retained-evidence notice. A further 3 Compiling lines depend on the cache. The same Mac measured 302 lines before the change, and CI on main measured 303 lines, 12925 bytes at most. 2026-11-14 (#185), the same Mac: 379 lines, 16734 bytes, 52 tests; 30 write-kind checkpoint verdicts, their 30 detach notices and 2 test lines add 62 lines, 2611 bytes | 385 lines, 18700 bytes, allowing formatter/checker diagnostics | 25 |
 | wasm | CI run 43105817721, ubuntu, cold wasm32 build: 84 lines, 2946 bytes; 2026-11-11 the browser build under Node, local macOS, cold wasm32 build: 41 lines, 1476 bytes, 1 test (7 lines warm) | 86 lines, 3100 bytes | 1 |
 | package | 4 lines, 207 bytes: one line per check | 20 lines, 1000 bytes, allowing a failure's assertion lines | Not counted: it prints no test count |
 | fuzz | 10 lines, 538 bytes: one verdict per target | 40 lines, 4000 bytes, allowing an error line per target | A target's run fails below one input per second |
-| scripts | 2026-11-11, six files: 23 lines, 1305 bytes, mostly test-fuzz-all.sh's line per check | 30 lines, 1700 bytes, room for two more files | Each file fails itself; `set -e` stops at the first |
+| scripts | 2026-11-14 (#187), fourteen files on top of #208: 40 lines, 2287 bytes, one `== name` line and one verdict per file; 2026-11-11, six files: 23 lines, 1305 bytes | 42 lines, 2420 bytes, room for one more file | Each file fails itself; `set -e` stops at the first |
 | cli | 2026-11-11, three files: 15 lines, 666 bytes, three of them doctor's staged paths | 20 lines, 900 bytes, room for one more file | 60 of the 64 checks |
 | semver | 2026-11-11, passing against main: 14 lines, 631 bytes, fixed rather than per item | 40 lines, 4000 bytes; a failing run lists every broken item and is not held to it | cargo-semver-checks prints its own check count |
 
@@ -210,8 +210,37 @@ must accept it and the read-only Linux mount must agree with the strict
 reader on every path, size, read-only attribute, mtime, atime and SHA-256.
 GNU `stat` also checks every creation time through the kernel; an unavailable
 birth time fails rather than weakening the comparison. Missing fixtures or
-guest access fail the tiers. This does not cover the rest of #133: relan/exfat
-in both directions, crash consistency, or write fuzzing.
+guest access fail the tiers. These #130 cases cover creation and file-data writes;
+they do not establish crash consistency or TexFAT correctness.
+
+For #187, `test:third` creates fresh single-FAT images at the same two geometries.
+relan checks the allocation/free cycle and reads complete snapshots after this
+crate creates/writes, truncates/removes, renames and changes times, attributes and
+labels, including clearing the label. The #179 tree producer requires directory
+growth and FAT-chain fragmentation at both geometries. Every writer path has
+`exfatattrib` evidence for ReadOnly, Hidden, System, Archive and Directory; these
+trees have no sampling cap. Every full file length and SHA-256, mtime and atime,
+and the label must agree with the strict reader, and both checkers must accept
+each image.
+
+In the reverse direction, the pinned FUSE driver creates the tree, writes data
+and gaps, grows a directory, fragments two streams, grows/shrinks/zeroes and
+removes files, removes a directory, changes case, moves and replaces files and
+directories, and sets modification/access times. relan's CLI sets and clears all
+four attribute flags and writes Unicode and empty labels. Four detached
+checkpoints are compared with an independent byte model as well as relan's
+complete readback. Allocation counts must decrease after truncation/removal.
+No low-level allocation API, birth-time setter or UTC-offset setter is exposed
+by that interface; reverse allocation evidence comes from the filesystem calls.
+GNU `stat` must report an unavailable birth time for every writer path, and
+fractional utime requests must yield the pin's exact whole-second times.
+
+The extra kernel test records #207 at both geometries: after truncate growth,
+Linux 6.1 returns the ValidDataLength prefix (size 0 or 300,004 in these cases),
+while relan and this crate return full DataLength (50,001 or 350,001), with zeros
+in the extension. The kernel's entire tree, metadata and prefix hashes must
+match that explicit model; a change requires revisiting the assertion. Full
+relan comparisons do not shorten any file to accommodate this kernel view.
 
 Two deviation-report findings are expected on every kernel-made image and
 allowed by rule, severity and offset only: mkfs.exfat 1.2.0 fills the OEM
