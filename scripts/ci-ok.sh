@@ -7,7 +7,9 @@
 # skip it. A skip is accepted only for a full-only job under the quick
 # profile, or for a VM job when the change is documentation alone.
 #
-# ALL names every job in ci.yml but ci-ok itself; tests/scripts/
+# ALL names every job in ci.yml but ci-ok itself and ci-ok-gate (which only
+# picks ci-ok's runner, and is CI_GATE_NON_GATING in ci.yml). Each job's -gate
+# job is judged with it, so a gate that failed or was skipped fails the run; tests/scripts/
 # test-ci-profile.sh fails when it and ci-ok's `needs:` differ. The VM jobs
 # join FULL_ONLY and VM_ONLY when they are gated on the plan (#120-#126);
 # until then nothing may be skipped.
@@ -19,7 +21,7 @@ case "${CANCELLED-false}" in
   *) echo "::error::invalid workflow cancellation state"; exit 1 ;;
 esac
 
-all="changes unit fixtures images test suite-in-vm test-arm64 oracle-macos package semver msrv wasm cli provenance scripts"
+all="changes-gate changes unit-gate unit fixtures-gate fixtures images-gate images test-gate test suite-in-vm-gate suite-in-vm test-arm64-gate test-arm64 oracle-macos-gate oracle-macos package-gate package semver-gate semver msrv-gate msrv wasm-gate wasm cli-gate cli provenance-gate provenance scripts-gate scripts"
 full_only=" "
 vm_only=" "
 
