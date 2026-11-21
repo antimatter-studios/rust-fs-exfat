@@ -287,7 +287,11 @@ fn the_inactive_pair_gives_its_own_chains_as_evidence_not_damage() {
         let walk = adapter.walk_extents(&source, &candidates[0]).unwrap();
         let chain = spec.chain(n, 10);
         let extent = Extent::new(position(10), (chain.len() * CLUSTER) as u64);
-        assert_eq!((walk.extents, walk.end), (vec![extent], end), "FAT {n}");
+        assert_eq!(
+            (walk.sources().collect::<Vec<_>>(), walk.end),
+            (vec![extent], end),
+            "FAT {n}"
+        );
     }
 
     // Stale chains come from each pair's FAT and bitmap: free clusters with
@@ -369,7 +373,10 @@ fn a_main_boot_sector_failing_its_checksum_still_gives_the_volume_flags() {
     let walk = adapter.walk_extents(&source, &candidates[0]).unwrap();
     let chain = Spec(&image).chain(1, 10);
     let extent = Extent::new(position(10), (chain.len() * CLUSTER) as u64);
-    assert_eq!((walk.extents, walk.end), (vec![extent], WalkEnd::Complete));
+    assert_eq!(
+        (walk.sources().collect::<Vec<_>>(), walk.end),
+        (vec![extent], WalkEnd::Complete)
+    );
 
     // The volume state is the main sector's, reported at its VolumeFlags.
     let mut found: Vec<Damage> = Vec::new();
