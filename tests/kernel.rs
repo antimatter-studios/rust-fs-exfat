@@ -20,6 +20,8 @@ mod allocation_support;
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "support/image.rs"]
+mod image_support;
 #[path = "write_support/kernel_kinds.rs"]
 mod kernel_kinds;
 #[path = "write_support/kinds.rs"]

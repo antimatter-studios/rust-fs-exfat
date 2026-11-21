@@ -1,5 +1,10 @@
 mod interface_support;
 
+#[path = "support/image.rs"]
+mod image_support;
+
+use image_support::Snapshot;
+
 use fs_exfat::capi::*;
 use std::ffi::{c_int, c_void, CStr, CString};
 use std::mem::MaybeUninit;
@@ -202,7 +207,7 @@ fn callback_failure_and_success_preserve_the_error_contract() {
 #[test]
 fn file_mount_offsets_null_outputs_and_invalid_utf8() {
     let fixture = interface_support::Temp::new();
-    let original = std::fs::read(&fixture.image).unwrap();
+    let original = Snapshot::new(&fixture.image);
     let path = CString::new(fixture.image.to_str().unwrap()).unwrap();
     unsafe {
         assert!(fs_exfat_mount(path.as_ptr(), 1).is_null());
@@ -233,7 +238,7 @@ fn file_mount_offsets_null_outputs_and_invalid_utf8() {
         );
         fs_exfat_umount(handle);
     }
-    assert_eq!(std::fs::read(&fixture.image).unwrap(), original);
+    original.assert_unchanged(&fixture.image);
 }
 
 #[test]

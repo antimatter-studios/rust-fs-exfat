@@ -1,4 +1,5 @@
 use super::{chain, find_bitmap_entry, formatter_value, oracle_directory, reference, walk};
+use crate::image_support::{Image, Snapshot};
 use fs_core::BlockRead;
 use fs_exfat::primitives::{
     allocation_class, boot_check, chain_head, chain_islands, cluster_offset, clusters_for,
@@ -13,10 +14,11 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use unicode_normalization::UnicodeNormalization;
 
-fn raw_fat(image: &[u8], boot: &BootSector) -> Vec<u32> {
+fn raw_fat(image: &Image, boot: &BootSector) -> Vec<u32> {
     let start = (u64::from(boot.fat_offset) * boot.bytes_per_sector()) as usize;
     let length = (u64::from(boot.fat_length) * boot.bytes_per_sector()) as usize;
-    image[start..start + length]
+    image
+        .read(start..start + length)
         .chunks_exact(4)
         .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
         .collect()
@@ -39,11 +41,11 @@ fn raw_offset(boot: &BootSector, cluster: u32) -> usize {
         + u64::from(cluster - FIRST_CLUSTER) * boot.cluster_size()) as usize
 }
 
-fn bitmap(image: &[u8], boot: &BootSector) -> Vec<u8> {
+fn bitmap(image: &Image, boot: &BootSector) -> Vec<u8> {
     let root = chain(image, boot, boot.root_cluster, None);
     let (first, length) = find_bitmap_entry(&root).unwrap();
     let start = raw_offset(boot, first);
-    image[start..start + length as usize].to_vec()
+    image.read(start..start + length as usize)
 }
 
 fn bitmap_bit(bitmap: &[u8], cluster: u32) -> bool {
@@ -57,7 +59,7 @@ fn primitive_fat_root_geometry_predecessors_and_boot_checks_match_formatted_imag
         let (image, boot) = reference(sector);
         let expected_fat = raw_fat(&image, &boot);
         let start = (u64::from(boot.fat_offset) * sector) as usize;
-        let fat = decode_fat(&image[start..start + expected_fat.len() * 4], &boot);
+        let fat = decode_fat(&image.read(start..start + expected_fat.len() * 4), &boot);
         assert_eq!(fat, expected_fat);
         let expected_root = raw_chain(&expected_fat, formatter_value(sector, "Root start") as u32);
         assert_eq!(root_chain(&boot, &fat), expected_root);
@@ -87,13 +89,17 @@ fn primitive_fat_root_geometry_predecessors_and_boot_checks_match_formatted_imag
             assert!(!valid_cluster(&boot, cluster));
         }
         let size = (BOOT_REGION_SECTORS * sector) as usize;
-        let check = boot_check(&image[..size], &image[size..size * 2], sector as usize);
+        let check = boot_check(
+            &image.read(0..size),
+            &image.read(size..size * 2),
+            sector as usize,
+        );
         assert_eq!(check.main_stored, check.main_computed);
         assert_eq!(check.backup_stored, check.backup_computed);
         assert_eq!(check.main_stored, check.backup_stored);
         assert_eq!(
             check.regions_identical,
-            image[..size] == image[size..size * 2]
+            image.read(0..size) == image.read(size..size * 2)
         );
     }
 }
@@ -234,9 +240,7 @@ fn primitive_stream_clusters_recover_every_driver_file_and_directory_at_both_sec
                 .iter()
                 .flat_map(|&cluster| {
                     let start = raw_offset(&boot, cluster);
-                    image[start..start + boot.cluster_size() as usize]
-                        .iter()
-                        .copied()
+                    image.read(start..start + boot.cluster_size() as usize)
                 })
                 .collect();
             bytes.truncate(entry.length as usize);
@@ -268,7 +272,7 @@ fn primitive_stream_clusters_recover_every_driver_file_and_directory_at_both_sec
 }
 
 /// Free clusters with non-zero FAT entries, read straight from the bytes.
-fn free_fat_clusters(image: &[u8], boot: &BootSector) -> BTreeSet<u32> {
+fn free_fat_clusters(image: &Image, boot: &BootSector) -> BTreeSet<u32> {
     let fat = raw_fat(image, boot);
     let bitmap = bitmap(image, boot);
     (FIRST_CLUSTER..boot.last_cluster_exclusive())
@@ -276,8 +280,8 @@ fn free_fat_clusters(image: &[u8], boot: &BootSector) -> BTreeSet<u32> {
         .collect()
 }
 
-fn stale_listing(image: &[u8]) -> Vec<StaleChain> {
-    let source = crate::support::Bytes(image.to_vec());
+fn stale_listing(image: &Image) -> Vec<StaleChain> {
+    let source = image.clone();
     let mut chains = Vec::new();
     let report = ExfatSalvage::probe(&source)
         .stale_chains(&source, &mut chains)
@@ -318,19 +322,21 @@ fn stale_chains_match_the_formatter_fat_and_a_freed_driver_chain() {
         let clusters = raw_chain(&fat, file.first_cluster);
         assert!(clusters.windows(2).any(|pair| pair[1] != pair[0] + 1));
 
-        let mut freed = image.clone();
+        let freed = Snapshot::new(&image.path);
         let root_at = |position: usize| {
             let cluster =
                 raw_chain(&fat, boot.root_cluster)[position / boot.cluster_size() as usize];
             raw_offset(&boot, cluster) + position % boot.cluster_size() as usize
         };
         for slot in 0..file.slots {
-            freed[root_at(file.offset + slot * 32)] &= 0x7f;
+            let at = root_at(file.offset + slot * 32);
+            freed.patch(at, &[freed.byte(at) & 0x7f]);
         }
         let (first, _) = find_bitmap_entry(&root).unwrap();
         for &cluster in &clusters {
             let index = (cluster - FIRST_CLUSTER) as usize;
-            freed[raw_offset(&boot, first) + index / 8] &= !(1 << (index % 8));
+            let at = raw_offset(&boot, first) + index / 8;
+            freed.patch(at, &[freed.byte(at) & !(1 << (index % 8))]);
         }
         let chains = stale_listing(&freed);
         assert_eq!(listed(&chains), free_fat_clusters(&freed, &boot));
@@ -352,7 +358,7 @@ fn stale_chains_match_the_formatter_fat_and_a_freed_driver_chain() {
             .extents
             .iter()
             .flat_map(|extent| {
-                freed[extent.offset as usize..(extent.offset + extent.length) as usize].to_vec()
+                freed.read(extent.offset as usize..(extent.offset + extent.length) as usize)
             })
             .collect();
         bytes.truncate(file.length as usize);
@@ -384,7 +390,7 @@ fn cross_links_are_absent_from_the_macos_reference_images() {
                 assert!(named.insert(next), "macOS linked {next} twice");
             }
         }
-        let source = crate::support::Bytes(image.clone());
+        let source = image.clone();
         let adapter = ExfatSalvage::probe(&source);
         let mut candidates = Vec::new();
         adapter

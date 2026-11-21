@@ -1,0 +1,29 @@
+# Whole-file reads in tests of files that are NOT disk images.
+# Disk images are never read whole: compare and digest them with tests/support/image.rs.
+# There is no size-based or other exemption for an image. Every entry says what the file is,
+# and its reason must start with "Not a disk image:".
+# path<TAB>exact source line<TAB>occurrences<TAB>reason; stale entries fail the guard.
+tests/check/deviations.rs	let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/spec-rules.md"))	1	Not a disk image: the checked-in Markdown specification rule table, parsed row by row.
+tests/fixture_support/mod.rs	let text = std::fs::read_to_string(fixture(&format!("{image}.manifest"))).unwrap();	1	Not a disk image: a fixture's text manifest or tree listing, parsed into keys and entries.
+tests/fixture_support/mod.rs	&std::fs::read_to_string(path).unwrap(),	1	Not a disk image: a fixture's text manifest or tree listing, parsed into keys and entries.
+tests/fuzz_decoders.rs	(name, std::fs::read(&path).unwrap())	1	Not a disk image: a libFuzzer corpus seed (fuzz input, under 6 KB), replayed through the fuzz entry points, which take libFuzzer's &[u8].
+tests/fuzz_decoders.rs	std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))	1	Not a disk image: checked-in Rust, shell, YAML and Markdown source, searched with patterns.
+tests/oracle/boot.rs	std::fs::read_to_string(directory.join(format!("format-{sector}.txt"))).unwrap();	1	Not a disk image: newfs_exfat's text geometry report, parsed by label.
+tests/oracle/device.rs	let files = std::fs::read_to_string(directory.join(format!("files-{sector}.txt"))).unwrap();	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/directory.rs	std::fs::read_to_string(directory.join(format!("listing-{sector}.txt"))).unwrap();	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/file.rs	std::fs::read_to_string(directory.join(format!("files-{sector}.txt"))).unwrap();	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/file.rs	let kept: u64 = std::fs::read_to_string(directory.join(format!("unaligned-{sector}.txt")))	1	Not a disk image: a text report holding one decimal byte count, parsed as a number.
+tests/oracle/file.rs	std::fs::read_to_string(directory.join(format!("files-{sector}.txt")))	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/interfaces.rs	std::fs::read_to_string(directory.join(format!("listing-{sector}.txt"))).unwrap();	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/interfaces.rs	let files = std::fs::read_to_string(directory.join(format!("files-{sector}.txt"))).unwrap();	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/metadata.rs	std::fs::read_to_string(directory.join(format!("format-{sector}.txt"))).unwrap();	1	Not a disk image: newfs_exfat's text geometry report, parsed by label.
+tests/oracle/path.rs	std::fs::read_to_string(directory.join(format!("lookup-{sector}.txt"))).unwrap();	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/primitive_chains.rs	std::fs::read_to_string(oracle_directory().join(format!("files-{sector}.txt")))	2	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/primitives.rs	std::fs::read_to_string(oracle_directory().join(format!("format-{sector}.txt"))).unwrap();	1	Not a disk image: newfs_exfat's text geometry report, parsed by label.
+tests/oracle/primitives.rs	std::fs::read_to_string(oracle_directory().join(format!("listing-{sector}.txt")))	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/primitives.rs	std::fs::read_to_string(oracle_directory().join(format!("files-{sector}.txt")))	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/salvage.rs	std::fs::read_to_string(oracle_directory().join(format!("{name}-{sector}.txt")))	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/oracle/scale.rs	std::fs::read_to_string(program.with_extension("calls"))	2	Not a disk image: the text log of invocations written by the fake detach program, counted line by line.
+tests/oracle/windows.rs	std::fs::read_to_string(directory().join(format!("windows-files-{sector}.txt")))	1	Not a disk image: a text listing of the reference tree, parsed line by line into fields.
+tests/scale_support/mod.rs	if std::fs::read_to_string(self.directory.join("attachment-state"))	1	Not a disk image: the one-word attachment-state file (attached or detached), read inside Drop to decide whether to print where an attached image was kept.
+tests/test_contract.rs	(name, std::fs::read_to_string(&path).unwrap())	1	Not a disk image: Rust test source, searched with patterns.

@@ -20,6 +20,8 @@ mod cuts;
 mod fixture_support;
 #[path = "guest_support/mod.rs"]
 mod guest_support;
+#[path = "support/image.rs"]
+mod image_support;
 #[path = "write_support/kinds.rs"]
 mod kinds;
 #[path = "oracle/linux_mkfs.rs"]
@@ -88,14 +90,14 @@ fn block_cut_matrix(sector: u32, cluster: u32) {
     const RETAINED: usize = 8;
     let image = guest_support::write_image::WriteImage::with_size("oracle", sector, cluster, "8M");
     let name = format!("s{sector}/c{cluster}");
-    let base = std::fs::read(&image.path).unwrap();
+    let base = cuts::Image::open(&image.path);
     let plan = cuts::Plan::measure(&base, u64::from(sector));
     let mut previous = base.clone();
     let mut records = Vec::new();
     let mut deltas = Vec::new();
     for cut in 0..=plan.total() {
         let mut record = cuts::replay(&base, u64::from(sector), &plan, cut);
-        let image = std::mem::take(&mut record.image);
+        let image = std::mem::replace(&mut record.image, base.clone());
         deltas.push((cut, cuts::delta(&previous, &image, sector as usize)));
         previous = image;
         records.push(record);
@@ -153,7 +155,7 @@ fn block_cut_matrix(sector: u32, cluster: u32) {
                 record.cut,
                 cuts::STEPS[record.step].name
             ));
-            std::fs::write(&kept, &current).unwrap();
+            current.store(&kept);
             problem.push_str(&format!(
                 "\n  retained {}\n{}",
                 kept.display(),
