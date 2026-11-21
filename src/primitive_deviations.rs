@@ -7,6 +7,8 @@
 //! reject anything. Callers supply volume byte offsets, so a structure that
 //! spans clusters is reported where its bytes really lie.
 
+#![allow(deprecated)]
+
 use super::{boot_checksum, entry_set_checksum, name_hash, u16_at, u32_at, u64_at, ENTRY_SIZE};
 use crate::salvage::Severity;
 use serde::{Serialize, Serializer};

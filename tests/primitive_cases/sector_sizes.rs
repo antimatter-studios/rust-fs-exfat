@@ -6,6 +6,8 @@
 //! and formatter produce at each sector size. `tests/kernel.rs` and
 //! `tests/oracle` compare the same listings against the Linux kernel and macOS.
 
+#![allow(deprecated)]
+
 use crate::write_support::Memory;
 use fs_core::BlockRead;
 use fs_exfat::mkfs::{self, FormatOptions};

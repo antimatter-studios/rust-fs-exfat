@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use crate::check;
 use crate::device::AlignedDevice;
 use crate::directory::DirectoryEntry;

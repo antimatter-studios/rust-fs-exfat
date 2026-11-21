@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 #[path = "../support/mod.rs"]
 mod support;
 

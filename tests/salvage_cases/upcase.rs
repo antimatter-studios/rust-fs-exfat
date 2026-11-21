@@ -3,6 +3,8 @@
 //! TableChecksum (section 7.2.2) and both forms of the table (section 7.2.5),
 //! compressed with identity runs and uncompressed.
 
+#![allow(deprecated)]
+
 use super::support::Bytes;
 use super::{damage, has, named, position, scan, volume, Failing};
 use fs_exfat::fixtures::{upcase_entry, upcase_table, Builder, ROOT_CLUSTER};

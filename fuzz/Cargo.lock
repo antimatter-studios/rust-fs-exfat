@@ -166,9 +166,13 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rust-fs-core"
-version = "0.4.5"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "098237625d671fe7541c1d2453880185b3ccda81f7170a2e0d371cf5bc0972b6"
+checksum = "c145374b5807e2dd51fbdd2eb994af911eec5459e44ebef4c8f877bb98c00312"
+dependencies = [
+ "serde",
+ "sha2",
+]
 
 [[package]]
 name = "rust-fs-exfat"

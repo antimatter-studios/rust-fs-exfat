@@ -7,6 +7,8 @@
 //! A source here can refuse reads: [`Faulty`] fails the sectors an input names,
 //! because unreadable bytes are what salvage exists for.
 
+#![allow(deprecated)]
+
 use super::support::{self, file_set, put16, put32, put64, seal_set};
 use super::{
     apply_patches, geometry, reseal_sets, seal, template, u32_at, BITMAP, FAT, FLAT, REGIONS, ROOT,

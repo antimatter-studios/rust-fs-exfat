@@ -1,6 +1,9 @@
 //! The driver conformance set: checks that any driver runs against its own
 //! salvage adapter and strict API.
 //!
+//! New drivers use [`fs_core::layers::conformance::salvage`]. This copy runs
+//! the original checks for drivers that still implement the legacy adapter.
+//!
 //! The driver convention (`docs/convention.md`, section 6) asks every driver
 //! to run one shared test set. This module is that set, and it names no
 //! format. A driver describes itself through [`Driver`]: how its salvage
@@ -43,13 +46,15 @@
 //! }
 //! ```
 
+#![allow(deprecated)]
+
 use crate::salvage::{
     Candidate, CandidateState, Capabilities, ClusterLayout, Damage, DamageKind, DamageReport,
     Extent, ExtentWalk, Feature, Integrity, MaterializeReport, MaterializedRange, Parent, Plan,
     PlanCheck, PlanFault, PlanRead, PlanReader, PlanStep, SalvageAdapter, SalvageError, ScanReport,
     Severity, Sink, Tree, WalkEnd,
 };
-use fs_core::BlockRead;
+use fs_core::{layers::conformance::salvage as shared, BlockRead};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -93,6 +98,10 @@ const FEATURES: [Feature; 9] = [
 
 /// What a driver hands the conformance set: its salvage adapter, its strict
 /// API and its test images.
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::conformance::salvage::Driver"
+)]
 pub trait Driver {
     /// The driver's salvage adapter. Its candidate detail must compare, so
     /// the set can tell whether two answers agree.
@@ -123,6 +132,10 @@ pub trait Driver {
 
 /// One damaged image and the evidence its damage must leave.
 #[derive(Clone, Debug)]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::conformance::salvage::Damaged"
+)]
 pub struct Damaged {
     /// Names the case in violations.
     pub name: String,
@@ -151,6 +164,10 @@ impl Damaged {
 
 /// Where damage must show on the salvage path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::conformance::salvage::Evidence"
+)]
 pub enum Evidence {
     /// The damage report streams a finding of this kind.
     Damage(DamageKind),
@@ -162,6 +179,10 @@ pub enum Evidence {
 
 /// The five rules of the conformance set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::conformance::salvage::Rule"
+)]
 pub enum Rule {
     /// Adapter verbs return consistent evidence.
     Consistency,
@@ -203,6 +224,10 @@ impl fmt::Display for Rule {
 
 /// A failed check.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::conformance::salvage::Violation"
+)]
 pub struct Violation {
     pub rule: Rule,
     /// The image or derived source the check ran on.
@@ -212,6 +237,10 @@ pub struct Violation {
 
 /// What a run checked and what failed.
 #[derive(Clone, Debug, Default)]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::conformance::salvage::Report"
+)]
 pub struct Report {
     checks: [u64; Rule::ALL.len()],
     violations: Vec<Violation>,
@@ -290,6 +319,10 @@ impl fmt::Display for Report {
 }
 
 /// Runs the conformance set against a driver.
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::conformance::salvage::run"
+)]
 pub fn run<D: Driver>(driver: &D) -> Report {
     let mut run = Run {
         driver,
@@ -313,6 +346,52 @@ pub fn run<D: Driver>(driver: &D) -> Report {
     run.unreadable(&healthy, &observed);
     run.exercised(&observed.capabilities);
     run.report
+}
+
+impl From<Evidence> for shared::Evidence {
+    fn from(value: Evidence) -> Self {
+        match value {
+            Evidence::Damage(kind) => Self::Damage(kind.into()),
+            Evidence::FailedCandidate => Self::FailedCandidate,
+            Evidence::BrokenWalk => Self::BrokenWalk,
+        }
+    }
+}
+
+impl TryFrom<shared::Evidence> for Evidence {
+    type Error = fs_core::layers::salvage::DamageKind;
+
+    fn try_from(value: shared::Evidence) -> Result<Self, Self::Error> {
+        Ok(match value {
+            shared::Evidence::Damage(kind) => Self::Damage(kind.try_into()?),
+            shared::Evidence::FailedCandidate => Self::FailedCandidate,
+            shared::Evidence::BrokenWalk => Self::BrokenWalk,
+        })
+    }
+}
+
+impl From<Damaged> for shared::Damaged {
+    fn from(value: Damaged) -> Self {
+        Self {
+            name: value.name,
+            image: value.image,
+            unreadable: value.unreadable.into_iter().map(Into::into).collect(),
+            evidence: value.evidence.into(),
+        }
+    }
+}
+
+impl TryFrom<shared::Damaged> for Damaged {
+    type Error = fs_core::layers::salvage::DamageKind;
+
+    fn try_from(value: shared::Damaged) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: value.name,
+            image: value.image,
+            unreadable: value.unreadable.into_iter().map(Into::into).collect(),
+            evidence: value.evidence.try_into()?,
+        })
+    }
 }
 
 type Detail<D> = <<D as Driver>::Adapter as SalvageAdapter>::Detail;

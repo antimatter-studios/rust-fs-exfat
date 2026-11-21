@@ -5,6 +5,8 @@
 //! out over its cluster chain, so a directory that grew after other clusters
 //! were allocated splits such a set across distant clusters (#99).
 
+#![allow(deprecated)]
+
 use super::secondary_count::vendor_set;
 use super::support::{file_set, metadata_volume, put32, Bytes};
 use super::{named, scan, whole};

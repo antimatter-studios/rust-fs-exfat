@@ -1,6 +1,8 @@
 //! Materialization plans that name clusters, declare a final and a valid
 //! length, and carry the rebuilt file's name and times.
 
+#![allow(deprecated)]
+
 use super::support::Bytes;
 use super::{named, position, scan, volume, Failing};
 use fs_core::BlockRead;

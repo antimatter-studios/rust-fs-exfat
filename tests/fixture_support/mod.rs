@@ -12,6 +12,7 @@
 //! path, written from a read-only kernel mount with `fmask=0,dmask=0`, so the
 //! mode's write bits say only whether the read-only attribute is set.
 
+#![allow(deprecated)]
 #![allow(dead_code)]
 
 use fs_core::BlockRead;
