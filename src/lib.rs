@@ -17,9 +17,9 @@
 //! These deliberately incomplete fixtures are not a formatter or evidence of
 //! format correctness; healthy structures are checked against macOS oracles.
 //!
-//! The same feature exposes `fs_exfat::conformance`, the driver convention's
-//! format-neutral conformance set. A driver runs it against its own salvage
-//! adapter and strict API; `tests/conformance.rs` runs it against this crate's.
+//! The shared conformance set is `fs_core::layers::conformance::salvage`.
+//! The `test-support` feature still exposes `fs_exfat::conformance` for
+//! callers of the deprecated adapter. This crate tests both interfaces.
 //!
 //! ```toml
 //! [dev-dependencies]

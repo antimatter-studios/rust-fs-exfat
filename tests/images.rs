@@ -7,6 +7,8 @@
 //! with that listing. Nothing here needs the VM or exfatprogs, so the tier
 //! runs on any host that has the fixtures, arm64 runners included.
 
+#![allow(deprecated)]
+
 #[path = "fixture_support/mod.rs"]
 mod fixture_support;
 

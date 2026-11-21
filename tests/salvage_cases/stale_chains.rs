@@ -3,6 +3,8 @@
 //! links clusters (section 4.1.3). macOS clears freed entries, so these
 //! states come from the specification rather than from macOS output.
 
+#![allow(deprecated)]
+
 use super::support::Bytes;
 use super::{fat_word, position, Failing};
 use fs_core::BlockRead;

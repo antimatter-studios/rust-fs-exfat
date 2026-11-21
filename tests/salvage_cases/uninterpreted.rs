@@ -4,6 +4,8 @@
 //! SetChecksum (section 6.3.3). macOS drops such entries silently, so these
 //! images come from the specification rather than from macOS output.
 
+#![allow(deprecated)]
+
 use super::support::Bytes;
 use super::{named, position, scan, Failing};
 use fs_core::BlockRead;

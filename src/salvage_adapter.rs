@@ -56,8 +56,10 @@
 //! `Unsupported`. The absence is visible in the flags, never implied by an
 //! empty scan.
 //!
-//! The trait lives in this crate until ext4 and NTFS also implement it; only
-//! then does it move to rust-fs-core.
+//! New code uses `fs_core::layers::salvage`. This module preserves the old API
+//! during the transition.
+
+#![allow(deprecated)]
 
 use fs_core::BlockRead;
 use serde::de::DeserializeOwned;
@@ -70,6 +72,9 @@ use std::ops::ControlFlow;
 mod plan;
 
 use plan::Resolved;
+#[path = "salvage_compat.rs"]
+mod compat;
+
 pub use plan::{
     ClusterLayout, Plan, PlanCheck, PlanFault, PlanMetadata, PlanOverlap, PlanRead, PlanReader,
     PlanStep,
@@ -83,6 +88,7 @@ const MATERIALIZE_CHUNK: u64 = 64 * 1024;
     Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[serde(rename_all = "camelCase")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Extent")]
 pub struct Extent {
     pub offset: u64,
     pub length: u64,
@@ -102,6 +108,7 @@ impl Extent {
 /// A salvage operation or deletion-specific part that a driver may lack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Feature")]
 pub enum Feature {
     FindCandidates,
     WalkExtents,
@@ -145,6 +152,10 @@ impl fmt::Display for Feature {
 /// adapter supports every [`Feature`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::Capabilities"
+)]
 pub struct Capabilities {
     pub missing: Vec<Feature>,
 }
@@ -167,6 +178,10 @@ impl Capabilities {
 /// Why a salvage operation could not run. Damage is never one of these: it is
 /// returned as evidence. These are operational failures and refusals.
 #[derive(Debug)]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::SalvageError"
+)]
 pub enum SalvageError {
     /// The adapter lacks this feature.
     Unsupported(Feature),
@@ -210,6 +225,7 @@ impl std::error::Error for SalvageError {
 
 /// Receives streamed results. Returning [`ControlFlow::Break`] stops the
 /// operation; its report says where, so the caller can resume.
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Sink")]
 pub trait Sink<T> {
     fn accept(&mut self, item: T) -> ControlFlow<()>;
 }
@@ -229,6 +245,10 @@ impl<T, F: FnMut(T) -> ControlFlow<()>> Sink<T> for F {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::CandidateKind"
+)]
 pub enum CandidateKind {
     File,
     Directory,
@@ -240,6 +260,10 @@ pub enum CandidateKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::CandidateState"
+)]
 pub enum CandidateState {
     Live,
     /// The format records the object as deleted.
@@ -251,6 +275,7 @@ pub enum CandidateState {
 /// The result of the format's own check on a candidate's record bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Integrity")]
 pub enum Integrity {
     /// A checksum or equivalent check over the record passed.
     Verified,
@@ -267,6 +292,7 @@ pub enum Integrity {
 /// fields the driver needs to walk the candidate again.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Candidate")]
 pub struct Candidate<D> {
     /// The record bytes that describe the candidate.
     pub location: Extent,
@@ -282,6 +308,10 @@ pub struct Candidate<D> {
 /// The outcome of a candidate scan whose candidates went to a sink.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::ScanReport"
+)]
 pub struct ScanReport {
     /// Candidates passed to the sink.
     pub candidates: u64,
@@ -295,6 +325,7 @@ pub struct ScanReport {
 /// Why an extent walk ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::WalkEnd")]
 pub enum WalkEnd {
     /// Every claimed byte was mapped.
     Complete,
@@ -312,6 +343,10 @@ pub enum WalkEnd {
 /// The storage a candidate claims, as far as its map could be followed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::ExtentWalk"
+)]
 pub struct ExtentWalk {
     /// Source byte ranges in claim order, merged where adjacent and trimmed to
     /// the claimed size. A broken walk keeps every extent it reached.
@@ -331,6 +366,7 @@ impl ExtentWalk {
 /// A claim that a candidate sits under another one, or under the root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Parent")]
 pub enum Parent {
     Root,
     /// The parent candidate's `location.offset`.
@@ -340,6 +376,7 @@ pub enum Parent {
 /// One candidate's place in the rebuilt tree.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::TreeNode")]
 pub struct TreeNode {
     /// The candidate's `location.offset`.
     pub candidate: u64,
@@ -351,6 +388,7 @@ pub struct TreeNode {
 /// Relationships rebuilt from candidates, one node per candidate in input order.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Tree")]
 pub struct Tree {
     pub nodes: Vec<TreeNode>,
 }
@@ -368,6 +406,10 @@ impl Tree {
 /// The shared core of damage kinds. Format specifics go in [`Damage::detail`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::DamageKind"
+)]
 pub enum DamageKind {
     /// A signature, magic number or identifying name is wrong.
     Signature,
@@ -389,6 +431,7 @@ pub enum DamageKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Severity")]
 pub enum Severity {
     /// State that may explain other damage, such as an unclean unmount.
     Notice,
@@ -402,6 +445,7 @@ pub enum Severity {
 /// source structure, plus format-specific detail.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Damage")]
 pub struct Damage {
     pub kind: DamageKind,
     pub severity: Severity,
@@ -416,6 +460,10 @@ pub struct Damage {
 /// The outcome of a damage report whose findings went to a sink.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::DamageReport"
+)]
 pub struct DamageReport {
     /// Findings passed to the sink.
     pub reported: u64,
@@ -426,6 +474,10 @@ pub struct DamageReport {
 /// Where a run of output bytes came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::MaterializedRange"
+)]
 pub struct MaterializedRange {
     /// The bytes' position in the output.
     pub output: Extent,
@@ -440,6 +492,10 @@ pub struct MaterializedRange {
 /// Provenance for every output byte of a materialized plan.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::MaterializeReport"
+)]
 pub struct MaterializeReport {
     pub length: u64,
     /// Contiguous, in output order, covering the whole output.
@@ -506,6 +562,10 @@ fn append(
 ///
 /// Methods take the source as `&dyn BlockRead` per call, so an adapter value
 /// holds only format context, such as geometry, and never a device.
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::SalvageAdapter"
+)]
 pub trait SalvageAdapter {
     /// Format-specific candidate fields, kept as plain data.
     type Detail: Clone + fmt::Debug + Serialize + DeserializeOwned;

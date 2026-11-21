@@ -4,6 +4,8 @@
 //! 6.4.3). The healthy forms, and a cross-link macOS `fsck_exfat -n`
 //! refuses, are checked by the macOS oracle.
 
+#![allow(deprecated)]
+
 use super::support::Bytes;
 use super::{fat_word, named, position, scan, Failing};
 use fs_core::BlockRead;

@@ -1,6 +1,8 @@
 //! The salvage adapter over synthetic damaged images. Healthy forms of these
 //! structures are checked against macOS by the primitive oracle tests.
 
+#![allow(deprecated)]
+
 use fs_core::BlockRead;
 use fs_exfat::fixtures::{
     self, boot_field, entry_set, upcase_entry, upcase_table, BootField, Builder, CLUSTER,

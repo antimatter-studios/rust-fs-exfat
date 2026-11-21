@@ -4,6 +4,8 @@
 //! Extension entries fill a set up to that limit. Salvage must find every
 //! such set that the strict reader accepts.
 
+#![allow(deprecated)]
+
 use super::support::{file_set, metadata_volume, put32, seal_set, Bytes};
 use super::{named, scan, whole};
 use fs_exfat::primitives::ENTRY_SIZE;

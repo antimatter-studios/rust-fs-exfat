@@ -17,6 +17,7 @@ const RETRY_SPAN: u64 = 512;
 /// One operation of a materialization plan.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::PlanStep")]
 pub enum PlanStep {
     /// Copy these source bytes.
     Extent(Extent),
@@ -35,6 +36,10 @@ pub enum PlanStep {
 /// order. Cluster steps in a plan map through it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::ClusterLayout"
+)]
 pub struct ClusterLayout {
     pub first: u64,
     pub count: u64,
@@ -69,6 +74,10 @@ impl ClusterLayout {
 /// format-specific detail gives them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::PlanMetadata"
+)]
 pub struct PlanMetadata {
     pub name: Option<String>,
     pub created: Option<String>,
@@ -93,6 +102,7 @@ impl PlanMetadata {
 /// read.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::Plan")]
 pub struct Plan {
     pub steps: Vec<PlanStep>,
     /// The output's final length.
@@ -110,6 +120,7 @@ pub struct Plan {
 /// the analysis that wrote the plan can correct it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::PlanFault")]
 pub enum PlanFault {
     /// The step at this index names clusters outside the adapter's
     /// [`ClusterLayout`].
@@ -373,6 +384,7 @@ impl Plan {
 /// bytes more than one step reads.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::PlanCheck")]
 pub struct PlanCheck {
     /// The output length.
     pub length: u64,
@@ -389,6 +401,10 @@ pub struct PlanCheck {
 /// Source bytes that two plan steps both read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::PlanOverlap"
+)]
 pub struct PlanOverlap {
     /// The lower step index.
     pub first: usize,
@@ -468,6 +484,10 @@ pub(crate) enum Origin {
 ///
 /// It holds the adapter, the source and the plan by reference, and the plan
 /// mapped onto the source, never any output bytes.
+#[deprecated(
+    since = "0.5.0",
+    note = "use rust_fs_core::layers::salvage::PlanReader"
+)]
 pub struct PlanReader<'a, A: ?Sized> {
     adapter: &'a A,
     source: &'a dyn BlockRead,
@@ -478,6 +498,7 @@ pub struct PlanReader<'a, A: ?Sized> {
 /// What one positioned read produced and where its bytes came from.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[deprecated(since = "0.5.0", note = "use rust_fs_core::layers::salvage::PlanRead")]
 pub struct PlanRead {
     /// The output offset the read started at.
     pub offset: u64,
