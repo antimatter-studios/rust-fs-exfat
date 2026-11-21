@@ -96,7 +96,13 @@ vars:
   # Every consumer uses the shared guest; no host-directory opt-in is needed.
   # v0.7.1 disables guest auto-updates on every boot, defaults builds to one
   # job, and retries transient destroy locks.
-  LINUX_HARNESS_REF: v0.7.1
+  # v0.8.0: Linux needs upstream virtiofsd 1.14.0, which answers a non-UTF-8
+  # xattr name (harness #274); CI installs it with the harness's
+  # install-virtiofsd action, whose tag in .github/workflows must match this
+  # one. The shared guest is sized by a host resource profile.
+  # v0.9.1: a macOS host needs the virtiofsd port 1.14.0.1 or newer, and a
+  # grep check under pipefail no longer fails on its own match.
+  LINUX_HARNESS_REF: v0.9.1
 
 # The harness's consumer tasks, as `chore vm:<task>`. OPTIONAL because the
 # harness is a sibling that `chore siblings` itself checks out: without it
