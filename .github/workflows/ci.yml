@@ -137,16 +137,31 @@ env:
   RUSTUP_TOOLCHAIN: 1.95.0
   CARGO_TERM_COLOR: never
   CHORE_VERSION: "0.19.0"
+  # ci-ok-gate only picks ci-ok's runner and carries `if: always()` like ci-ok;
+  # it is not a job whose result the aggregate judges.
+  CI_GATE_NON_GATING: ci-ok-gate
 
 jobs:
+  changes-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   changes:
     name: changes (which profile, and does it need the full pipeline?)
-    runs-on: ubuntu-latest
+    needs: changes-gate
+    runs-on: ${{ needs.changes-gate.outputs.runner }}
     timeout-minutes: 10
     outputs:
       code: ${{ steps.c.outputs.code }}
       profile: ${{ steps.plan.outputs.profile }}
-      runners: ${{ steps.runners.outputs.runners || '{}' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -203,43 +218,23 @@ jobs:
           fi
           echo "code=$code ($EVENT${range:+ $range})"
           echo "code=$code" >> "$GITHUB_OUTPUT"
-      - name: Pick runners
-        # One pick per light Linux job, from the owner's runner gate. The
-        # fallback is ubuntu-24.04, not ubuntu-latest: the self-hosted image
-        # is Ubuntu 24.04, and ubuntu-latest moved to 26.04, whose stock
-        # exfatprogs adds lines to `doctor` and breaks the cli tier's budget.
-        id: runners
-        env:
-          ORG: ${{ github.repository_owner }}
-          ACTOR: ${{ github.triggering_actor }}
-          AUTHOR: ${{ github.event.pull_request.user.login }}
-          SENDER: ${{ github.event.sender.login }}
-          GH_ACTOR: ${{ github.actor }}
-          JOBS: unit msrv package provenance scripts semver cli wasm
-        run: |
-          set -euo pipefail
-          ours=true
-          for who in "$ACTOR" "$GH_ACTOR" "$SENDER" "$AUTHOR"; do
-            [ -z "$who" ] || [ "$who" = christhomas ] || ours=false
-          done
-          pick() {
-            $ours || { echo ubuntu-24.04; return; }
-            r=$(curl -fsS --max-time 10 --get https://runner-gate.antimatter-studios.com/pick \
-                  --data-urlencode "org=$ORG" --data-urlencode prefer=antimatter-vps-linux-x64 \
-                  --data-urlencode fallback=ubuntu-24.04 --data-urlencode "actor=$ACTOR" --data-urlencode "author=$AUTHOR" \
-                  --data-urlencode "run=${{ github.run_id }}" --data-urlencode "attempt=${{ github.run_attempt }}" \
-                  --data-urlencode "job=$1") || r=ubuntu-24.04
-            case "$r" in antimatter-vps-linux-x64|ubuntu-24.04) echo "$r" ;; *) echo ubuntu-24.04 ;; esac
-          }
-          runners='{}'
-          for job in $JOBS; do runners=$(jq -c --arg j "$job" --arg r "$(pick "$job")" '. + {($j): $r}' <<<"$runners"); done
-          echo "$runners" | jq . | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "runners=$runners" >> "$GITHUB_OUTPUT"
+
+  unit-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
 
   unit:
     name: unit (no tools, no fixtures)
-    needs: changes
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['unit'] || 'ubuntu-24.04' }}
+    needs: unit-gate
+    runs-on: ${{ needs.unit-gate.outputs.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -309,6 +304,18 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  fixtures-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64-kvm
+
   fixtures:
     # The harness guest boots on x86_64 KVM; scripts/vm-setup.sh fails
     # unless exfatprogs and the kernel's exfat module are there; and every
@@ -316,22 +323,17 @@ jobs:
     # The images, manifests and kernel listings go on as one artifact, so
     # each later job reads the same build (#121).
     name: fixtures (harness VM, x86_64 KVM)
-    # images needs both changes and fixtures, and its runner pick is the last
-    # step here. A pick holds its runner for 120 s, so this job must finish
-    # after changes too: under a hosted-runner backlog changes can start
-    # minutes late and end after fixtures, and images then started long
-    # after its hold lapsed (runs 43579976014, 43579981434, 43579989573).
-    # Waiting for changes normally costs about 10 s.
-    needs: changes
-    runs-on: ubuntu-24.04
+    needs: fixtures-gate
+    runs-on: ${{ needs.fixtures-gate.outputs.runner }}
     timeout-minutes: 60
-    outputs:
-      runners: ${{ steps.runners.outputs.runners || '{}' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: C toolchain for the gated runner
+        if: runner.environment == 'self-hosted'
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - name: PyYAML
@@ -353,52 +355,25 @@ jobs:
         run: chore tools
       - name: chore fixtures
         run: chore fixtures
-      # The shared guest outlives each run by design (harness v0.7.0), but a
-      # runner has no later run to share it with: stop it, then prove it
-      # stopped. vm:down leaves the guest up while a session still holds it,
-      # so a leaked session fails the status check below.
-      - name: chore vm:down
-        run: chore vm:down
-      - name: chore vm:status (the VM is down again)
-        run: '! chore vm:status'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fixtures
           path: rust-fs-exfat/test-disks/exfat-*
           if-no-files-found: error
           retention-days: 7
-      - name: Pick runners
-        # images needs this job too, so its pick is made here, as the last
-        # step: a pick reserves the slot for 120 s, and one made in changes
-        # would expire long before fixtures finishes. Same contract as the
-        # picker in changes.
-        id: runners
-        env:
-          ORG: ${{ github.repository_owner }}
-          ACTOR: ${{ github.triggering_actor }}
-          AUTHOR: ${{ github.event.pull_request.user.login }}
-          SENDER: ${{ github.event.sender.login }}
-          GH_ACTOR: ${{ github.actor }}
-          JOBS: images
-        run: |
-          set -euo pipefail
-          ours=true
-          for who in "$ACTOR" "$GH_ACTOR" "$SENDER" "$AUTHOR"; do
-            [ -z "$who" ] || [ "$who" = christhomas ] || ours=false
-          done
-          pick() {
-            $ours || { echo ubuntu-24.04; return; }
-            r=$(curl -fsS --max-time 10 --get https://runner-gate.antimatter-studios.com/pick \
-                  --data-urlencode "org=$ORG" --data-urlencode prefer=antimatter-vps-linux-x64 \
-                  --data-urlencode fallback=ubuntu-24.04 --data-urlencode "actor=$ACTOR" --data-urlencode "author=$AUTHOR" \
-                  --data-urlencode "run=${{ github.run_id }}" --data-urlencode "attempt=${{ github.run_attempt }}" \
-                  --data-urlencode "job=$1") || r=ubuntu-24.04
-            case "$r" in antimatter-vps-linux-x64|ubuntu-24.04) echo "$r" ;; *) echo ubuntu-24.04 ;; esac
-          }
-          runners='{}'
-          for job in $JOBS; do runners=$(jq -c --arg j "$job" --arg r "$(pick "$job")" '. + {($j): $r}' <<<"$runners"); done
-          echo "$runners" | jq . | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "runners=$runners" >> "$GITHUB_OUTPUT"
+
+  images-gate:
+    needs: fixtures
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
 
   images:
     # chore test:images (#122): the strict reader, the audit and salvage on
@@ -406,8 +381,8 @@ jobs:
     # artifact present. No VM and no exfatprogs; test-arm64 and oracle-macos
     # run the same tier on their architectures.
     name: images (x86_64, fixtures artifact, no VM)
-    needs: [changes, fixtures]
-    runs-on: ${{ fromJSON(needs.fixtures.outputs.runners || '{}')['images'] || 'ubuntu-24.04' }}
+    needs: [fixtures, images-gate]
+    runs-on: ${{ needs.images-gate.outputs.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -454,6 +429,19 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  test-gate:
+    needs: fixtures
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64-kvm
+
   test:
     # x86_64, where GitHub gives us KVM: the Linux oracles, every call inside
     # the harness guest. exfatprogs (`chore test:oracle`, #123), the
@@ -463,8 +451,8 @@ jobs:
     # runner's own exfatprogs is made unusable first, so a test that ran a
     # tool on the host would fail here as well as in tests/test_contract.rs.
     name: test (x86_64, oracles in the VM)
-    needs: fixtures
-    runs-on: ubuntu-24.04
+    needs: [fixtures, test-gate]
+    runs-on: ${{ needs.test-gate.outputs.runner }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -477,6 +465,9 @@ jobs:
           ref: v0.4.6
           persist-credentials: false
           path: rust-fs-core
+      - name: C toolchain for the gated runner
+        if: runner.environment == 'self-hosted'
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-27
@@ -539,28 +530,36 @@ jobs:
           name: tier-logs-test
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
-      # The shared guest outlives each run by design (harness v0.7.0), but a
-      # runner has no later run to share it with: stop it, then prove it
-      # stopped. vm:down leaves the guest up while a session still holds it,
-      # so a leaked session fails the status check below.
-      - name: chore vm:down
-        run: chore vm:down
-      - name: chore vm:status (the VM is down again)
-        run: '! chore vm:status'
+
+  suite-in-vm-gate:
+    needs: fixtures
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64-kvm
 
   suite-in-vm:
     # `chore test:vm` (#126): every Linux tier compiled and run inside the
     # guest, the way a macOS host runs the Linux suite. Run on every pull
     # request so that path cannot rot.
     name: suite in the guest (the macOS path)
-    needs: fixtures
-    runs-on: ubuntu-24.04
+    needs: [fixtures, suite-in-vm-gate]
+    runs-on: ${{ needs.suite-in-vm-gate.outputs.runner }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: C toolchain for the gated runner
+        if: runner.environment == 'self-hosted'
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Install chore
         run: scripts/ci-install-chore.sh
       - name: PyYAML
@@ -593,27 +592,38 @@ jobs:
           name: tier-logs-suite-in-vm
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
-      # The shared guest outlives each run by design (harness v0.7.0), but a
-      # runner has no later run to share it with: stop it, then prove it
-      # stopped. vm:down leaves the guest up while a session still holds it,
-      # so a leaked session fails the status check below.
-      - name: chore vm:down
-        run: chore vm:down
-      - name: chore vm:status (the VM is down again)
-        run: '! chore vm:status'
+
+  test-arm64-gate:
+    needs: fixtures
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-arm64
 
   test-arm64:
     name: test (aarch64, no KVM on this runner)
     # No KVM, so no VM: lint, the unit tier, and test:images over the
     # fixtures artifact (#122).
-    needs: fixtures
-    runs-on: ubuntu-24.04-arm
+    needs: [fixtures, test-arm64-gate]
+    runs-on: ${{ needs.test-arm64-gate.outputs.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: C toolchain for the gated runner
+        # Only a self-hosted Linux runner lacks it; the hosted image has it.
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            sudo apt-get update && sudo apt-get install -y build-essential
+          fi
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
@@ -668,11 +678,24 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  oracle-macos-gate:
+    needs: fixtures
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick macos-arm64
+
   oracle-macos:
     name: oracle-macos (macOS newfs_exfat, fsck_exfat and driver)
     # test:images runs here too (#122): the fixtures read on macOS.
-    needs: fixtures
-    runs-on: macos-26
+    needs: [fixtures, oracle-macos-gate]
+    runs-on: ${{ needs.oracle-macos-gate.outputs.runner }}
     timeout-minutes: 45
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/rust-fs-exfat/tmp/target-worktree
@@ -728,10 +751,22 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  package-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   package:
     name: package (the crate as published)
-    needs: changes
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['package'] || 'ubuntu-24.04' }}
+    needs: package-gate
+    runs-on: ${{ needs.package-gate.outputs.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -772,10 +807,22 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  semver-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   semver:
     name: semver (public API against its baseline)
-    needs: changes
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['semver'] || 'ubuntu-24.04' }}
+    needs: semver-gate
+    runs-on: ${{ needs.semver-gate.outputs.runner }}
     timeout-minutes: 30
     env:
       # The version rust-fs-core's semver-check.sh expects. A prebuilt binary,
@@ -831,10 +878,22 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  msrv-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   msrv:
     name: msrv (Cargo.toml rust-version)
-    needs: changes
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['msrv'] || 'ubuntu-24.04' }}
+    needs: msrv-gate
+    runs-on: ${{ needs.msrv-gate.outputs.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -864,10 +923,22 @@ jobs:
         # rustup is all it needs.
         run: chore check:msrv
 
+  wasm-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   wasm:
     name: wasm32 (browser build, tests under Node)
-    needs: changes
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['wasm'] || 'ubuntu-24.04' }}
+    needs: wasm-gate
+    runs-on: ${{ needs.wasm-gate.outputs.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -918,10 +989,22 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  cli-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   cli:
     name: cli (the installed tools, on PATH)
-    needs: changes
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['cli'] || 'ubuntu-24.04' }}
+    needs: cli-gate
+    runs-on: ${{ needs.cli-gate.outputs.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -969,16 +1052,34 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  provenance-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   provenance:
     name: provenance (no copyleft exFAT source named)
-    needs: changes
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['provenance'] || 'ubuntu-24.04' }}
+    needs: provenance-gate
+    runs-on: ${{ needs.provenance-gate.outputs.runner }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: C toolchain for the gated runner
+        # Only a self-hosted Linux runner lacks it; the hosted image has it.
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            sudo apt-get update && sudo apt-get install -y build-essential
+          fi
       - name: Stock runner tools
         run: |
           sudo apt-get update
@@ -988,16 +1089,34 @@ jobs:
       - name: chore check:provenance
         run: chore check:provenance
 
+  scripts-gate:
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   scripts:
     name: scripts (the shell tests)
-    needs: changes
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners)['scripts'] || 'ubuntu-24.04' }}
+    needs: scripts-gate
+    runs-on: ${{ needs.scripts-gate.outputs.runner }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           path: rust-fs-exfat
+      - name: C toolchain for the gated runner
+        # Only a self-hosted Linux runner lacks it; the hosted image has it.
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            sudo apt-get update && sudo apt-get install -y build-essential
+          fi
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: antimatter-studios/rust-fs-core
@@ -1028,6 +1147,20 @@ jobs:
           path: rust-fs-exfat/tmp/logs/*.log
           if-no-files-found: error
 
+  ci-ok-gate:
+    needs: [changes-gate, changes, unit-gate, unit, fixtures-gate, fixtures, images-gate, images, test-gate, test, suite-in-vm-gate, suite-in-vm, test-arm64-gate, test-arm64, oracle-macos-gate, oracle-macos, package-gate, package, semver-gate, semver, msrv-gate, msrv, wasm-gate, wasm, cli-gate, cli, provenance-gate, provenance, scripts-gate, scripts]
+    if: ${{ !(cancelled() && github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:')) }}
+    runs-on: antimatter-vps-gate
+    defaults:
+      run:
+        working-directory: .
+    timeout-minutes: 1
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - id: pick
+        run: runner-gate pick linux-x64
+
   ci-ok:
     name: ci-ok
     # As always(), so a failed, skipped or cancelled job fails the gate
@@ -1045,8 +1178,8 @@ jobs:
     if: ${{ !(cancelled() && github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:')) }}
     # Every job above. scripts/ci-ok.sh judges the same list, and
     # tests/scripts/test-ci-profile.sh holds the two equal.
-    needs: [changes, unit, fixtures, images, test, suite-in-vm, test-arm64, oracle-macos, package, semver, msrv, wasm, cli, provenance, scripts]
-    runs-on: ubuntu-latest
+    needs: [changes-gate, changes, unit-gate, unit, fixtures-gate, fixtures, images-gate, images, test-gate, test, suite-in-vm-gate, suite-in-vm, test-arm64-gate, test-arm64, oracle-macos-gate, oracle-macos, package-gate, package, semver-gate, semver, msrv-gate, msrv, wasm-gate, wasm, cli-gate, cli, provenance-gate, provenance, scripts-gate, scripts, ci-ok-gate]
+    runs-on: ${{ needs.ci-ok-gate.outputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
