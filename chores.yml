@@ -245,9 +245,15 @@ tasks:
     # at 406 tests printed 567 and 568 lines (34,003 bytes) with a third
     # notice and a doctest compile line. 570 / 34,300 leaves two lines
     # above that and keeps the byte cap.
+    # #234's four sector-size tests add four result lines to the primitives
+    # target, with no new executable banner. The stack top below them
+    # (674cf42, CI run 44045059567) measured Linux 569 / 33,565 and macOS
+    # 567 / 33,657; with them, local macOS measured 571 / 33,678 and
+    # 573 / 33,909 on 413 tests, and Linux CI comes to 573. 576 / 34,300
+    # keeps three lines above that and the byte cap.
     # CI runs `chore build` first, so the log holds no cold build.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 570 34300 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 576 34300 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:images:
     desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'

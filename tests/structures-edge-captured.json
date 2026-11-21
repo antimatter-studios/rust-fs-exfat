@@ -102,7 +102,7 @@
     ]
   },
   "unsupported_saved": {
-    "error": "unsupported sector size 4096"
+    "error": "structure size or offset is not representable"
   },
   "wrong_backup": {
     "error": "backup boot sector: no exFAT signature at offset 3: this is not an exFAT volume"

@@ -2,6 +2,9 @@ use fs_exfat::primitives::{find_sets, Limits, ENTRY_SIZE};
 
 mod support;
 
+#[path = "write_support/mod.rs"]
+mod write_support;
+
 #[path = "primitive_cases/audit_layering.rs"]
 mod audit_layering;
 
@@ -44,6 +47,9 @@ mod copies;
 #[cfg(feature = "test-support")]
 #[path = "primitive_cases/structures.rs"]
 mod structures;
+
+#[path = "primitive_cases/sector_sizes.rs"]
+mod sector_sizes;
 
 const TYPE_FILE: u8 = 0x85;
 const TYPE_FILE_DELETED: u8 = 0x05;

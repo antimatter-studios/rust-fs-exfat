@@ -1,0 +1,3 @@
+## Reading
+
+| Primitive structure reader sector sizes | Experimental; `primitives::read_structures` and `inspect_structures` place the boot regions, FAT, root directory, bitmap and boot checksum from the boot sector's own size, so volumes with 512, 1024, 2048 and 4096-byte sectors open; synthetic evidence only, on volumes this crate formatted and wrote, listed the same by the salvage adapter at every size; the kernel and macOS listings of 4096-byte volumes are compared by the existing oracle tiers, not by this change | Unreleased (#234) | #234 | `tests/primitive_cases/sector_sizes.rs`, `tests/primitive_cases/structures.rs` |

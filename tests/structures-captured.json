@@ -726,11 +726,23 @@
         ],
         [
           6144,
-          6144
+          43008
+        ],
+        [
+          49152,
+          49152
+        ],
+        [
+          98304,
+          32768
+        ],
+        [
+          163840,
+          32768
         ]
       ],
       "result": {
-        "error": "unsupported sector size 4096"
+        "error": "root directory has no allocation bitmap entry"
       }
     },
     "wrong_name": {

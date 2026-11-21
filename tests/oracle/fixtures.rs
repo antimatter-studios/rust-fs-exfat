@@ -27,13 +27,6 @@ fn permissive_loading_and_checked_snapshots_agree_with_platform_structures() {
             output.copy_from_slice(&reference.image.read(start..start + output.len()));
             Ok(())
         });
-        if sector == 4096 {
-            assert_eq!(
-                loaded.unwrap_err().to_string(),
-                "unsupported sector size 4096"
-            );
-            continue;
-        }
         let loaded = loaded.unwrap();
         let geometry = inspect_structures(&loaded).unwrap();
         assert_eq!(geometry.boot.bytes_per_sector(), sector as u64);
