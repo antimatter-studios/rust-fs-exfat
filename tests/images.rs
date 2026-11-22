@@ -3,8 +3,8 @@
 //! The images were formatted by exfatprogs and written by the Linux kernel's
 //! exfat driver in the harness guest (`chore fixtures`), which also captured
 //! the kernel's own listing of each one. Here the strict reader, the
-//! allocation audit and the salvage verbs read the same images and must agree
-//! with that listing. Nothing here needs the VM or exfatprogs, so the tier
+//! allocation audit, the salvage verbs and rust-fs-core's shared layers read
+//! the same images and must agree with that listing. Nothing here needs the VM or exfatprogs, so the tier
 //! runs on any host that has the fixtures, arm64 runners included.
 
 #![allow(deprecated)]
@@ -14,11 +14,16 @@ mod fixture_support;
 
 use fixture_support::{
     assert_same, fixture, images, kernel_listing, manifest, read_listing, salvage, strict_listing,
+    Listing, Row,
 };
+use fs_core::layers::conformance::{self, Limits};
+use fs_core::layers::{FileAPI, NodeKind, OpenVolume, Timestamp};
 use fs_core::{BlockRead, FileDevice};
 use fs_exfat::check::{check, Rule};
 use fs_exfat::interface::open_path;
+use fs_exfat::layers::ExfatVolume;
 use fs_exfat::salvage::Severity;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 fn undamaged() -> Vec<String> {
@@ -239,5 +244,90 @@ fn the_strict_reader_reads_or_refuses_each_damaged_copy_as_its_damage_requires()
             }
             other => panic!("{image}: no expectation for damage {other}"),
         }
+    }
+}
+
+/// The shared FileAPI's listing of a volume, in the kernel's terms.
+fn layers_listing(volume: &ExfatVolume) -> Listing {
+    fn walk(
+        volume: &ExfatVolume,
+        node: &<ExfatVolume as FileAPI>::Node,
+        prefix: &str,
+        rows: &mut Listing,
+    ) {
+        assert!(prefix.matches('/').count() < 64, "excessive depth");
+        let milliseconds = |time: Option<Timestamp>| {
+            let time = time.expect("exFAT records every time");
+            time.seconds * 1000 + i64::from(time.nanoseconds / 1_000_000)
+        };
+        for entry in volume.read_dir(node).unwrap() {
+            let path = format!("{prefix}{}", entry.name);
+            let metadata = volume.metadata(&entry.node).unwrap();
+            let directory = metadata.kind == NodeKind::Directory;
+            let sha256 = (!directory).then(|| {
+                let mut bytes = Vec::new();
+                assert_eq!(
+                    volume.copy_to(&entry.node, &mut bytes).unwrap(),
+                    metadata.size
+                );
+                format!("{:x}", Sha256::digest(&bytes))
+            });
+            let row = Row {
+                directory,
+                size: metadata.size,
+                read_only: metadata.attributes.unwrap() & 1 != 0,
+                modified_ms: milliseconds(metadata.modified),
+                accessed_ms: milliseconds(metadata.accessed),
+                sha256,
+            };
+            assert!(rows.insert(path.clone(), row).is_none(), "{path} twice");
+            if directory {
+                walk(volume, &entry.node, &format!("{path}/"), rows);
+            }
+        }
+    }
+    let mut rows = Listing::new();
+    walk(volume, &volume.root().unwrap(), "", &mut rows);
+    rows
+}
+
+/// Large enough for the largest fixture, so no tree is checked in part.
+/// Every path is still listed, read and compared with the kernel; 256 of
+/// them, spread over the tree, are also resolved by lookup, which reads every
+/// directory on the path, so one per entry of the large-directory image
+/// alone takes minutes.
+fn limits() -> Limits {
+    Limits {
+        max_nodes: 1 << 16,
+        max_walks: 1 << 16,
+        max_lookups: 256,
+        ..Limits::default()
+    }
+}
+
+#[test]
+fn the_shared_layers_conform_and_list_every_image_as_the_kernel_did() {
+    for image in images() {
+        if manifest(&image).damaged() {
+            let volume = ExfatVolume::open_for_salvage(source(&image))
+                .unwrap_or_else(|error| panic!("{image}: no salvage open: {error}"));
+            let report = conformance::check_damaged(&volume, &limits());
+            assert!(report.passed(), "{image}:\n{report}");
+            continue;
+        }
+        let volume = ExfatVolume::open(source(&image))
+            .unwrap_or_else(|error| panic!("{image}: the shared layers refuse it: {error}"));
+        let report = conformance::check_healthy(&volume, &[], &limits());
+        assert!(report.passed(), "{image}:\n{report}");
+        let report = conformance::check_files_against_candidates(&volume, &limits());
+        assert!(report.passed(), "{image}:\n{report}");
+        assert_same(
+            &image,
+            "the kernel",
+            &kernel_listing(&image),
+            "the shared FileAPI",
+            &layers_listing(&volume),
+            true,
+        );
     }
 }

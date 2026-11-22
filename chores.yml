@@ -257,9 +257,14 @@ tasks:
     # 567 / 33,657; with them, local macOS measured 571 / 33,678 and
     # 573 / 33,909 on 413 tests, and Linux CI comes to 573. 576 / 34,300
     # keeps three lines above that and the byte cap.
+    # #238's four shared-layer tests add four result lines to the primitives
+    # target and one doctest line, with no new executable banner: local
+    # macOS measured 576 / 34,047 on 418 tests. Linux CI has run one or two
+    # lines above local macOS, so 580 / 34,400 keeps four lines and about
+    # 350 bytes above this measurement.
     # CI runs `chore build` first, so the log holds no cold build.
     cmds:
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 576 34300 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored unit unit 580 34400 -- bash -c "cargo test --locked --features cli,test-support --lib --test read_only --test boot --test metadata --test directory --test file --test timestamp --test path --test primitives --test salvage --test conformance --test capi --test check --test cli --test fuzz_decoders --test fixtures --test test_contract --test write --test capi_write --test write_files --test cli_write --test write_remove --test write_rename --test mkfs --test write_cost && cargo test --locked --all-features --doc"'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored unit 150
   test:images:
     desc: 'The tests that read the kernel-made fixtures but need no VM: what a host without KVM can still run'
@@ -272,11 +277,17 @@ tasks:
     # BUDGET: 95 lines / 3,328 bytes in CI (run 43105817721, ubuntu, cold
     # build: 81 of those lines are cargo's), 53 / 2,025 cold and 14 warm on a
     # macOS host (#122). 98 / 3,500 leaves three lines and about 5% of bytes.
-    # FLOOR: seven tests, every one of them.
+    # #238 adds the shared layers' conformance and kernel-listing test: 16
+    # lines / 972 bytes warm on a macOS host, including the one-minute
+    # running notice it prints. The budget holds it.
+    # Merge-group run 44977021810 (ubuntu, cold build) measured 97 lines /
+    # 3,516 bytes with the shared layers' tests, 16 bytes over 3,500. The
+    # byte ceiling is 3,900, about 11% above that run; the line ceiling stays.
+    # FLOOR: eight tests, every one of them.
     cmds:
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 98 3500 -- cargo test --locked --profile test-opt --features cli,test-support --test images'
-      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored images 7
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 98 3900 -- cargo test --locked --profile test-opt --features cli,test-support --test images'
+      - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored images 8
   test:oracle:
     desc: 'exfatprogs judges every fixture: fsck.exfat -n and dump.exfat, every call made inside the harness VM'
     # tests/exfatprogs.rs, through tests/guest_support: one guest call per

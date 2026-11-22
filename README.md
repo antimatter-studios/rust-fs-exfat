@@ -149,6 +149,21 @@ specification calls stale rather than invalid.
 `ExfatSalvage::cross_links` lists each cluster that two or more FAT entries name,
 or that two or more of the caller's candidates claim, with the FAT entries and
 their chains' heads, and the candidate records, that reach it.
+
+`fs_exfat::layers` puts the driver on rust-fs-core's three shared API layers.
+`ExfatVolume` implements `VolumeAPI` and `OpenVolume` (bytes, geometry, both
+boot regions with their checksums, and a quick health verdict from the boot
+regions, VolumeDirty and the strict reader), `PrimitiveAPI` (the boot regions,
+FATs, allocation bitmaps, Up-case Table and root directory as located
+structures, and the salvage verbs bound to the volume's own source through
+`ExfatSalvage`) and `FileAPI` (the strict reader's namespace, with names
+compared through the volume's Up-case Table). `OpenVolume::open` refuses what
+the strict reader refuses; `open_for_salvage` needs only a usable geometry
+from either boot region, and offers files only when the strict reader accepts
+the volume. rust-fs-core's conformance helpers pass on volumes this crate
+formats at 512 and 4096 bytes per sector and on every kernel-made fixture,
+where the shared layers also list the same paths, sizes, times and SHA-256s
+as the Linux kernel.
 Pointer conversion is confined to the C ABI module; the decoders and command-line
 implementation deny unsafe Rust. The header and ownership rules are documented
 in [the C ABI guide](docs/C-ABI.md).

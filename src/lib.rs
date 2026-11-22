@@ -52,6 +52,7 @@ pub mod file;
 #[cfg(feature = "test-support")]
 pub mod fixtures;
 pub mod interface;
+pub mod layers;
 pub mod metadata;
 pub mod mkfs;
 pub mod path;
