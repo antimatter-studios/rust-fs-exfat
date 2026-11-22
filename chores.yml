@@ -280,10 +280,13 @@ tasks:
     # #238 adds the shared layers' conformance and kernel-listing test: 16
     # lines / 972 bytes warm on a macOS host, including the one-minute
     # running notice it prints. The budget holds it.
+    # Merge-group run 44977021810 (ubuntu, cold build) measured 97 lines /
+    # 3,516 bytes with the shared layers' tests, 16 bytes over 3,500. The
+    # byte ceiling is 3,900, about 11% above that run; the line ceiling stays.
     # FLOOR: eight tests, every one of them.
     cmds:
       - test-disks/build-fixtures.sh --check
-      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 98 3500 -- cargo test --locked --profile test-opt --features cli,test-support --test images'
+      - 'bash ../rust-fs-core/scripts/tier.sh --refuse-skips --refuse-ignored images images 98 3900 -- cargo test --locked --profile test-opt --features cli,test-support --test images'
       - bash ../rust-fs-core/scripts/test-floor.sh --refuse-ignored images 8
   test:oracle:
     desc: 'exfatprogs judges every fixture: fsck.exfat -n and dump.exfat, every call made inside the harness VM'
