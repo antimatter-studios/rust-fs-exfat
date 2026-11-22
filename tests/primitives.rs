@@ -51,6 +51,9 @@ mod structures;
 #[path = "primitive_cases/sector_sizes.rs"]
 mod sector_sizes;
 
+#[path = "primitive_cases/shared_layers.rs"]
+mod shared_layers;
+
 const TYPE_FILE: u8 = 0x85;
 const TYPE_FILE_DELETED: u8 = 0x05;
 const TYPE_STREAM: u8 = 0xC0;
