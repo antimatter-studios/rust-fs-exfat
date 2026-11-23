@@ -137,6 +137,7 @@ env:
   RUSTUP_TOOLCHAIN: 1.95.0
   CARGO_TERM_COLOR: never
   CHORE_VERSION: "0.19.0"
+  FLTH_RESOURCE_PROFILE: low
   # ci-ok-gate only picks ci-ok's runner and carries `if: always()` like ci-ok;
   # it is not a job whose result the aggregate judges.
   CI_GATE_NON_GATING: ci-ok-gate
@@ -348,7 +349,7 @@ jobs:
         # Ubuntu 24.04 packages virtiofsd 1.10.0, which never answers a
         # non-UTF-8 xattr name (fs-linux-test-harness #274). The tag must
         # match LINUX_HARNESS_REF in chores.yml.
-        uses: antimatter-studios/fs-linux-test-harness/.github/actions/install-virtiofsd@v0.9.1
+        uses: antimatter-studios/fs-linux-test-harness/.github/actions/install-virtiofsd@v0.11.0
       - name: KVM, QEMU and Vagrant
         id: vm-host
         run: ../fs-linux-test-harness/scripts/ci-setup-linux.sh
@@ -499,7 +500,7 @@ jobs:
         # Ubuntu 24.04 packages virtiofsd 1.10.0, which never answers a
         # non-UTF-8 xattr name (fs-linux-test-harness #274). The tag must
         # match LINUX_HARNESS_REF in chores.yml.
-        uses: antimatter-studios/fs-linux-test-harness/.github/actions/install-virtiofsd@v0.9.1
+        uses: antimatter-studios/fs-linux-test-harness/.github/actions/install-virtiofsd@v0.11.0
       - name: KVM, QEMU and Vagrant
         id: vm-host
         run: ../fs-linux-test-harness/scripts/ci-setup-linux.sh
@@ -584,7 +585,7 @@ jobs:
         # Ubuntu 24.04 packages virtiofsd 1.10.0, which never answers a
         # non-UTF-8 xattr name (fs-linux-test-harness #274). The tag must
         # match LINUX_HARNESS_REF in chores.yml.
-        uses: antimatter-studios/fs-linux-test-harness/.github/actions/install-virtiofsd@v0.9.1
+        uses: antimatter-studios/fs-linux-test-harness/.github/actions/install-virtiofsd@v0.11.0
       - name: KVM, QEMU and Vagrant
         id: vm-host
         run: ../fs-linux-test-harness/scripts/ci-setup-linux.sh

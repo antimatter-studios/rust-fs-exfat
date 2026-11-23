@@ -12,7 +12,7 @@ import yaml
 root = pathlib.Path(sys.argv[1])
 chores = yaml.safe_load((root / "chores.yml").read_text())
 config = (root / "fs-linux-test-harness.toml").read_text()
-assert chores["vars"]["LINUX_HARNESS_REF"] == "v0.9.1", "pin the shared-guest release"
+assert chores["vars"]["LINUX_HARNESS_REF"] == "v0.11.0", "pin the shared-guest release"
 assert not re.search(r"^\s*\[vm\]\s*(?:#.*)?$", config, re.MULTILINE), \
     "consumer VM settings do not configure the shared guest"
 for task in ("fixtures", "test:vm"):
