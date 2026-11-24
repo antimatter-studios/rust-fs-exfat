@@ -131,14 +131,12 @@ tasks:
     # is shared by every crate on the machine. Only a main below the pin is
     # fast-forwarded; anything else is reported for a person to move.
     #
-    # SIBLINGS LIVE BESIDE THE MAIN TREE, NOT BESIDE THIS CHECKOUT:
-    # --git-common-dir names the main checkout from a worktree too, so every
-    # worktree resolves the same copy.
+    # Resolve siblings from this checkout's parent so worktree-local sibling
+    # symlinks work just like siblings beside the main checkout.
     cmds:
       - |
         set -eu
-        common="$(git rev-parse --path-format=absolute --git-common-dir)"
-        siblings_root="$(cd "$common/../.." && pwd)"
+        siblings_root="$(cd .. && pwd)"
         printf '%s\t%s\t%s\n' \
           rust-fs-core          '{{.FS_CORE_URL}}'       '{{.FS_CORE_REF}}' \
           fs-linux-test-harness '{{.LINUX_HARNESS_URL}}' '{{.LINUX_HARNESS_REF}}' \
@@ -169,14 +167,6 @@ tasks:
               exit 1
             fi
           done
-          # A worktree beside the main checkout reaches the siblings as ../<name>.
-          # One elsewhere has nothing there, and every tier names ../rust-fs-core.
-          here="$(cd .. && pwd)"
-          [ "$here" = "$siblings_root" ] || {
-            echo "siblings: this checkout is not beside $siblings_root, where the siblings are;" >&2
-            echo "          ../rust-fs-core and ../fs-linux-test-harness would not resolve." >&2
-            exit 1
-          }
 
   tools:
     desc: "Install and verify what the HOST needs: ripgrep, python3, and the VM the Linux oracles live in"
@@ -522,12 +512,15 @@ tasks:
     # #170's shared-guest contract (79 bytes) measured 38 lines / 2,167
     # bytes on top of #202's detach gates; 40 / 2,300 leaves room for one.
     # #187's relan metadata and write-model regression measured 40 lines /
-    # 2,287 bytes over fourteen files on top of #208 (2026-11-14, macOS);
-    # 42 / 2,420 leaves room for one more file.
+    # 2,287 bytes over fourteen files on top of #208 (2026-11-14, macOS).
+    # #247's sibling worktree check measured 44 lines / 2,502 bytes on
+    # local macOS (2026-11-24); 46 / 2,650 leaves two lines and 148 bytes.
     cmds:
       - |
         set -eu
-        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 42 2420 -- bash -c '
+        # Several shell checks parse YAML; validate their shared Python dependency first.
+        scripts/tools.sh --check >/dev/null
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 46 2650 -- bash -c '
           set -eu
           for t in tests/scripts/*.sh; do
             echo "== $t"
