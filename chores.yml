@@ -512,14 +512,15 @@ tasks:
     # #170's shared-guest contract (79 bytes) measured 38 lines / 2,167
     # bytes on top of #202's detach gates; 40 / 2,300 leaves room for one.
     # #187's relan metadata and write-model regression measured 40 lines /
-    # 2,287 bytes over fourteen files on top of #208 (2026-11-14, macOS);
-    # 42 / 2,420 leaves room for one more file.
+    # 2,287 bytes over fourteen files on top of #208 (2026-11-14, macOS).
+    # #247's sibling worktree check measured 44 lines / 2,502 bytes on
+    # local macOS (2026-11-24); 46 / 2,650 leaves two lines and 148 bytes.
     cmds:
       - |
         set -eu
         # Several shell checks parse YAML; validate their shared Python dependency first.
         scripts/tools.sh --check >/dev/null
-        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 42 2420 -- bash -c '
+        bash ../rust-fs-core/scripts/tier.sh --refuse-skips scripts scripts 46 2650 -- bash -c '
           set -eu
           for t in tests/scripts/*.sh; do
             echo "== $t"
