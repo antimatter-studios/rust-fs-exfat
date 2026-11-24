@@ -19,8 +19,9 @@
 #   scripts/crates-io-published.sh <name>             that crate, any version
 #   scripts/crates-io-published.sh <name> <version>   that version of it
 #
-# CRATES_IO_ATTEMPTS (default 4) and CRATES_IO_RETRY_DELAY (seconds before
-# the first retry, doubled each time; default 5) bound the retries.
+# CRATES_IO_ATTEMPTS (default 4) bounds ordinary transient errors;
+# HTTP 429 gets CRATES_IO_429_ATTEMPTS (default 8). CRATES_IO_RETRY_DELAY
+# (default 5) doubles after each retry, capped at 60 seconds.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,6 +35,7 @@ esac
 [ -n "$name" ] || { echo "crates-io-published: no crate name" >&2; exit 2; }
 
 attempts="${CRATES_IO_ATTEMPTS:-4}"
+rate_limit_attempts="${CRATES_IO_429_ATTEMPTS:-8}"
 delay="${CRATES_IO_RETRY_DELAY:-5}"
 url="https://crates.io/api/v1/crates/$name${version:+/$version}"
 what="$name${version:+ $version}"
@@ -53,12 +55,15 @@ for ((attempt = 1; ; attempt++)); do
             echo "published=false"
             exit 0 ;;
     esac
-    if [ "$attempt" -ge "$attempts" ]; then
-        echo "crates-io-published: $url answered HTTP ${code:-000} on each of $attempts attempts;" \
+    max_attempts="$attempts"
+    [ "$code" = 429 ] && max_attempts="$rate_limit_attempts"
+    if [ "$attempt" -ge "$max_attempts" ]; then
+        echo "crates-io-published: $url answered HTTP ${code:-000} on each of $max_attempts attempts;" \
              "cannot tell whether $what is published" >&2
         exit 1
     fi
     echo "crates-io-published: HTTP ${code:-000} from $url; retrying in ${delay}s" >&2
     sleep "$delay"
     delay=$((delay * 2))
+    [ "$delay" -le 60 ] || delay=60
 done

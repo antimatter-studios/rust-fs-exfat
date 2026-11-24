@@ -94,6 +94,11 @@ run 503 200 -- some-crate
 [[ $status -eq 0 && "$answer" == "published=true" ]] ||
     fail "a 503 then a 200 should be published=true, got status $status, '$answer': $(cat "$SANDBOX/log")"
 
+# A rate limit can last longer than the ordinary transient-error retry window.
+run 429 429 429 429 429 200 -- some-crate
+[[ $status -eq 0 && "$answer" == "published=true" && $calls -eq 6 ]] ||
+    fail "a 429 that clears on the sixth request should be published=true, got status $status after $calls calls: $(cat "$SANDBOX/log")"
+
 # check-semver.sh refuses to pick a baseline when crates.io cannot say.
 printf '503\n' > "$SANDBOX/codes"
 : > "$SANDBOX/calls"
