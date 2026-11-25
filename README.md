@@ -7,15 +7,14 @@ read-only salvage adapter, licensed under MIT.
 directory iteration, file reads, timestamps, volume-upcase path lookup, a
 C ABI and command-line tools are implemented, which completes
 [Milestone 1](https://github.com/antimatter-studios/rust-fs-exfat/issues/1).
-Writing is being built ([#135](https://github.com/antimatter-studios/rust-fs-exfat/issues/135)):
-a volume can be mounted for writing, files and directories created, written,
+Writing is implemented through a separate API ([#135](https://github.com/antimatter-studios/rust-fs-exfat/issues/135)):
+a volume can be mounted for writing, files and directories created and written,
 truncated, removed and renamed, and times, attributes and the label set. A
-formatter creates new, empty volumes. There is no repair operation, and the
-Linux tiers check write mounts, volume state, allocation/free cycles, file and
-directory creation, data writes and formatted volumes at both sector sizes.
-Other write operations still need Linux validation
-([#133](https://github.com/antimatter-studios/rust-fs-exfat/issues/133)).
-The formatter is also checked on macOS.
+formatter creates new, empty volumes. Linux exfatprogs, the Linux kernel and
+the pinned relan/exfat implementation check supported write operations in both
+directions at both sector sizes; a block-cut matrix checks interrupted writes.
+Two-FAT interoperability and repair are not supported. The formatter is also
+checked on macOS.
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
