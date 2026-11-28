@@ -28,6 +28,9 @@
 #   6. No `run:` interpolates a workflow input: an expression is
 #      substituted before the shell parses it, so an input reaches a script
 #      through `env:` only.
+#   7. The unit tier's output budget in chores.yml is the one
+#      docs/TESTING.md states, and it holds a quiet macOS run with three of
+#      libtest's slow-test notices (#252).
 #
 #   bash tests/scripts/test-ci-profile.sh
 set -uo pipefail
@@ -315,6 +318,27 @@ for wf, doc in workflows.items():
         for s in steps(job):
             if re.search(r"\$\{\{[^}]*\b(inputs|github\.event\.inputs)\.", s.get("run") or ""):
                 problems.append(f"{wf} {jname}: step {s.get('name')!r} interpolates an input into run:")
+
+# 7. The unit budget. A slow runner adds a "has been running for over 60
+# seconds" notice to a run that passes. macOS prints the most: 576 lines /
+# 34,374 bytes quiet (CI run 45587465362) and 577 / 34,491 with one 117-byte
+# notice (CI run 45364114462). Three notices have been recorded in one run,
+# and timing digits get 40 bytes.
+quiet_lines, quiet_bytes, notices, notice_bytes, digit_bytes = 576, 34374, 3, 117, 40
+unit_cmds = "\n".join(c for c in (chores.get("test:unit") or {}).get("cmds", []) if isinstance(c, str))
+row = re.search(r"tier\.sh\b.*? unit unit (\d+) (\d+) -- ", unit_cmds)
+with open(os.path.join(root, "docs/TESTING.md")) as f:
+    stated = re.search(r"^\| unit \|[^|]*\| (\d+) lines, (\d+) bytes\b", f.read(), re.M)
+if not row:
+    problems.append("chores.yml test:unit runs no `tier.sh ... unit unit LINES BYTES` row")
+else:
+    lines, size = map(int, row.groups())
+    if not stated or stated.groups() != row.groups():
+        problems.append(f"docs/TESTING.md states the unit budget as {stated and stated.groups()}, "
+                        f"chores.yml sets {row.groups()}")
+    if lines < quiet_lines + notices or size < quiet_bytes + notices * notice_bytes + digit_bytes:
+        problems.append(f"the unit budget {lines} lines / {size} bytes does not hold a quiet macOS run "
+                        f"({quiet_lines} / {quiet_bytes}) with {notices} slow-test notices")
 
 if problems:
     sys.exit("\n".join("FAIL  " + p for p in problems))
