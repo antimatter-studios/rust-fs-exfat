@@ -27,5 +27,19 @@ for document in "$REPO"/README.md "$REPO"/docs/*.md "$REPO"/features.d/*.md; do
   fi
 done
 
+# The README's layers are the ones the crate has: rust-fs-core's shared traits,
+# implemented by `layers::ExfatVolume`. It names no consuming application and no
+# revision one of them pins.
+readme="$REPO/README.md"
+section="$(awk '/^## /{inside = ($0 == "## API layers")} inside' "$readme")"
+for name in fs_core::layers layers::ExfatVolume open_for_salvage; do
+  grep -Fq "$name" <<<"$section" ||
+    { echo "FAIL: README.md \"API layers\" does not name $name" >&2; fails=$((fails + 1)); }
+done
+if grep -Fq 'Captain Salvage' "$readme"; then
+  echo "FAIL: README.md names a consuming application" >&2
+  fails=$((fails + 1))
+fi
+
 ((fails == 0)) || exit 1
 echo "test-docs-raw: ok"

@@ -30,8 +30,18 @@ real disk. Known limits:
 
 ## API layers
 
-The crate is read in three layers, named as in `rust-fs-fat`. Every layer takes
-`fs_core::BlockRead` only, so none of them can write to a source by type.
+The crate is read in three layers, the shared traits of `fs_core::layers`:
+`VolumeAPI`, `PrimitiveAPI` and `FileAPI`. `layers::ExfatVolume` implements all
+three over the exFAT modules below. Every layer takes `fs_core::BlockRead` only,
+so none of them can write to a source by type.
+
+`OpenVolume::open` refuses what the strict reader refuses.
+`OpenVolume::open_for_salvage` needs only a usable geometry from either boot
+region, and offers files only when the strict reader accepts the volume. Through
+the traits, VolumeAPI gives bounded volume-relative reads, geometry, both boot
+regions and a health verdict; PrimitiveAPI gives the located structures and the
+salvage verbs through `ExfatSalvage`; FileAPI gives the strict namespace. The
+exFAT-specific surface of each layer is:
 
 - **VolumeAPI** reads the bytes of a volume and opens it as a strict exFAT
   volume. `interface::open_device` and `interface::open_path` build a
@@ -62,6 +72,35 @@ The crate is read in three layers, named as in `rust-fs-fat`. Every layer takes
   The recovery counterpart, which does not need a strict mount, is
   [`salvage`](docs/convention.md): candidates, extent walks, parent claims and
   plans, built on the primitives alone.
+
+The shared layers, on a volume that may be damaged:
+
+```rust
+use fs_core::layers::{FileAPI, OpenVolume, PrimitiveAPI, VolumeAPI};
+use fs_core::{BlockRead, FileDevice};
+use fs_exfat::layers::ExfatVolume;
+use std::sync::Arc;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let source: Arc<dyn BlockRead> = Arc::new(FileDevice::open("disk.img")?);
+    let volume = ExfatVolume::open_for_salvage(source)?;
+    // VolumeAPI: what the volume says about itself.
+    println!("{} bytes, {:?}", volume.size_bytes(), volume.health()?);
+    // PrimitiveAPI: where the format's structures are.
+    for structure in volume.structures()? {
+        println!("{} {:?}", structure.name, structure.location);
+    }
+    // FileAPI: only when the strict reader accepts the volume.
+    if volume.support()?.files {
+        for entry in volume.read_dir(&volume.root()?)? {
+            println!("{} ({} bytes)", entry.name, entry.size);
+        }
+    }
+    Ok(())
+}
+```
+
+The exFAT modules directly:
 
 ```rust
 use fs_core::FileDevice;
@@ -106,14 +145,6 @@ cannot reach the writer.
 **Gaps.** There is no `RawVolume` as in `rust-fs-fat`: `Volume::open` refuses a
 volume whose main boot region is invalid, so a damaged volume is read through
 `device::Reader`, `boot::BootRegions` and the primitives, or through `salvage`.
-
-**At the revision Captain Salvage uses (`1dae694`).** The layers above are all
-present, with the same names: that revision has `volume`, `interface`, `device`,
-`boot`, `file`, `directory`, `path`, `primitives` and `salvage`. It has no
-`write` or `mkfs` modules and none of the later salvage extensions (cross-links,
-plans). Captain Salvage uses the primitives (`parse_set`, `Limits`,
-`BootSector`, `bitmap_location`, `decode_timestamp`, the FAT constants), the
-boot decoders and the strict `Volume::open`; it does not use `salvage`.
 
 ## Architecture
 
