@@ -18,13 +18,12 @@ checked on macOS.
 
 The evidence is limited. Listings and every file's SHA-256 are compared with the
 macOS driver on images macOS formatted and populated, at 512 and 4096 bytes per
-sector, and `fsck_exfat -n` agrees on them. Nothing has been compared with an image
-Windows formatted
+sector, and `fsck_exfat -n` agrees on them. The raw and block device nodes of
+such images, at both sector sizes, give the same file hashes as the macOS driver.
+Nothing has been compared with an image Windows formatted
 ([#22](https://github.com/antimatter-studios/rust-fs-exfat/issues/22)), or with a
 real disk. Known limits:
 
-- A raw device with 4096-byte sectors cannot be read; its block node can
-  ([#20](https://github.com/antimatter-studios/rust-fs-exfat/issues/20)).
 - The macOS driver keeps original bytes up to the next sector boundary past an
   unaligned ValidDataLength. This reader returns zeros from the exact length, as the
   specification requires, so the two differ on such a file.
@@ -107,8 +106,6 @@ cannot reach the writer.
 **Gaps.** There is no `RawVolume` as in `rust-fs-fat`: `Volume::open` refuses a
 volume whose main boot region is invalid, so a damaged volume is read through
 `device::Reader`, `boot::BootRegions` and the primitives, or through `salvage`.
-A raw device with 4096-byte sectors cannot be read
-([#20](https://github.com/antimatter-studios/rust-fs-exfat/issues/20)).
 
 **At the revision Captain Salvage uses (`1dae694`).** The layers above are all
 present, with the same names: that revision has `volume`, `interface`, `device`,
@@ -122,7 +119,9 @@ boot decoders and the strict `Volume::open`; it does not use `salvage`.
 
 The library is `fs_exfat`. Strict entry points accept `fs_core::BlockRead` only;
 devices are held behind `ReadOnlyDevice`, never a writable device trait or a
-runtime writable flag. Reads passed to a device are aligned to 512 bytes.
+runtime writable flag. Reads passed to a device are aligned to 512 bytes. When a
+device refuses a read as `InvalidInput`, the alignment doubles, so raw devices
+with 512-byte and 4096-byte sectors are both read.
 
 Writing is a separate API, `fs_exfat::write`, over rust-fs-core's `BlockDevice`.
 The salvage adapter and the strict reader cannot reach it: they take
